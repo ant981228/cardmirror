@@ -60,3 +60,6 @@ apps/desktop/resources/voice/
 # other binary attachments referenced from the wishlist.
 WISHLIST.md
 WISHLIST.assets/
+
+# Nix build artifacts
+result/
