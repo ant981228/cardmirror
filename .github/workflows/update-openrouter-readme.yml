@@ -1,0 +1,104 @@
+name: Update README OpenRouter setup
+
+on:
+  push:
+    branches:
+      - agent/document-openrouter-ai-setup
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/document-openrouter-ai-setup
+      - name: Update AI setup section
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("README.md")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''## (Optional) Set up AI features
+
+A few features call out to Anthropic's Claude API:
+
+- AI-formatted citations from a pasted URL or freeform quote.
+- AI repair of OCR / PDF extraction errors in a selection (Mod-Shift-R).
+- AI image alt-text and table-from-image (right-click an image).
+- AI commenting / explain features in the comments column.
+
+To enable them:
+
+1. Get an API key from
+   [console.anthropic.com](https://console.anthropic.com/) (you'll
+   need to top up a small amount of credit — Anthropic doesn't have
+   a free tier for the API).
+2. In CardMirror, click the ⚙ gear icon in the ribbon.
+3. Toggle **AI features** on and paste your API key into the
+   **Anthropic API key** field.
+
+The key is stored locally on your machine and is sent directly to
+Anthropic when you trigger an AI feature. It doesn't travel through
+a third-party server.
+
+**Translation** (Mod-Shift-T on a selection → copied to the clipboard)
+also has an Anthropic backend, but it works **without** any AI setup: the
+default MyMemory backend needs no key. You can also plug in a Google Cloud
+Translation key. Configure it under Settings → Editing → Translation.
+'''
+
+          new = '''## (Optional) Set up AI features
+
+CardMirror can use either **Anthropic** directly or **OpenRouter** for its AI features:
+
+- AI-formatted citations from a pasted URL or freeform quote.
+- AI repair of OCR / PDF extraction errors in a selection (Mod-Shift-R).
+- AI image alt-text and table-from-image (right-click an image).
+- AI commenting / explain features in the comments column.
+
+To enable them, open CardMirror's settings with the ⚙ gear icon in the ribbon,
+then turn on **AI features** under **Comments & AI** and choose a provider:
+
+- **Anthropic** — get an API key from
+  [console.anthropic.com](https://console.anthropic.com/), then paste it into
+  the **Anthropic API key** field. CardMirror uses its built-in Claude model by
+  default; the optional model override lets you enter a different Anthropic
+  model ID.
+- **OpenRouter** — get an API key from
+  [openrouter.ai/keys](https://openrouter.ai/keys), paste it into the
+  **OpenRouter API key** field, and enter an **OpenRouter model ID** such as
+  `anthropic/claude-sonnet-4.6`. Unlike the Anthropic provider, OpenRouter has
+  no built-in default model, so both the key and model ID are required.
+
+The **max output tokens** setting applies to both providers. Reasoning models
+may spend part of that budget on hidden reasoning tokens, so increase it if a
+model returns an incomplete or empty response.
+
+API keys are stored locally, excluded from settings exports, and sent only to
+the provider you select when you trigger an AI feature. Anthropic requests go
+directly to Anthropic; OpenRouter requests go directly to OpenRouter.
+
+**Translation** (Mod-Shift-T on a selection → copied to the clipboard) still
+works without any AI setup through the default keyless MyMemory backend. In
+Settings → Editing → Translation, **Auto** uses the configured AI provider when
+AI is ready and otherwise falls back to MyMemory. You can also explicitly use
+MyMemory, the selected AI provider, or Google Cloud Translation.
+'''
+
+          if old not in text:
+              raise SystemExit("README AI section did not match the expected source block")
+
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+      - name: Commit README and remove updater
+        run: |
+          rm .github/workflows/update-openrouter-readme.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md .github/workflows/update-openrouter-readme.yml
+          git commit -m "Document OpenRouter AI setup"
+          git push
