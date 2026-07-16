@@ -152,31 +152,40 @@ instead.
 
 ## (Optional) Set up AI features
 
-A few features call out to Anthropic's Claude API:
+CardMirror can use either **Anthropic** directly or **OpenRouter** for its AI features:
 
 - AI-formatted citations from a pasted URL or freeform quote.
 - AI repair of OCR / PDF extraction errors in a selection (Mod-Shift-R).
 - AI image alt-text and table-from-image (right-click an image).
 - AI commenting / explain features in the comments column.
 
-To enable them:
+To enable them, open CardMirror's settings with the ⚙ gear icon in the ribbon,
+then turn on **AI features** under **Comments & AI** and choose a provider:
 
-1. Get an API key from
-   [console.anthropic.com](https://console.anthropic.com/) (you'll
-   need to top up a small amount of credit — Anthropic doesn't have
-   a free tier for the API).
-2. In CardMirror, click the ⚙ gear icon in the ribbon.
-3. Toggle **AI features** on and paste your API key into the
-   **Anthropic API key** field.
+- **Anthropic** — get an API key from
+  [console.anthropic.com](https://console.anthropic.com/), then paste it into
+  the **Anthropic API key** field. CardMirror uses its built-in Claude model by
+  default; the optional model override lets you enter a different Anthropic
+  model ID.
+- **OpenRouter** — get an API key from
+  [openrouter.ai/keys](https://openrouter.ai/keys), paste it into the
+  **OpenRouter API key** field, and enter an **OpenRouter model ID** such as
+  `anthropic/claude-sonnet-4.6`. Unlike the Anthropic provider, OpenRouter has
+  no built-in default model, so both the key and model ID are required.
 
-The key is stored locally on your machine and is sent directly to
-Anthropic when you trigger an AI feature. It doesn't travel through
-a third-party server.
+The **max output tokens** setting applies to both providers. Reasoning models
+may spend part of that budget on hidden reasoning tokens, so increase it if a
+model returns an incomplete or empty response.
 
-**Translation** (Mod-Shift-T on a selection → copied to the clipboard)
-also has an Anthropic backend, but it works **without** any AI setup: the
-default MyMemory backend needs no key. You can also plug in a Google Cloud
-Translation key. Configure it under Settings → Editing → Translation.
+API keys are stored locally, excluded from settings exports, and sent only to
+the provider you select when you trigger an AI feature. Anthropic requests go
+directly to Anthropic; OpenRouter requests go directly to OpenRouter.
+
+**Translation** (Mod-Shift-T on a selection → copied to the clipboard) still
+works without any AI setup through the default keyless MyMemory backend. In
+Settings → Editing → Translation, **Auto** uses the configured AI provider when
+AI is ready and otherwise falls back to MyMemory. You can also explicitly use
+MyMemory, the selected AI provider, or Google Cloud Translation.
 
 ## Run from source
 
