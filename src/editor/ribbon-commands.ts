@@ -4413,6 +4413,7 @@ export type RibbonCommandId =
   | 'openFindReplace'
   | 'openFindByProximity'
   | 'toggleNavPane'
+  | 'toggleResearchBrowser'
   // Commands that ship without a default binding — bindable via
   // Settings → Keyboard shortcuts. Each maps to a ribbon button or
   // menu item.
@@ -4633,6 +4634,7 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'openFindReplace',
   'openFindByProximity',
   'toggleNavPane',
+  'toggleResearchBrowser',
   // Bindable ribbon actions with no default keys.
   'adjustFontSizeUp',
   'adjustFontSizeDown',
@@ -4813,6 +4815,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   openFindReplace: 'Find and Replace',
   openFindByProximity: 'Find Without Category Grouping',
   toggleNavPane: 'Show / Hide Navigation Pane',
+  toggleResearchBrowser: 'Show / Hide Research Browser',
   adjustFontSizeUp: 'Increase Font Size by 1pt',
   adjustFontSizeDown: 'Decrease Font Size by 1pt',
   applyFontColor: 'Apply Font Color',
@@ -4887,6 +4890,7 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   // show/hide ⇄ toggle visibility pairs
   toggleCommentsVisible: ['toggle comments', 'comments'],
   toggleNavPane: ['toggle navigation pane', 'toggle nav pane', 'sidebar', 'outline pane'],
+  toggleResearchBrowser: ['research browser', 'in-app browser', 'browse web', 'cite from browser'],
   toggleReadMode: ['show read mode', 'hide read mode', 'reader mode', 'reading mode'],
   toggleAutosave: ['enable autosave', 'disable autosave', 'turn on autosave', 'turn off autosave'],
   markActiveAsSpeech: ['toggle speech doc', 'set speech document'],
@@ -5190,6 +5194,8 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   // ribbon + nav-pane × + pull-tab; the keybinding is a power-
   // user convenience layer, not a discoverable default.
   toggleNavPane: '',
+  // No default — desktop-only, reachable via the ribbon.
+  toggleResearchBrowser: '',
   // Ribbon actions with no default key — all already reachable via
   // the ribbon, so a default chord would be noise. Bindable in
   // Settings → Keyboard shortcuts.
@@ -5430,6 +5436,8 @@ export interface RibbonContext {
    *  (transient), so toggling in one window leaves siblings
    *  untouched. */
   toggleNavPane: () => void;
+  /** Toggle the docked research-browser panel (desktop-only). */
+  toggleResearchBrowser: () => void;
   /** Most-recently-picked font color (hex, no `#`, e.g. `"FF0000"`)
    *  or `null` when the user has chosen "Automatic" / no explicit
    *  color. Read at invocation time by the `applyFontColor` command
@@ -5552,6 +5560,7 @@ const DEFAULT_RIBBON_CONTEXT: RibbonContext = {
   openFindReplace: () => {},
   openFindByProximity: () => {},
   toggleNavPane: () => {},
+  toggleResearchBrowser: () => {},
   lastFontColor: () => null,
   openSettings: () => {},
   minimizeWindow: () => {},
@@ -6276,6 +6285,12 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
       return (_state, dispatch) => {
         if (!dispatch) return true;
         ctx.toggleNavPane();
+        return true;
+      };
+    case 'toggleResearchBrowser':
+      return (_state, dispatch) => {
+        if (!dispatch) return true;
+        ctx.toggleResearchBrowser();
         return true;
       };
     // ─── No-default-binding commands (keybinding parity for

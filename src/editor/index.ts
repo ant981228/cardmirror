@@ -60,6 +60,8 @@ import {
 import { sendViewToStarred } from './pairing/send-to-starred.js';
 import { installExternalConsent } from './external-consent-ui.js';
 import { installExternalInsertHost } from './external-insert-host.js';
+import { ResearchBrowserPanel } from './research-browser-panel.js';
+import { researchBrowserEnabled } from './research-browser-gate.js';
 import { installPluginRegistry } from './plugin-registry.js';
 import { createPluginApi } from './plugin-api.js';
 import { installPluginJumpHost } from './plugin-jump-host.js';
@@ -415,6 +417,7 @@ const settingsBtn = document.getElementById('settings-btn') as HTMLButtonElement
 const referenceBtn = document.getElementById('reference-btn') as HTMLButtonElement | null;
 const readModeBtn = document.getElementById('read-mode-btn') as HTMLButtonElement;
 const navPaneToggleBtn = document.getElementById('nav-pane-toggle-btn') as HTMLButtonElement | null;
+const researchBrowserToggleBtn = document.getElementById('research-browser-toggle-btn') as HTMLButtonElement | null;
 const navPanePullTab = document.getElementById('nav-pane-pull-tab') as HTMLButtonElement | null;
 const insertImageBtn = document.getElementById('insert-image-btn') as HTMLButtonElement | null;
 // Speech-doc buttons. Visible in multi-doc and multi-window modes
@@ -968,6 +971,9 @@ let multiDocReduceToFocused: (() => Promise<boolean>) | null = null;
  *  any is hidden, else hide-all), and the pull-tab restores them all. */
 let multiDocToggleAllNav: (() => void) | null = null;
 let multiDocShowAllNav: (() => void) | null = null;
+/** Docked research-browser panel (desktop-only) — created once, mounted
+ *  near the other window-level "act on the focused doc" surfaces below. */
+let researchBrowserPanel: ResearchBrowserPanel | null = null;
 /** Web same-file guard: the file handles this window currently has open, so a
  *  peer window's cross-window duplicate-open query can compare against them
  *  (single-doc reports its one handle; multi-pane reports every pane's). */
@@ -1984,6 +1990,9 @@ const ribbonContext: RibbonContext = {
   toggleNavPane: () => {
     if (multiDocActive && multiDocToggleAllNav) multiDocToggleAllNav();
     else settings.set('navPaneVisible', !settings.get('navPaneVisible'));
+  },
+  toggleResearchBrowser: () => {
+    researchBrowserPanel?.toggle();
   },
   // ─── No-default-binding hooks ────────────────────────────────
   // Each routes through the same button's existing click handler
@@ -4170,6 +4179,9 @@ const VIEWLESS_RIBBON_COMMANDS = new Set<AnyCommandId>([
   // Toggling the nav-pane visibility only flips a transient
   // setting + body class; works without an active doc.
   'toggleNavPane',
+  // The research-browser panel toggles independently of any open doc;
+  // its insert actions merely no-op with a toast when nothing's focused.
+  'toggleResearchBrowser',
   // Home screen overlay — pure UI, no doc needed. Must be view-
   // less so it works in multi-pane with zero panes open.
   'goHome',
@@ -4220,6 +4232,7 @@ function runViewlessRibbon(id: AnyCommandId): void {
     case 'zoomOut': ribbonContext.zoomOut(); return;
     case 'zoomReset': ribbonContext.zoomReset(); return;
     case 'toggleNavPane': ribbonContext.toggleNavPane(); return;
+    case 'toggleResearchBrowser': ribbonContext.toggleResearchBrowser(); return;
     case 'goHome': ribbonContext.goHome(); return;
     case 'openQuickCardSearch': ribbonContext.openQuickCardSearch(); return;
     case 'insertLiveZone': ribbonContext.insertLiveZone(); return;
@@ -8695,6 +8708,23 @@ if (!BOOT_MOBILE) {
     };
     homeScreen.onVisibilityChange(placeReceivePill);
     placeReceivePill(homeScreen.isVisible());
+  }
+}
+
+// Research browser (desktop-only): docked panel + native WebContentsView
+// the user browses source material in, with two actions that pull the
+// current page selection into the focused pane — AI-formatted cite or
+// plain text. Never mounted on the web build.
+if (researchBrowserToggleBtn) researchBrowserToggleBtn.hidden = !researchBrowserEnabled();
+if (researchBrowserEnabled()) {
+  researchBrowserPanel = new ResearchBrowserPanel({
+    getFocusedView: () => getActiveView(),
+    toggleButton: researchBrowserToggleBtn,
+  });
+  researchBrowserPanel.mount(document.body);
+  if (researchBrowserToggleBtn) {
+    researchBrowserToggleBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    researchBrowserToggleBtn.addEventListener('click', () => runRibbon('toggleResearchBrowser'));
   }
 }
 

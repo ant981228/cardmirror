@@ -344,6 +344,25 @@ interface ElectronAPI {
   /** Toggle Chromium DevTools on this window (packaged builds have no
    *  menu accelerators for it on Windows/Linux). */
   toggleDevTools?(): Promise<void>;
+  /** Research browser (desktop-only docked WebContentsView). Optional so
+   *  an older preload tolerates its absence — the panel simply never
+   *  offers the toggle. */
+  browserToggle?(show: boolean): Promise<void>;
+  browserSetBounds?(rect: { x: number; y: number; width: number; height: number }): Promise<void>;
+  browserNavigate?(url: string): Promise<void>;
+  browserBack?(): Promise<void>;
+  browserForward?(): Promise<void>;
+  browserReload?(): Promise<void>;
+  browserGetSelection?(): Promise<{ text: string; title: string; url: string }>;
+  onBrowserNavState?(
+    handler: (state: {
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+      loading: boolean;
+    }) => void,
+  ): () => void;
   /** System woke from sleep — long-lived streams should hard-restart. */
   onPowerResumed?(handler: () => void): () => void;
   onPairingInboxChanged?(handler: (items: PairingInboxItemIpc[]) => void): () => void;
@@ -1076,6 +1095,40 @@ export class ElectronHost implements Host {
 
   async toggleDevTools(): Promise<void> {
     await api().toggleDevTools?.();
+  }
+
+  /** Research browser — no-ops gracefully on an older preload. */
+  async browserToggle(show: boolean): Promise<void> {
+    await api().browserToggle?.(show);
+  }
+  async browserSetBounds(rect: { x: number; y: number; width: number; height: number }): Promise<void> {
+    await api().browserSetBounds?.(rect);
+  }
+  async browserNavigate(url: string): Promise<void> {
+    await api().browserNavigate?.(url);
+  }
+  async browserBack(): Promise<void> {
+    await api().browserBack?.();
+  }
+  async browserForward(): Promise<void> {
+    await api().browserForward?.();
+  }
+  async browserReload(): Promise<void> {
+    await api().browserReload?.();
+  }
+  async browserGetSelection(): Promise<{ text: string; title: string; url: string }> {
+    return (await api().browserGetSelection?.()) ?? { text: '', title: '', url: '' };
+  }
+  onBrowserNavState(
+    handler: (state: {
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+      loading: boolean;
+    }) => void,
+  ): () => void {
+    return api().onBrowserNavState?.(handler) ?? (() => {});
   }
 
   onPowerResumed(handler: () => void): () => void {

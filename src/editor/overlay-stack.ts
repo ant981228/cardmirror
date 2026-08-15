@@ -19,11 +19,14 @@
  */
 
 const stack: symbol[] = [];
+const listeners = new Set<(open: boolean) => void>();
 
 /** Mark an overlay as opened; returns its token (pass to the others). */
 export function pushOverlay(): symbol {
+  const wasEmpty = stack.length === 0;
   const token = Symbol('overlay');
   stack.push(token);
+  if (wasEmpty) for (const l of listeners) l(true);
   return token;
 }
 
@@ -31,6 +34,19 @@ export function pushOverlay(): symbol {
 export function popOverlay(token: symbol): void {
   const i = stack.lastIndexOf(token);
   if (i >= 0) stack.splice(i, 1);
+  if (stack.length === 0) for (const l of listeners) l(false);
+}
+
+/** Subscribe to "any overlay open" transitions — fires `true` when the
+ *  stack goes 0→1, `false` when it drains back to 0 (not on every
+ *  push/pop while already non-empty). Used by surfaces that must get
+ *  out of the way while ANY modal has focus — e.g. a native
+ *  Electron `WebContentsView`, which paints over all DOM content
+ *  including modals regardless of z-index, so it has to hide itself
+ *  while a dialog is up. Returns an unsubscribe function. */
+export function onAnyOverlayChange(listener: (open: boolean) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 /** Whether `token` is the topmost (most recently opened) overlay. */

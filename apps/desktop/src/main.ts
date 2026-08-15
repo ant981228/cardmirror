@@ -21,6 +21,7 @@ import {
   Menu,
   MenuItemConstructorOptions,
   MessageChannelMain,
+  WebContentsView,
   clipboard,
   crashReporter,
   dialog,
@@ -545,6 +546,103 @@ function bytesToBuffer(bytes: unknown): Buffer {
   throw new TypeError('Unsupported bytes payload — expected Uint8Array / ArrayBuffer / Buffer.');
 }
 
+// ─── Research browser ────────────────────────────────────────────
+//
+// A WebContentsView docked INTO one pane of the multi-pane workspace
+// (never a fixed overlay over the whole window — a single-pane doc
+// has nowhere to spare) so a user can browse for source material
+// without leaving CardMirror, then send a selection into the focused
+// editor pane (research-browser-panel.ts, renderer side, which also
+// enforces the multi-pane-only gate and the pane picker). The
+// embedded page runs UNPRIVILEGED — no preload, contextIsolation on,
+// sandboxed — since it renders arbitrary third-party web content.
+// One view per document window, created lazily on first toggle and
+// kept alive (navigation state persists) across hide/show.
+//
+// Bounds are pushed from the renderer (`host:browser-set-bounds`),
+// tracking the chosen pane's `getBoundingClientRect()` via
+// ResizeObserver — that already reacts to window resizes and
+// splitter drags, so main doesn't re-derive layout itself.
+
+const RESEARCH_BROWSER_HOME = 'https://www.google.com';
+// The renderer draws its own toolbar (address bar, nav buttons, insert
+// actions) as ordinary DOM docked at the top of the same pane rect —
+// the native view is positioned BELOW it so the DOM toolbar stays
+// visible (a WebContentsView always paints over same-window DOM
+// content it overlaps). Keep in sync with the panel's CSS toolbar
+// height in research-browser-panel.ts.
+const RESEARCH_BROWSER_TOOLBAR_HEIGHT = 76;
+
+interface ResearchBrowserState {
+  view: WebContentsView;
+  visible: boolean;
+}
+
+const researchBrowsers = new Map<number, ResearchBrowserState>();
+
+function isNavigableUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function sendResearchBrowserNavState(win: BrowserWindow, view: WebContentsView): void {
+  if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+  const wc = view.webContents;
+  win.webContents.send('host:browser-nav-state', {
+    url: wc.getURL(),
+    title: wc.getTitle(),
+    canGoBack: wc.navigationHistory.canGoBack(),
+    canGoForward: wc.navigationHistory.canGoForward(),
+    loading: wc.isLoading(),
+  });
+}
+
+function getOrCreateResearchBrowser(win: BrowserWindow): ResearchBrowserState {
+  const existing = researchBrowsers.get(win.id);
+  if (existing) return existing;
+
+  const view = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  // Deny popups outright — a genuine new-tab intent opens in the OS
+  // browser instead of spawning another in-app surface. Non-http(s)
+  // schemes (file:, chrome:, custom protocol handlers) never open.
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    if (isNavigableUrl(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  view.webContents.on('will-navigate', (event, url) => {
+    if (!isNavigableUrl(url)) event.preventDefault();
+  });
+  view.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false);
+  });
+  view.webContents.session.on('will-download', (event) => event.preventDefault());
+
+  const state: ResearchBrowserState = { view, visible: false };
+  researchBrowsers.set(win.id, state);
+
+  const notify = (): void => sendResearchBrowserNavState(win, view);
+  view.webContents.on('did-navigate', notify);
+  view.webContents.on('did-navigate-in-page', notify);
+  view.webContents.on('page-title-updated', notify);
+  view.webContents.on('did-start-loading', notify);
+  view.webContents.on('did-stop-loading', notify);
+
+  win.on('closed', () => researchBrowsers.delete(win.id));
+
+  void view.webContents.loadURL(RESEARCH_BROWSER_HOME);
+  return state;
+}
+
 // ─── IPC handlers ──────────────────────────────────────────────────
 
 /** F2 (Paste Plain Text) on Electron: the renderer asks main for
@@ -597,6 +695,94 @@ ipcMain.handle(
  *  build has no console access at all. */
 ipcMain.handle('host:toggle-devtools', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.webContents.toggleDevTools();
+});
+
+/** Research browser (desktop-only) — a docked WebContentsView the user
+ *  browses source material in and pulls selections out of. See the
+ *  helpers above for the embedding + isolation posture. */
+ipcMain.handle('host:browser-toggle', (event, show: boolean) => {
+  const win = ownerWindow(event.sender);
+  if (!win) return;
+  const state = getOrCreateResearchBrowser(win);
+  state.visible = !!show;
+  if (state.visible) {
+    win.contentView.addChildView(state.view);
+    // No bounds yet — stay a zero-size view until the renderer's first
+    // `host:browser-set-bounds` (right after toggle-on, once it knows
+    // which pane it's docking into) lands.
+  } else {
+    win.contentView.removeChildView(state.view);
+  }
+});
+
+/** Position the native view within the pane rect the renderer just
+ *  measured (`el.getBoundingClientRect()`, tracked live via
+ *  ResizeObserver) — the toolbar strip at the top of that same rect
+ *  is ordinary DOM the renderer draws itself. Rect is in the window's
+ *  CSS-pixel content-view coordinate space. */
+ipcMain.handle(
+  'host:browser-set-bounds',
+  (event, rect: { x: number; y: number; width: number; height: number }) => {
+    const win = ownerWindow(event.sender);
+    const state = win && researchBrowsers.get(win.id);
+    if (!state || !state.visible) return;
+    const x = Math.round(rect.x);
+    const y = Math.round(rect.y) + RESEARCH_BROWSER_TOOLBAR_HEIGHT;
+    const width = Math.max(0, Math.round(rect.width));
+    const height = Math.max(0, Math.round(rect.height) - RESEARCH_BROWSER_TOOLBAR_HEIGHT);
+    state.view.setBounds({ x, y, width, height });
+  },
+);
+
+ipcMain.handle('host:browser-navigate', (event, url: string) => {
+  const win = ownerWindow(event.sender);
+  if (!win) return;
+  const state = researchBrowsers.get(win.id);
+  if (!state) return;
+  const target = isNavigableUrl(url)
+    ? url
+    : `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+  void state.view.webContents.loadURL(target);
+});
+
+ipcMain.handle('host:browser-back', (event) => {
+  const win = ownerWindow(event.sender);
+  const state = win && researchBrowsers.get(win.id);
+  if (state?.view.webContents.navigationHistory.canGoBack()) {
+    state.view.webContents.navigationHistory.goBack();
+  }
+});
+
+ipcMain.handle('host:browser-forward', (event) => {
+  const win = ownerWindow(event.sender);
+  const state = win && researchBrowsers.get(win.id);
+  if (state?.view.webContents.navigationHistory.canGoForward()) {
+    state.view.webContents.navigationHistory.goForward();
+  }
+});
+
+ipcMain.handle('host:browser-reload', (event) => {
+  const win = ownerWindow(event.sender);
+  const state = win && researchBrowsers.get(win.id);
+  state?.view.webContents.reload();
+});
+
+ipcMain.handle('host:browser-get-selection', async (event) => {
+  const win = ownerWindow(event.sender);
+  const state = win && researchBrowsers.get(win.id);
+  if (!state) return { text: '', title: '', url: '' };
+  try {
+    const text = await state.view.webContents.executeJavaScript(
+      'window.getSelection() ? window.getSelection().toString() : ""',
+    );
+    return {
+      text: typeof text === 'string' ? text : '',
+      title: state.view.webContents.getTitle(),
+      url: state.view.webContents.getURL(),
+    };
+  } catch {
+    return { text: '', title: '', url: '' };
+  }
 });
 
 /** Trigger an electron-updater check from the renderer. Mirrors

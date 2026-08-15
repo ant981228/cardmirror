@@ -711,6 +711,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
       routingCode: string;
     }>,
   toggleDevTools: () => ipcRenderer.invoke('host:toggle-devtools') as Promise<void>,
+  /** Research browser (desktop-only docked WebContentsView). */
+  browserToggle: (show: boolean) =>
+    ipcRenderer.invoke('host:browser-toggle', show) as Promise<void>,
+  browserSetBounds: (rect: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke('host:browser-set-bounds', rect) as Promise<void>,
+  browserNavigate: (url: string) =>
+    ipcRenderer.invoke('host:browser-navigate', url) as Promise<void>,
+  browserBack: () => ipcRenderer.invoke('host:browser-back') as Promise<void>,
+  browserForward: () => ipcRenderer.invoke('host:browser-forward') as Promise<void>,
+  browserReload: () => ipcRenderer.invoke('host:browser-reload') as Promise<void>,
+  browserGetSelection: () =>
+    ipcRenderer.invoke('host:browser-get-selection') as Promise<{
+      text: string;
+      title: string;
+      url: string;
+    }>,
+  onBrowserNavState(
+    handler: (state: {
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+      loading: boolean;
+    }) => void,
+  ): () => void {
+    const listener = (
+      _evt: unknown,
+      state: { url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean },
+    ): void => handler(state);
+    ipcRenderer.on('host:browser-nav-state', listener);
+    return () => ipcRenderer.removeListener('host:browser-nav-state', listener);
+  },
   onPowerResumed: (handler: () => void) => {
     const listener = () => handler();
     ipcRenderer.on('host:power-resumed', listener);

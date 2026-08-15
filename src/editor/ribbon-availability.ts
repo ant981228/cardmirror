@@ -23,6 +23,7 @@ import { RIBBON_COMMAND_IDS, type AnyCommandId, type RibbonCommandId } from './r
 import { pluginCommandIds } from './plugin-registry.js';
 import { settings } from './settings.js';
 import { collabEnabled } from './collab/collab-gate.js';
+import { researchBrowserEnabled } from './research-browser-gate.js';
 import { getElectronHost, isWindowsHost } from './host/index.js';
 
 const FLOW_COMMANDS = new Set<RibbonCommandId>([
@@ -76,6 +77,8 @@ export function isRibbonCommandAvailable(id: RibbonCommandId): boolean {
   // Intra-doc live windows work entirely within the open doc (no disk), so
   // they're available everywhere (not desktop-gated).
   if (COLLAB_COMMANDS.has(id)) return collabEnabled();
+  // Embeds a native WebContentsView — desktop only.
+  if (id === 'toggleResearchBrowser') return researchBrowserEnabled();
   return true;
 }
 

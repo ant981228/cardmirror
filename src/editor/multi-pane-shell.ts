@@ -130,7 +130,7 @@ import { icon, setIcon } from './icons';
 import { formatSpeechFilename } from './speech-filename.js';
 import { pushOverlay, popOverlay, isTopOverlay } from './overlay-stack.js';
 
-type SlotId = 'slot1' | 'slot2' | 'slot3';
+export type SlotId = 'slot1' | 'slot2' | 'slot3';
 const SLOT_IDS: SlotId[] = ['slot1', 'slot2', 'slot3'];
 
 let nextDocUid = 1;
@@ -531,6 +531,12 @@ class Slot {
   readonly paneEl: HTMLElement;
   /** Title chip text container. */
   private chipNameEl: HTMLElement;
+  /** When set, overrides the chip's displayed title (e.g. "CardMirror
+   *  Browser" while the research browser docks into this pane) —
+   *  `refreshChipFilename` leaves it alone so a Save-As on the doc
+   *  underneath can't clobber it, and normal filename display resumes
+   *  once the override is cleared. */
+  private chipTitleOverride: string | null = null;
   /** Title chip stack dropdown trigger (shown when stack has 2+). */
   private chipStackBtn: HTMLButtonElement;
   /** Title chip expand / restore toggle — fills this pane to the
@@ -1103,11 +1109,28 @@ class Slot {
 
   /** Re-render the chip's filename label from the visible record.
    *  Called after Save-As updates `record.filename` so the chip
-   *  reflects the user's chosen name. */
+   *  reflects the user's chosen name. No-op while a title override
+   *  (research browser) is active. */
   refreshChipFilename(): void {
+    if (this.chipTitleOverride !== null) return;
     const rec = this.visible;
     if (!rec) return;
     this.chipNameEl.textContent = rec.filename;
+  }
+
+  /** Force the chip's title to `text` regardless of the visible doc's
+   *  filename (or restore normal filename display when `text` is
+   *  null) — used by the research browser, which takes over this
+   *  pane's screen area but shouldn't masquerade as the underlying
+   *  document. */
+  setChipTitleOverride(text: string | null): void {
+    this.chipTitleOverride = text;
+    if (text !== null) {
+      this.chipNameEl.textContent = text;
+    } else {
+      this.refreshChipFilename();
+      if (this.stack.length === 0) this.chipNameEl.textContent = '';
+    }
   }
 
   /** Paint this slot footer's co-editing indicator from its VISIBLE record's
@@ -1347,6 +1370,12 @@ class MultiPaneShell {
    *  whether those slots have docs loaded. Click the chip's expand
    *  button again to restore the normal multi-pane layout. */
   private expandedSlot: Slot | null = null;
+  /** When non-null, this EMPTY slot is being held open for the
+   *  research browser to dock into — counted as "active" for layout
+   *  purposes (column count, wide-mode peek) exactly like a slot with
+   *  a real doc loaded, even though `stack.length === 0`. Set by
+   *  `openResearchBrowserPane`, cleared by `closeResearchBrowserPane`. */
+  private researchBrowserSlot: SlotId | null = null;
   private unsubscribeSettings: (() => void) | null = null;
   /** Doc-switcher overlay — the Alt+Tab-style list that opens
    *  when the user presses Ctrl+Tab while the focused slot has
@@ -1625,7 +1654,9 @@ class MultiPaneShell {
     // back to the normal layout with the same docs intact.
     const active = this.expandedSlot
       ? 1
-      : SLOT_IDS.filter((id) => this.slots[id].stack.length > 0).length;
+      : SLOT_IDS.filter(
+          (id) => this.slots[id].stack.length > 0 || id === this.researchBrowserSlot,
+        ).length;
     this.rowEl.dataset['active'] = String(active);
     this.navRailEl.dataset['active'] = String(active);
     // Active-count change → pane widths change → re-sync.
@@ -1663,7 +1694,7 @@ class MultiPaneShell {
       const slot = this.slots[id];
       const show = expanded
         ? slot === expanded
-        : slot.stack.length > 0;
+        : slot.stack.length > 0 || id === this.researchBrowserSlot;
       slot.paneEl.hidden = !show;
       slot.setExpandButtonPressed(slot === expanded);
     }
@@ -1919,7 +1950,9 @@ class MultiPaneShell {
   /** Send the focused slot's visible doc to the slot at `idx`
    *  (0/1/2). Used by the `sendDocToSlotN` ribbon commands. */
   sendVisibleToSlotByIndex(idx: 0 | 1 | 2): void {
-    const targetSlot = this.slots[SLOT_IDS[idx]!];
+    const targetId = SLOT_IDS[idx]!;
+    if (targetId === this.researchBrowserSlot) return;
+    const targetSlot = this.slots[targetId];
     if (!this.focusedSlot || this.focusedSlot === targetSlot) return;
     const record = this.focusedSlot.releaseVisible();
     if (!record) return;
@@ -1989,6 +2022,10 @@ class MultiPaneShell {
    *  third doc brings it into view, but clicking the middle (fully
    *  visible) doc leaves the scroll position alone. */
   focusSlot(slot: Slot): void {
+    // A slot held open for the research browser has no doc — nothing to
+    // route keyboard / active-view focus to. The click still lands (the
+    // pane's chip is real, clickable chrome), it just doesn't steal focus.
+    if (slot.stack.length === 0) return;
     // Focus follows VISIBILITY: a pane hidden behind an expanded slot
     // can receive docs (the slot picker routes there happily) but must
     // never take the keyboard — the expanded pane is what the user is
@@ -2184,6 +2221,65 @@ class MultiPaneShell {
     return this.focusedSlot?.visible?.filename ?? null;
   }
 
+  /** Occupied panes (a doc open, not hidden), left-to-right, for the
+   *  research browser's "which pane?" picker — it docks INTO one
+   *  pane's screen rect rather than overlaying the whole window, so
+   *  it needs somewhere with an open doc to sit over. Reports
+   *  `bodyElement` (the scrollable doc area), NOT the whole `paneEl`
+   *  — the pane's own chip/tab row and footer sit outside `bodyEl`
+   *  and must stay visible and usable above/below the docked browser,
+   *  not get covered or squeezed by it. */
+  occupiedSlotPanes(): Array<{ id: SlotId; label: string; el: HTMLElement }> {
+    const labels: Record<SlotId, string> = { slot1: 'Pane 1', slot2: 'Pane 2', slot3: 'Pane 3' };
+    return SLOT_IDS.filter((id) => this.slots[id].stack.length > 0 && !this.slots[id].paneEl.hidden).map(
+      (id) => ({ id, label: labels[id], el: this.slots[id].bodyElement }),
+    );
+  }
+
+  /** Reserve the first EMPTY pane for the research browser, auto-
+   *  expanding the visible pane count exactly like opening a doc there
+   *  would (one doc open → this shows pane 2; two docs open → pane 3,
+   *  respecting the current layout mode's compact-thirds or
+   *  wide-with-peek rendering — both already derive purely from the
+   *  active-pane count `refreshLayout` computes). Returns null when
+   *  every pane already has a doc loaded (caller falls back to
+   *  `occupiedSlotPanes`'s pick-one-to-replace picker) or a slot is
+   *  currently expanded/maximized (that mode already collapses to one
+   *  visible pane; reserving a hidden one would just fight it). */
+  openResearchBrowserPane(): { id: SlotId; el: HTMLElement } | null {
+    if (this.expandedSlot) return null;
+    const emptyId = SLOT_IDS.find((id) => this.slots[id].stack.length === 0);
+    if (!emptyId) return null;
+    this.researchBrowserSlot = emptyId;
+    this.applyExpandedState();
+    return { id: emptyId, el: this.slots[emptyId].bodyElement };
+  }
+
+  /** Release a pane reserved by `openResearchBrowserPane`, restoring
+   *  normal occupancy-driven visibility. No-op if nothing's reserved
+   *  (e.g. the browser docked into an already-occupied pane instead). */
+  closeResearchBrowserPane(): void {
+    if (!this.researchBrowserSlot) return;
+    this.researchBrowserSlot = null;
+    this.applyExpandedState();
+  }
+
+  /** Force (or clear) `id`'s chip title while the research browser
+   *  occupies that pane — see `Slot.setChipTitleOverride`. */
+  setResearchBrowserChipTitle(id: SlotId, text: string | null): void {
+    this.slots[id].setChipTitleOverride(text);
+  }
+
+  /** Whether `id` is free to receive a newly-opened/recovered doc —
+   *  empty AND not currently reserved for the research browser. Every
+   *  "route a doc to an empty slot" path (file open, crash recovery,
+   *  Show-in-context) must check this instead of `stack.length === 0`
+   *  directly, or it'll happily plant a doc in the pane the browser is
+   *  visually occupying. */
+  private isSlotFreeForDoc(id: SlotId): boolean {
+    return this.slots[id].stack.length === 0 && id !== this.researchBrowserSlot;
+  }
+
   /** Return the focused doc's filename + on-disk handle + format,
    *  for the Save / Save-As flow. Returns null when no pane is
    *  focused or the slot has no visible record. */
@@ -2356,7 +2452,7 @@ class MultiPaneShell {
     // currently-focused slot or slot1.
     let target: SlotId = 'slot1';
     for (const id of SLOT_IDS) {
-      if (this.slots[id].stack.length === 0) {
+      if (this.isSlotFreeForDoc(id)) {
         target = id;
         break;
       }
@@ -2511,8 +2607,7 @@ class MultiPaneShell {
       showToast(`Couldn't open "${req.name}" — file moved or deleted.`);
       return;
     }
-    const target =
-      SLOT_IDS.find((id) => this.slots[id].stack.length === 0) ?? 'slot1';
+    const target = SLOT_IDS.find((id) => this.isSlotFreeForDoc(id)) ?? 'slot1';
     await this.loadOpenedIntoSlot(
       { name: file.name, bytes: file.bytes, handle: file.handle },
       target,
@@ -2577,7 +2672,13 @@ class MultiPaneShell {
       dialog.appendChild(header);
       const row = document.createElement('div');
       row.className = 'pmd-route-buttons';
-      for (const id of SLOT_IDS) {
+      // The research browser's reserved pane isn't a legal doc
+      // destination — offering it would let a new doc land right on
+      // top of (and get visually hidden behind) the browser overlay.
+      // The digit-key shortcuts below check this same list so a
+      // typed '2' can't bypass the omitted button.
+      const availableSlotIds = SLOT_IDS.filter((sid) => sid !== this.researchBrowserSlot);
+      for (const id of availableSlotIds) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'pmd-route-btn';
@@ -2617,7 +2718,9 @@ class MultiPaneShell {
         else if (e.key === '2') idx = 1;
         else if (e.key === '3') idx = 2;
         if (idx >= 0) {
-          finish(SLOT_IDS[idx]!);
+          const id = SLOT_IDS[idx]!;
+          if (!availableSlotIds.includes(id)) return false;
+          finish(id);
           return true;
         }
         return false;
@@ -3315,6 +3418,41 @@ function buildDocRecord(
   syncDocPathClaim(null, record.handle);
 
   return record;
+}
+
+/** Whether the multi-pane workspace is mounted right now. The
+ *  research browser only opens inside a real pane, so it gates on
+ *  this rather than on `settings.get('multiDocWorkspace')` directly
+ *  — the setting could be on with the shell not yet mounted. */
+export function multiPaneShellActive(): boolean {
+  return shell !== null;
+}
+
+/** Occupied panes for the research browser's pane picker, or `[]`
+ *  when the shell isn't mounted (single-doc mode). */
+export function researchBrowserSlotCandidates(): Array<{
+  id: SlotId;
+  label: string;
+  el: HTMLElement;
+}> {
+  return shell?.occupiedSlotPanes() ?? [];
+}
+
+/** Reserve the first empty pane for the research browser, or null
+ *  when every pane is occupied / the shell isn't mounted. */
+export function openResearchBrowserPane(): { id: SlotId; el: HTMLElement } | null {
+  return shell?.openResearchBrowserPane() ?? null;
+}
+
+/** Release a pane reserved by `openResearchBrowserPane`. */
+export function closeResearchBrowserPane(): void {
+  shell?.closeResearchBrowserPane();
+}
+
+/** Force (or clear, passing null) a pane's chip title while the
+ *  research browser occupies it. */
+export function setResearchBrowserChipTitle(id: SlotId, text: string | null): void {
+  shell?.setResearchBrowserChipTitle(id, text);
 }
 
 /** Boot-time entry point — called from editor/index.ts when the

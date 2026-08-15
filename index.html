@@ -199,6 +199,11 @@
           <button id="nav-pane-toggle-btn" class="ribbon-doc-ops-btn" type="button"
                   aria-pressed="true" title="Show / hide the navigation pane"
                   aria-label="Toggle nav pane"><span class="pmd-icon pmd-icon-nav-toggle" aria-hidden="true"></span></button>
+          <!-- Desktop-only (hidden on the web build by isRibbonCommandAvailable /
+               researchBrowserEnabled — see index.ts's button-visibility wiring). -->
+          <button id="research-browser-toggle-btn" class="ribbon-doc-ops-btn" type="button"
+                  aria-pressed="false" title="Research browser — browse the web and cite into your card"
+                  aria-label="Toggle research browser"><span class="pmd-icon pmd-icon-research-browser" aria-hidden="true"></span></button>
         </div>
         <div id="comments-ops-panel" class="ribbon-doc-ops-panel ribbon-doc-ops-panel-3col" role="group" aria-label="Comments">
           <!-- 2-row × 3-col grid (row-major):

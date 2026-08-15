@@ -15221,3 +15221,70 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 body.pmd-multi-doc #collab-chip {
   display: none;
 }
+
+/* Research browser toolbar (desktop-only). Docks into whichever pane
+   the user picked — `left`/`top`/`width` are set inline in JS from
+   that pane's `getBoundingClientRect()` (research-browser-panel.ts).
+   `height` is fixed and must match RESEARCH_BROWSER_TOOLBAR_HEIGHT in
+   apps/desktop/src/main.ts — the native WebContentsView is positioned
+   directly beneath this strip, filling the rest of the same pane. */
+.research-browser-toolbar {
+  position: fixed;
+  height: 76px;
+  z-index: 400;
+  background: var(--pmd-panel-bg, #fff);
+  border-bottom: 1px solid var(--pmd-border, #ddd);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--pmd-ui-font);
+  font-size: 0.85rem;
+}
+.research-browser-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+}
+.research-browser-nav-row button {
+  flex: 0 0 auto;
+}
+.research-browser-address {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.research-browser-action-row {
+  display: flex;
+  gap: 4px;
+  padding: 0 6px 4px;
+}
+
+/* Pane picker — shown when 2+ panes are open and the user must choose
+   which one the research browser takes over. Centered floating card,
+   independent of any particular pane's geometry. */
+.research-browser-picker {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 401;
+  background: var(--pmd-panel-bg, #fff);
+  border: 1px solid var(--pmd-border, #ddd);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  font-family: var(--pmd-ui-font);
+  font-size: 0.9rem;
+}
+.research-browser-picker-heading {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.research-browser-picker-cancel {
+  margin-top: 4px;
+  opacity: 0.75;
+}
