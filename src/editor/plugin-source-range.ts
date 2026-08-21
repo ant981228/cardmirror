@@ -1,10 +1,11 @@
 /**
  * Shared range resolution for plugin provenance tokens - the doc-level
- * half of `plugin-jump.ts`, split out so the inbound `/jump` and
- * `/replace` routes can never disagree about which textblock a token
- * names. Jump wants a caret position, replace wants a content range;
- * both come from the SAME resolution order (spec 4.3: heading UUID,
- * then text anchor).
+ * half of `plugin-jump.ts`, split out so the inbound `/jump`,
+ * `/replace` and `/insert-after` routes can never disagree about which
+ * textblock a token names. Jump wants a caret position, replace wants a
+ * content range, insert-after wants a position inside the anchor block;
+ * all come from the SAME resolution order (spec 4.3: heading UUID, then
+ * text anchor).
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import { collectHeadings } from './headings.js';

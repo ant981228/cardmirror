@@ -1039,6 +1039,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('external:replace-result', result);
   },
 
+  /** Anchored line add (`POST /insert-after`) - receive an
+   *  `external:insert-after` request from the main-process HTTP bridge
+   *  and send the ack back via `external:insert-after-result`. Same
+   *  shape as the replace pair above; here the ack's `source` names a
+   *  line that did not exist before the call, which is the only handle
+   *  the caller will ever get to it. */
+  onExternalInsertAfterRequest(handler: (req: {
+    requestId: string;
+    source: string;
+    text: string;
+  }) => void): () => void {
+    const listener = (
+      _evt: unknown,
+      req: { requestId: string; source: string; text: string },
+    ): void => handler(req);
+    ipcRenderer.on('external:insert-after', listener);
+    return () => ipcRenderer.removeListener('external:insert-after', listener);
+  },
+  sendExternalInsertAfterResult: (result: {
+    requestId: string;
+    ok: boolean;
+    error?: string;
+    docTitle?: string;
+    source?: string;
+  }): void => {
+    ipcRenderer.send('external:insert-after-result', result);
+  },
+
   /** Card-cutter local plugin (experimental). `pick` opens the native
    *  file dialog and returns the chosen path. `load` asks main for the
    *  engine bundle's source (from the given path, the CARDCUTTER_ENGINE

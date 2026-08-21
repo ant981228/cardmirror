@@ -77,11 +77,14 @@ export function buildExternalReplaceTransaction(
   return state.tr.replaceWith(from, to, state.schema.text(text, marks));
 }
 
-/** Textblock types `/replace` may rewrite: exactly what `/extract`
- *  emits - the heading kinds (`headings.ts` TYPE_TO_LEVEL) plus
- *  undertags and cites. `card_body` and doc-level `paragraph` are absent
- *  on purpose (see the header). */
-const REPLACEABLE_TYPES: Record<string, true> = {
+/** Textblock types an outside app may write into, or beside: exactly
+ *  what `/extract` emits - the heading kinds (`headings.ts`
+ *  TYPE_TO_LEVEL) plus undertags and cites. `card_body` and doc-level
+ *  `paragraph` are absent on purpose (see the header). Shared with
+ *  `/insert-after` (`external-insert-after.ts`), so the two write-back
+ *  routes cannot come to disagree about which text in the document an
+ *  outside app is allowed to author. */
+export const EXTERNAL_WRITABLE_TYPES: Record<string, true> = {
   pocket: true,
   hat: true,
   block: true,
@@ -116,7 +119,7 @@ export function replaceTokenInView(
   const range = resolveSourceRange(view.state.doc, payload);
   if (!range) return { ok: false, error: 'not-found', docTitle: payload.docTitle };
   // `from` is a content position, so its parent IS the named textblock.
-  if (!REPLACEABLE_TYPES[view.state.doc.resolve(range.from).parent.type.name]) {
+  if (!EXTERNAL_WRITABLE_TYPES[view.state.doc.resolve(range.from).parent.type.name]) {
     return { ok: false, error: 'body-text', docTitle: payload.docTitle };
   }
   const tr = buildExternalReplaceTransaction(view.state, {

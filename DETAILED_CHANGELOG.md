@@ -100,6 +100,128 @@ holds the doc and refuses the target has answered, while another
 window's `not-found` is the absence of an answer. 200 with
 `ok: false`, and `docTitle` rides along as it does for `not-found`.
 
+### Added: `POST /insert-after` - anchored line adds from a flowing app
+
+`/extract` hands an item out, `/replace` rewrites one, `/jump` steers
+to one - and none of them can put text in the document that was never
+there. A flowing app whose user writes a NEW line between two items
+they received held that line alone: `/replace` only overwrites text
+that already exists, and `/insert` writes at the caret of a focused
+document, which is neither anchored nor silent. New route in
+`apps/desktop/src/fast-paste-bridge.ts` (body `{ source, text }`,
+`dispatchInsertAfterTo` / `broadcastInsertAfter` / the
+`pendingInsertAfterAcks` map beside the replace trio), renderer side in
+new `src/editor/external-insert-after.ts` and
+`src/editor/external-insert-after-host.ts`, carried over a new preload
+pair (`apps/desktop/src/preload.ts`) as `external:insert-after` /
+`external:insert-after-result` and installed from
+`src/editor/index.ts`, and `plugin-source-range.ts`'s header now names
+all three routes it serves. Tests: new
+`tests/editor/external-insert-after.test.ts` and
+`tests/editor/external-insert-after-host.test.ts`, plus route,
+precedence and consent cases in
+`tests/desktop/fast-paste-bridge.test.ts`. Additive like `/replace`, so
+`/ping`'s `schema` stays 2 and the frozen §5 contract is extended
+rather than changed; consent is the existing per-app decision, with no
+new consent code and no second prompt.
+
+**The reply token is the ONLY handle to the new line.** `/replace`
+re-mints a token for text the caller already had one for; here the
+token names text that did not exist when the request was sent, so a
+bare `{ ok: true }` would leave the caller having written a line into
+the user's document that it can never edit, jump to, or insert after -
+findable only by hand. `insertAfterTokenInView` therefore mints against
+the LANDED document rather than the arithmetic: slice fitting is free
+to move or wrap an inserted node, and a token minted over the wrong
+range would name a line the caller never wrote. If the computed content
+start does not hold exactly the text that was sent, the answer is
+`internal`, and `broadcastInsertAfter` turns an `ok` ack without a
+token into `internal` too. There is deliberately no fallback: unlike a
+failed re-mint, there is no older token to keep.
+
+**`internal` leads the error precedence, and that is a duplicate-write
+argument, not a tidiness one.** Every other code (`bad-request`,
+`doc-readonly`, `body-text`, `not-found`, `doc-not-open`) is a definite
+refusal that changed nothing and is safe for a caller to retry.
+`internal` is the one outcome where a line may be in the document with
+no token naming it, so a caller told anything retryable would send the
+request again and add the line twice - and the user, not the caller,
+finds the duplicate. `broadcastInsertAfter` therefore ranks `internal`
+ahead of every definite complaint before falling through to
+`doc-not-open`, and the reference docs tell callers to bar that line at
+that anchor for the session.
+
+**The same argument moves the ack timeout.** `dispatchInsertAfterTo`
+resolves a renderer that misses `RENDERER_ACK_TIMEOUT_MS` as
+`internal`, where the replace and jump dispatchers resolve `not-mine`.
+A wedged window may be the one holding the doc, may have inserted the
+line, and simply never answered; `not-mine` from every window is
+`doc-not-open`, which is definite, which is retried, which writes the
+line into the user's evidence file twice. So the slow-window case is
+priced deliberately: a merely slow renderer costs that line staying in
+the flowing app, and the alternative costs a duplicate in the document.
+`/replace` and `/jump` keep `not-mine` and are right to - a retried
+replace still leaves one node, and a retried jump moves a viewport.
+Draining `pendingInsertAfterAcks` at shutdown answers `internal` for
+the same reason. `doc-not-open` on this route now means every window
+actually answered and none held the doc.
+
+Status codes follow `/replace` exactly rather than being made
+stricter: two write-back routes disagreeing about the same error code
+is worse than either choice, and ebb reads the JSON body.
+
+**The new block's kind is READ, not sent.** An outside app names a
+line, never a structure, so the sibling takes the anchor's own type.
+`tag` is only ever a `card`'s first child and `analytic` only ever an
+`analytic_unit`'s (`schema/nodes.ts`), so those two arrive wrapped in a
+fresh single-heading container placed after the anchor's container,
+while every other accepted kind goes in beside the anchor node itself,
+which the `card` / `analytic_unit` content expressions allow. The
+wrapping rule is `HEADING_CONTAINER`, now exported from
+`external-insert.ts` instead of copied, so `/insert`'s roles and this
+route cannot come to disagree about where a tag is legal. Heading kinds
+get a fresh `newHeadingId()` - one built without an id is invisible to
+the nav pane - and the reply token carries that id, so it resolves by
+UUID rather than by quote; an undertag or cite reply resolves through
+its descriptor and carries the anchor's governing heading id.
+
+**Text arrives plain, and one line only.** `/replace` inherits the
+marks of the run it overwrites, which is the right guess when replacing
+that exact run. Here there is no run to inherit from: this is text
+nobody styled, and dressing it in a neighbour's marks would be a guess
+about intent rather than a carry-over. A `\r` or `\n` is `bad-request`
+rather than a node split, for the same reason as `/replace`: the caller
+described one line, and splitting it would build a structure it never
+asked for. Structure still goes through `/insert`'s roles.
+
+**The accepted anchor kinds are `/replace`'s whitelist, shared not
+copied.** `REPLACEABLE_TYPES` became the exported
+`EXTERNAL_WRITABLE_TYPES` in `external-replace.ts`, so the two
+write-back routes cannot drift apart about which text in the document
+an outside app may author. A `card_body` anchor is refused `body-text`:
+`/extract` never emits card bodies, so such a token can only come from
+anchor drift, and a `card_body` sibling would mean an outside app
+authoring evidence rather than commentary beside it.
+
+**Silent, and pinned as silent.** One `view.dispatch` of one
+transaction with no `scrollIntoView`, no selection change and no stored
+marks; main never calls `show`, `focus` or `restore` on this path. The
+editor test asserts one transaction and an unmoved selection, and the
+route test asserts a minimized window stays minimized - the flowing app
+calls this while its user types, so a window coming forward per line
+would fight the reader for their own screen. One transaction also means
+one Cmd-Z removes the whole insert and `LoroSyncPlugin` mirrors it into
+a co-editing session as one step batch.
+
+**A queued insert lands unaddressed, and the docs say so.** Consent
+`ask` enqueues the broadcast and answers `{ ok: true, pending:
+"consent" }` exactly as `/replace` does, so an Allow applies the held
+insert and the user's click is the redo. The token the renderer mints
+for it then has nobody to go to: the HTTP response is long since sent.
+That is the honest cost of queueing rather than dropping the request,
+and the reference docs state the consequence - `pending` is not a
+success, and re-sending after an allow adds the line twice.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

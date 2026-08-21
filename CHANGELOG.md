@@ -18,7 +18,7 @@ see `DETAILED_CHANGELOG.md`.
   of a card is never touched** - only tags, analytics, undertags and
   cites can be updated this way, which is also all a companion app is
   ever given: the quoted text of a card doesn't leave your document,
-  and nothing can rewrite it from outside.
+  and nothing can rewrite it from outside. You grant nothing new: the
   existing permission for that app governs it - the same **Always
   Allow / Deny** decision that already covers sending text and
   jumping, listed and changeable under Settings → Plugins → External
@@ -26,6 +26,22 @@ see `DETAILED_CHANGELOG.md`.
   nothing changes at all if you don't use a companion app. Whether an
   app offers this is its own choice; ebb, for one, keeps it behind a
   setting that starts off.
+
+- **A companion app can now add a line next to one it received from
+  you.** The same flow, one step further. When the app's user writes a
+  new line beside a passage they took from your document - another
+  reason under a tag, a second cite under a card - the app can put that
+  line into the document too, immediately after the line it belongs
+  after. It arrives the way an update does: quietly, with no window
+  raised, nothing scrolled, and your cursor where you left it. It only
+  ever adds - the line it was anchored to is left exactly as it was,
+  and **the body of a card is never touched.** A new tag arrives as a
+  new card of its own; an undertag or a cite lands inside the card it
+  belongs to. Governed by the permission you already gave that app -
+  the same **Always Allow / Deny** decision under Settings → Plugins →
+  External apps - so an app you never allowed still cannot put anything
+  in a document, and nothing changes at all if you don't use a
+  companion app.
 
 ## 1.17.2 — 2026-11-01
 

@@ -77,8 +77,13 @@ export interface ExternalInsertOpts {
  * doc root. Pocket / hat / block stand alone; `tag` is only ever a card's
  * first child and `analytic` only ever an analytic_unit's, which is why
  * sending one of those inserts a whole (single-heading) card or unit.
+ *
+ * Exported for `/insert-after` (`external-insert-after.ts`), which needs
+ * the same wrapping rule to put a tag or an analytic next to one. A
+ * present-but-undefined entry means "heading kind, stands alone", so the
+ * heading test is `Object.hasOwn`, not a truthy read.
  */
-const HEADING_CONTAINER: Record<string, 'card' | 'analytic_unit' | undefined> = {
+export const HEADING_CONTAINER: Record<string, 'card' | 'analytic_unit' | undefined> = {
   pocket: undefined,
   hat: undefined,
   block: undefined,

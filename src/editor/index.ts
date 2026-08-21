@@ -74,6 +74,7 @@ import { maybeSnapshotVersion } from './version-history.js';
 import { awaitWithSaveWatchdog, warnIfSlow } from './save-watchdog.js';
 import { installExternalInsertHost } from './external-insert-host.js';
 import { installExternalReplaceHost } from './external-replace-host.js';
+import { installExternalInsertAfterHost } from './external-insert-after-host.js';
 import { installPluginRegistry } from './plugin-registry.js';
 import { createPluginApi } from './plugin-api.js';
 import { installPluginJumpHost } from './plugin-jump-host.js';
@@ -10144,6 +10145,12 @@ installPluginJumpHost({
 // focuses, raises or scrolls anything (a flowing app calls it on every
 // settled keystroke). No-ops when the preload bridge is absent.
 installExternalReplaceHost({
+  findViewForDocId: (docId) => findViewForDocId(docId),
+});
+// Inbound /insert-after handler - same silent, per-window token
+// resolution as the replace host, but it adds a line rather than
+// rewriting one, and answers with a token for the line it created.
+installExternalInsertAfterHost({
   findViewForDocId: (docId) => findViewForDocId(docId),
 });
 // External-app consent: mirror the toggle + per-app decisions to main

@@ -103,6 +103,19 @@ function fireReplaceAck(ack: {
   for (const l of listeners) l(null, ack);
 }
 
+/** The renderer -> main half of the insert-after contract, exactly as
+ *  external-insert-after-host.ts sends it. */
+function fireInsertAfterAck(ack: {
+  requestId: string;
+  ok: boolean;
+  error?: string;
+  docTitle?: string;
+  source?: string;
+}): void {
+  const listeners = ipcListeners.get('external:insert-after-result') ?? [];
+  for (const l of listeners) l(null, ack);
+}
+
 /** A cmsrc1 token shaped like the renderer's; docTitle is the only
  *  field main decodes (for the doc-not-open message). */
 function sourceToken(docTitle: string, docId = 'd'): string {
@@ -703,6 +716,173 @@ describe('fast-paste-bridge', () => {
       expect((await replaced).json.ok).toBe(true);
     });
   });
+
+  // Same real-clock caveat as the /replace block above: the request
+  // crosses a live loopback socket, so the 20ms waits let it reach the
+  // stub renderer before the ack fires, and the no-ack test runs out the
+  // real 1200ms timeout.
+  describe('POST /insert-after', () => {
+    const token = sourceToken('AT Cap K.docx');
+
+    const post = (body: unknown, port: number, fdpToken: string) =>
+      fetchJson({ method: 'POST', path: '/insert-after', port, token: fdpToken, body });
+
+    const insertAfterSent = () =>
+      sentToRenderer.filter((s) => s.channel === 'external:insert-after');
+
+    it('rejects a missing token', async () => {
+      const ep = bridge.getRunningEndpoint()!;
+      const r = await fetchJson({
+        method: 'POST', path: '/insert-after', port: ep.port,
+        body: { source: token, text: 'hi' },
+      });
+      expect(r.status).toBe(403);
+      expect(r.json).toEqual({ ok: false, error: 'unauthorized' });
+    });
+
+    it('answers with the token the renderer minted for the new line', async () => {
+      const win = makeMockWindow();
+      setMockAllWindows([win]);
+      const ep = bridge.getRunningEndpoint()!;
+      const added = post({ source: token, text: 'And a second reason.' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      const sent = insertAfterSent();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.payload).toMatchObject({ source: token, text: 'And a second reason.' });
+      expect(typeof sent[0]!.payload.requestId).toBe('string');
+      // The reply names a line that did not exist when the request was
+      // sent, so it can never be the token that was sent.
+      const minted =
+        'cmsrc1.' +
+        Buffer.from(
+          JSON.stringify({ docId: 'd', docTitle: 'AT Cap K.docx', quote: 'And a second reason.' }),
+        ).toString('base64url');
+      expect(minted).not.toBe(token);
+      fireInsertAfterAck({ requestId: sent[0]!.payload.requestId, ok: true, source: minted });
+      const r = await added;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: true, source: minted });
+    });
+
+    it('never shows, focuses or restores the window that took the line', async () => {
+      // Silent for the same reason /replace is: the flowing app calls
+      // this while its user types, and a window coming forward per line
+      // would fight the reader for their own screen.
+      const win = makeMockWindow({ minimized: true });
+      setMockAllWindows([win]);
+      const ep = bridge.getRunningEndpoint()!;
+      const added = post({ source: token, text: 'added line' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      fireInsertAfterAck({
+        requestId: insertAfterSent()[0]!.payload.requestId,
+        ok: true,
+        source: sourceToken('AT Cap K.docx'),
+      });
+      expect((await added).json.ok).toBe(true);
+      expect(win.__shown).toBe(false);
+      expect(win.__focused).toBe(false);
+      expect(win.__restored).toBe(false);
+    });
+
+    it.each([
+      ['a null body', null],
+      ['a missing source', { text: 'hi' }],
+      ['a source without the cmsrc1 prefix', { source: 'x.abc', text: 'hi' }],
+      ['a non-string text', { source: sourceToken('d.docx'), text: 42 }],
+      ['empty text', { source: sourceToken('d.docx'), text: '' }],
+      ['whitespace-only text', { source: sourceToken('d.docx'), text: '  \t ' }],
+      ['text with a newline', { source: sourceToken('d.docx'), text: 'one\ntwo' }],
+      ['text with a carriage return', { source: sourceToken('d.docx'), text: 'one\rtwo' }],
+      ['text over the cap', { source: sourceToken('d.docx'), text: 'x'.repeat(8 * 1024 + 1) }],
+    ])('400s %s and dispatches nothing', async (_label, body) => {
+      const ep = bridge.getRunningEndpoint()!;
+      const r = await post(body, ep.port, ep.token);
+      expect(r.status).toBe(400);
+      expect(r.json).toEqual({ ok: false, error: 'bad-request' });
+      expect(insertAfterSent()).toHaveLength(0);
+    });
+
+    it('400s a malformed body', async () => {
+      const ep = bridge.getRunningEndpoint()!;
+      const res = await fetch(`http://127.0.0.1:${ep.port}/insert-after`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-fdp-token': ep.token,
+          'x-app-id': 'testapp',
+          connection: 'close',
+        },
+        body: '{ broken',
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'bad-request' });
+    });
+
+    it('all not-mine → doc-not-open with the docTitle from the token', async () => {
+      setMockAllWindows([makeMockWindow(), makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const added = post({ source: token, text: 'added line' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      for (const s of insertAfterSent()) {
+        fireInsertAfterAck({ requestId: s.payload.requestId, ok: false, error: 'not-mine' });
+      }
+      const r = await added;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: false, error: 'doc-not-open', docTitle: 'AT Cap K.docx' });
+    });
+
+    it.each(['not-found', 'doc-readonly', 'body-text'])('passes a %s ack through', async (error) => {
+      setMockAllWindows([makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const added = post({ source: token, text: 'added line' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      fireInsertAfterAck({ requestId: insertAfterSent()[0]!.payload.requestId, ok: false, error });
+      const r = await added;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: false, error });
+    });
+
+    it('an ok ack with no token is internal, never a bare success', async () => {
+      // The line is in the document and nothing names it. A caller told
+      // `ok` would record an item it can never edit, jump to or insert
+      // after again.
+      setMockAllWindows([makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const added = post({ source: token, text: 'added line' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      fireInsertAfterAck({ requestId: insertAfterSent()[0]!.payload.requestId, ok: true });
+      const r = await added;
+      expect(r.json).toEqual({ ok: false, error: 'internal' });
+    });
+
+    it("an internal ack outranks another window's not-found", async () => {
+      // internal means the line may have landed unnamed; not-found means
+      // nothing happened and invites a retry. Reporting the retryable
+      // one would put a second copy of the line in the document.
+      setMockAllWindows([makeMockWindow(), makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const added = post({ source: token, text: 'added line' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      const sent = insertAfterSent();
+      fireInsertAfterAck({ requestId: sent[0]!.payload.requestId, ok: false, error: 'not-found' });
+      fireInsertAfterAck({ requestId: sent[1]!.payload.requestId, ok: false, error: 'internal' });
+      expect((await added).json).toEqual({ ok: false, error: 'internal' });
+    });
+
+    it('answers internal, not doc-not-open, when no window ever acks', async () => {
+      // The ack timeout, not the socket, ends this request: a silent
+      // renderer must never hang the sending app. What it ends AS is the
+      // point here - a window that went quiet may hold the doc and have
+      // inserted the line, and doc-not-open is a definite refusal the
+      // caller would retry, duplicating the line. /replace answers
+      // doc-not-open in this same case, and is right to: a retried
+      // replace still leaves one node.
+      setMockAllWindows([makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const r = await post({ source: sourceToken('Silent.docx'), text: 'added' }, ep.port, ep.token);
+      expect(r.json).toEqual({ ok: false, error: 'internal' });
+    });
+  });
 });
 
 describe('external-app consent (identity gate)', () => {
@@ -928,6 +1108,58 @@ describe('external-app consent (identity gate)', () => {
     expect(r.json).toEqual({ ok: true, pending: 'consent' });
     expect(r.json.source).toBeUndefined();
     expect(sent('external:replace-text')).toHaveLength(0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const prompt = sent('external:consent-prompt')[0]!;
+    fireConsentPromptResult({ requestId: prompt.payload.requestId, outcome: 'dismissed' });
+  });
+
+  it('unidentified /insert-after is turned away with the same guidance as /insert', async () => {
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/insert-after', port: ep.port, token: ep.token, appId: null,
+      body: { source: sourceToken('d.docx'), text: 'added' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.ok).toBe(false);
+    expect(r.json.error).toBe('unidentified');
+    expect(r.json.message).toContain('X-App-Id');
+    expect(sent('external:insert-after')).toHaveLength(0);
+  });
+
+  it('master toggle off → inserts-disabled on /insert-after too', async () => {
+    fireConsentSync({ policy: 'off', apps: { testapp: 'allow' } });
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/insert-after', port: ep.port, token: ep.token,
+      body: { source: sourceToken('d.docx'), text: 'added' },
+    });
+    expect(r.json).toEqual({ ok: false, error: 'inserts-disabled' });
+    expect(sent('external:insert-after')).toHaveLength(0);
+  });
+
+  it('a denied app cannot add a line either', async () => {
+    fireConsentSync({ policy: 'ask', apps: { testapp: 'deny' } });
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/insert-after', port: ep.port, token: ep.token,
+      body: { source: sourceToken('d.docx'), text: 'added' },
+    });
+    expect(r.json).toEqual({ ok: false, error: 'not-allowed' });
+    expect(sent('external:insert-after')).toHaveLength(0);
+  });
+
+  it('pending consent on /insert-after answers ok with pending and no token', async () => {
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/insert-after', port: ep.port, token: ep.token, appId: 'newapp',
+      body: { source: sourceToken('d.docx'), text: 'added' },
+    });
+    // `pending` is not a success: nothing was added yet, and if the user
+    // allows, the line lands with its token going nowhere - so there is
+    // nothing here for the caller to store.
+    expect(r.json).toEqual({ ok: true, pending: 'consent' });
+    expect(r.json.source).toBeUndefined();
+    expect(sent('external:insert-after')).toHaveLength(0);
     await new Promise((resolve) => setTimeout(resolve, 20));
     const prompt = sent('external:consent-prompt')[0]!;
     fireConsentPromptResult({ requestId: prompt.payload.requestId, outcome: 'dismissed' });
