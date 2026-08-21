@@ -5,6 +5,28 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **A companion app can now update the text of a card it previously
+  received from you.** A flowing app already asks CardMirror for a
+  passage and can jump you back to where it came from; one can now
+  also send back an edited version of a line it took, and the
+  document changes in place. It happens quietly on purpose: no window
+  is raised, nothing scrolls, and your cursor does not move. **The body
+  of a card is never touched** - only tags, analytics, undertags and
+  cites can be updated this way, which is also all a companion app is
+  ever given: the quoted text of a card doesn't leave your document,
+  and nothing can rewrite it from outside.
+  existing permission for that app governs it - the same **Always
+  Allow / Deny** decision that already covers sending text and
+  jumping, listed and changeable under Settings → Plugins → External
+  apps. An app you never allowed still cannot touch a document, and
+  nothing changes at all if you don't use a companion app. Whether an
+  app offers this is its own choice; ebb, for one, keeps it behind a
+  setting that starts off.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed

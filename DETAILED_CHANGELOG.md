@@ -5,6 +5,101 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Added: `POST /replace` - edit push-back from a flowing app
+
+The bridge could hand an item out and steer the user back to it
+(`/jump`), but nothing could change it: a flowing app whose user
+edited a card they had received held the only corrected copy, and the
+document stayed wrong. New route in
+`apps/desktop/src/fast-paste-bridge.ts` (body `{ source, text }`),
+renderer side in new `src/editor/external-replace.ts`,
+`src/editor/external-replace-host.ts`, and
+`src/editor/plugin-source-range.ts`, carried over the preload pair
+(`apps/desktop/src/preload.ts`) as `external:replace-text` /
+`external:replace-result`; installed from `src/editor/index.ts`, and
+`src/editor/plugin-jump.ts` is a refactor-only edit. Tests:
+`tests/desktop/fast-paste-bridge.test.ts` (route, caps, consent),
+plus new `tests/editor/plugin-source-range.test.ts`,
+`tests/editor/external-replace.test.ts`, and
+`tests/editor/external-replace-host.test.ts`.
+
+Main broadcasts to every doc window; the window holding the token's
+`docId` answers, the rest answer `not-mine`, and `not-mine` never
+reaches the wire - an all-`not-mine` outcome IS `doc-not-open`, which
+is the answer the caller can act on. The route is additive, so
+`/ping`'s `schema` stays 2 (an older build answers 404 on the path,
+which is a serviceable probe) and the frozen §5 contract is extended
+rather than changed. Consent is the existing per-app decision: no new
+consent code, no second prompt, and a denied app can no more replace
+than it can insert.
+
+**The reply re-mints the token, and that is load-bearing.** The stored
+descriptor QUOTES the text it anchors on (`learn-anchor.ts`), so a
+successful replace invalidates the very token that named the target -
+`resolveDescriptor` then looks for an occurrence of a quote that no
+longer exists, and the context gate rejects any coincidental hit. Had
+the success body been a bare `{ ok: true }`, every integration would
+have landed exactly one edit per item and seen `not-found` for the
+rest of the session: a failure that appears on the SECOND edit, i.e.
+after shipping, and reads to the user as "the connection broke".
+`buildDescriptor` runs against the post-write document and the fresh
+token goes back in the 200 with a spec obligation on the caller to
+store it in place of the one it sent.
+
+**Resolution is shared with `/jump`, not duplicated.**
+`resolveSourceRange` and `inMirroredContent` now live in
+`plugin-source-range.ts` and both routes import them, so the
+heading-then-anchor ladder, the context gate, and the
+self-transclusion exclusion (a hit inside read-only mirrored text is a
+coincidence, not the source) cannot drift apart between "show me this
+passage" and "rewrite this passage". Two copies agreeing on the day
+they are written diverge the first time either is tuned, and
+divergence here does not mean a missed scroll - it means rewriting a
+sentence the caller did not name.
+
+**No CRDT-aware code, deliberately.** The write is one
+`view.dispatch` of one transaction. `LoroSyncPlugin` is an ordinary
+entry in the view's plugin list (`collab/collab-session.ts`
+`plugins()`), so it observes an externally originated transaction
+exactly as it observes a keystroke and mirrors it into the CRDT as one
+step batch. Nothing in the route knows whether a co-editing session
+exists, and one transaction per call also means one Cmd-Z undoes the
+whole write.
+
+**The route refuses to focus, raise, or scroll.** It is built to be
+called on every settled edit in the companion app, so `/jump`'s
+behavior - raise the window, scroll to the range, select it - would
+hand a keystroke in one app control of another app's viewport, which
+is the difference between push-back being useful and being unusable.
+The transaction carries no `scrollIntoView`, no selection change, and
+no stored marks; main never calls `show`, `focus`, or `restore` on the
+route's path; and a test pins that silence so a later convenience
+cannot quietly add it back.
+
+**Card bodies are refused (`body-text`).** The accepted set is a
+whitelist in `external-replace.ts` of exactly what `/extract` emits -
+`pocket`, `hat`, `block`, `tag`, `analytic`, `undertag`,
+`cite_paragraph` - checked on the parent of the resolved range's
+`from`, ahead of building the transaction. `card_body` and doc-level
+`paragraph` are absent, and a schema addition is refused until someone
+decides it may travel. The symmetry with `/extract` is the argument:
+card bodies never leave the document (`plugin-extract.ts`, "spec rule,
+no override"), so no honest caller can hold a token naming one. A
+token that resolves to body text got there by anchor drift, and
+applying it would rewrite quoted evidence - the one class of text in
+the document whose value is that it is verbatim. That is a corrupted
+card rather than a stale one, and it would be invisible: no window is
+raised and nothing scrolls, so the user would not see it happen.
+`/jump` is untouched and still steers into card bodies; the shared
+`resolveSourceRange` stays kind-agnostic, because the restriction is
+about what may be WRITTEN, not about which textblock a token names.
+`broadcastReplace` ranks `body-text` above `not-found`: a window that
+holds the doc and refuses the target has answered, while another
+window's `not-found` is the absence of an answer. 200 with
+`ok: false`, and `docTitle` rides along as it does for `not-found`.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

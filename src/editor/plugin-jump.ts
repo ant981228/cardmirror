@@ -4,10 +4,10 @@
  * Resolution order per spec 4.3: heading UUID, then text anchor.
  */
 import type { EditorView } from 'prosemirror-view';
-import type { Node as PMNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { collectHeadings } from './headings.js';
 import { resolveDescriptor } from './learn-anchor.js';
+import { inMirroredContent } from './plugin-source-range.js';
 import { parseSourceToken, type SourcePayload } from './plugin-source-token.js';
 import { scrollToHeadingId } from './precise-scroll.js';
 import type { JumpResult } from './plugin-api.js';
@@ -30,18 +30,6 @@ export function resolveJumpInView(view: EditorView, payload: SourcePayload): boo
     // the real source. Treat it as unresolved and fall through to not-found.
     if (r && !inMirroredContent(doc, r.from)) {
       select(view, r.from);
-      return true;
-    }
-  }
-  return false;
-}
-
-/** True when `pos` sits inside a `self_ref` or `transclusion_ref` mirror
- *  subtree. */
-function inMirroredContent(doc: PMNode, pos: number): boolean {
-  const $pos = doc.resolve(pos);
-  for (let d = $pos.depth; d > 0; d--) {
-    if ($pos.node(d).type.name === 'self_ref' || $pos.node(d).type.name === 'transclusion_ref') {
       return true;
     }
   }

@@ -1012,6 +1012,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('external:jump-result', result);
   },
 
+  /** Edit push-back (`POST /replace`) - receive an `external:replace-text`
+   *  request from the main-process HTTP bridge and send the ack back via
+   *  `external:replace-result`. Same shape as the jump pair above; the
+   *  ack carries a freshly minted `source` token on success, because the
+   *  caller's stored token anchors on the text that was just replaced. */
+  onExternalReplaceRequest(handler: (req: {
+    requestId: string;
+    source: string;
+    text: string;
+  }) => void): () => void {
+    const listener = (
+      _evt: unknown,
+      req: { requestId: string; source: string; text: string },
+    ): void => handler(req);
+    ipcRenderer.on('external:replace-text', listener);
+    return () => ipcRenderer.removeListener('external:replace-text', listener);
+  },
+  sendExternalReplaceResult: (result: {
+    requestId: string;
+    ok: boolean;
+    error?: string;
+    docTitle?: string;
+    source?: string;
+  }): void => {
+    ipcRenderer.send('external:replace-result', result);
+  },
+
   /** Card-cutter local plugin (experimental). `pick` opens the native
    *  file dialog and returns the chosen path. `load` asks main for the
    *  engine bundle's source (from the given path, the CARDCUTTER_ENGINE

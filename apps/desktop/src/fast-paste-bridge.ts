@@ -27,6 +27,11 @@
  *     client never hangs and can fall back to its keystroke path).
  *   - `POST /jump`   → broadcast to doc windows; the token-holding
  *     window scrolls/selects and is focused.
+ *   - `POST /replace` → broadcast to doc windows; the token-holding
+ *     window rewrites that token's own text in place and mints a fresh
+ *     token. Focuses, shows and scrolls NOTHING: it fires on every
+ *     settled edit in the sending app, so activating a window here
+ *     would fight the reader for their own screen.
  *
  * Identity & consent: every route EXCEPT /ping requires an
  * `X-App-Id` header and is governed by the user's per-app consent
@@ -91,6 +96,17 @@ interface JumpAck {
   error?: string;
 }
 
+interface ReplaceAck {
+  requestId: string;
+  ok: boolean;
+  error?: string;
+  docTitle?: string;
+  /** Freshly minted token for the rewritten range. Mandatory on ok:
+   *  the caller's stored token anchors the pre-edit text, so without a
+   *  re-mint exactly one edit per cell would ever land. */
+  source?: string;
+}
+
 let serverState: { server: http.Server; token: string; port: number } | null = null;
 
 const pendingAcks = new Map<string, {
@@ -100,6 +116,11 @@ const pendingAcks = new Map<string, {
 
 const pendingJumpAcks = new Map<string, {
   resolve: (ack: JumpAck) => void;
+  timer: NodeJS.Timeout;
+}>();
+
+const pendingReplaceAcks = new Map<string, {
+  resolve: (ack: ReplaceAck) => void;
   timer: NodeJS.Timeout;
 }>();
 
@@ -333,6 +354,15 @@ function onJumpAck(_evt: unknown, ack: JumpAck): void {
   pending.resolve(ack);
 }
 
+function onReplaceAck(_evt: unknown, ack: ReplaceAck): void {
+  if (!ack || typeof ack.requestId !== 'string') return;
+  const pending = pendingReplaceAcks.get(ack.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingReplaceAcks.delete(ack.requestId);
+  pending.resolve(ack);
+}
+
 // keep in sync with SOURCE_TOKEN_PREFIX in src/editor/plugin-source-token.ts
 // (this literal adds the dot separator; the source constant is the bare prefix)
 const SOURCE_TOKEN_PREFIX = 'cmsrc1.';
@@ -496,6 +526,19 @@ function docTitleFromToken(source: string): string | undefined {
   }
 }
 
+/** The windows a token broadcast may ask. Doc windows all install the
+ *  token listeners; the timer pop-out (timer.html,
+ *  main.ts:openTimerWindow) is the one window kind that doesn't, and
+ *  broadcasting to it would just burn the full ack timeout. Skip it by
+ *  URL - a future non-doc window kind that isn't added here costs only
+ *  that timeout (it can never mis-ack, so correctness doesn't depend on
+ *  this list being complete). */
+function tokenBroadcastWindows(): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter(
+    (w) => !w.isDestroyed() && !w.webContents.getURL().endsWith('timer.html'),
+  );
+}
+
 /** Ask each window in turn to resolve the token; the first ok wins and
  *  its window is focused. Exported for the host:plugin-jump IPC. */
 export async function broadcastJump(
@@ -507,17 +550,7 @@ export async function broadcastJump(
   if (!source.startsWith(SOURCE_TOKEN_PREFIX)) {
     return { ok: false, error: 'bad-request' };
   }
-  const wins = BrowserWindow.getAllWindows().filter(
-    (w) =>
-      !w.isDestroyed() &&
-      // Doc windows all install a jump listener; the timer pop-out
-      // (timer.html, main.ts:openTimerWindow) is the one window kind
-      // that doesn't, and broadcasting to it would just burn the full
-      // ack timeout. Skip it by URL — a future non-doc window kind that
-      // isn't added here costs only that timeout (it can never mis-ack,
-      // so correctness doesn't depend on this list being complete).
-      !w.webContents.getURL().endsWith('timer.html'),
-  );
+  const wins = tokenBroadcastWindows();
   const acks = await Promise.all(
     wins.map((win) => dispatchJumpTo(win, source).then((ack) => ({ win, ack }))),
   );
@@ -535,6 +568,84 @@ export async function broadcastJump(
   }
   if (acks.some((a) => a.ack.error === 'not-found')) {
     return { ok: false, error: 'not-found' };
+  }
+  const docTitle = docTitleFromToken(source);
+  return { ok: false, error: 'doc-not-open', ...(docTitle ? { docTitle } : {}) };
+}
+
+/** A replace carries one line of a card, never a document. The body cap
+ *  stops a runaway client from streaming megabytes into a route that can
+ *  only ever apply a single line; the text cap states the same bound on
+ *  the field the renderer actually applies. */
+const REPLACE_BODY_MAX_BYTES = 64 * 1024;
+const REPLACE_TEXT_MAX_CHARS = 8 * 1024;
+
+function dispatchReplaceTo(
+  win: BrowserWindow,
+  source: string,
+  text: string,
+): Promise<ReplaceAck> {
+  return new Promise((resolve) => {
+    if (win.isDestroyed()) {
+      resolve({ requestId: '', ok: false, error: 'not-mine' });
+      return;
+    }
+    const requestId = crypto.randomBytes(8).toString('hex');
+    const timer = setTimeout(() => {
+      pendingReplaceAcks.delete(requestId);
+      resolve({ requestId, ok: false, error: 'not-mine' });
+    }, RENDERER_ACK_TIMEOUT_MS);
+    pendingReplaceAcks.set(requestId, { resolve, timer });
+    try {
+      win.webContents.send('external:replace-text', { requestId, source, text });
+    } catch {
+      // Window torn down between the isDestroyed() check and send
+      // (render process gone). Answer as a non-holder so the route
+      // never waits on an ack that can no longer arrive.
+      clearTimeout(timer);
+      pendingReplaceAcks.delete(requestId);
+      resolve({ requestId, ok: false, error: 'not-mine' });
+    }
+  });
+}
+
+/** Ask each window in turn to rewrite the token's own text; the first ok
+ *  wins and carries back the fresh token its renderer minted.
+ *
+ *  Unlike broadcastJump, the winning window is deliberately NOT
+ *  restored, shown or focused, and nothing scrolls. ebb calls this on
+ *  every settled edit, so raising a window here would yank the reader's
+ *  screen away mid-sentence; that silence is the whole reason /replace
+ *  exists instead of a /jump + /insert composition. */
+async function broadcastReplace(
+  source: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string; docTitle?: string; source?: string }> {
+  const acks = await Promise.all(
+    tokenBroadcastWindows().map((win) => dispatchReplaceTo(win, source, text)),
+  );
+  const winner = acks.find((a) => a.ok);
+  if (winner) {
+    if (typeof winner.source === 'string' && winner.source) {
+      return { ok: true, source: winner.source };
+    }
+    // An ok without a fresh token would leave the caller holding a
+    // token whose anchor quotes text that no longer exists: the next
+    // edit to that cell could never resolve. A hard error beats a cell
+    // that silently stops accepting edits.
+    return { ok: false, error: 'internal' };
+  }
+  // Precedence: a real complaint from any window beats the absence of
+  // an answer. `not-mine` is per-window bookkeeping (this window does
+  // not hold the token's doc) and never reaches the wire.
+  // `body-text` sits ahead of `not-found`: a window that holds the doc
+  // and refuses the target is a definite answer about that target, while
+  // another window's `not-found` is only the absence of one.
+  for (const code of ['bad-request', 'doc-readonly', 'body-text', 'not-found'] as const) {
+    const hit = acks.find((a) => a.error === code);
+    if (hit) {
+      return { ok: false, error: code, ...(hit.docTitle ? { docTitle: hit.docTitle } : {}) };
+    }
   }
   const docTitle = docTitleFromToken(source);
   return { ok: false, error: 'doc-not-open', ...(docTitle ? { docTitle } : {}) };
@@ -776,6 +887,105 @@ async function handleRequest(
     return;
   }
 
+  if (req.method === 'POST' && url === '/replace') {
+    let bodyText: string;
+    try {
+      bodyText = await readRequestBody(req, REPLACE_BODY_MAX_BYTES);
+    } catch {
+      jsonResponse(res, 400, { ok: false, error: 'bad-request' });
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      jsonResponse(res, 400, { ok: false, error: 'bad-request' });
+      return;
+    }
+    // Optional-chained off a nullable cast so a body of `null` or a bare
+    // scalar (both valid JSON) reads as absent fields instead of
+    // throwing out of the route and hanging the client on the socket.
+    const payload = parsed as { source?: unknown; text?: unknown } | null;
+    const source = payload?.source;
+    const text = payload?.text;
+    if (
+      typeof source !== 'string' ||
+      // A token that isn't ours can never match a window; refuse it here
+      // rather than broadcasting and echoing a forged docTitle back.
+      !source.startsWith(SOURCE_TOKEN_PREFIX) ||
+      typeof text !== 'string' ||
+      text.trim().length === 0 ||
+      text.length > REPLACE_TEXT_MAX_CHARS ||
+      // One line only: the token names a single line of a cell, and a
+      // newline would silently split the anchored range in two. Callers
+      // that want structure use /insert.
+      /[\r\n]/.test(text)
+    ) {
+      jsonResponse(res, 400, { ok: false, error: 'bad-request' });
+      return;
+    }
+    // Same per-app decision as insert and jump: rewriting the user's
+    // words is at least as consequential as adding to them.
+    const appId = requestAppId(req);
+    const disposition = consentGate.check(appId);
+    if (disposition === 'unidentified') {
+      notifyUnidentifiedCaller();
+      jsonResponse(res, 200, {
+        ok: false,
+        error: 'unidentified',
+        message:
+          'This CardMirror requires apps to identify themselves with an X-App-Id header. Update the sending app.',
+      });
+      return;
+    }
+    if (disposition === 'off') {
+      jsonResponse(res, 200, { ok: false, error: 'inserts-disabled' });
+      return;
+    }
+    if (disposition === 'deny') {
+      jsonResponse(res, 200, { ok: false, error: 'not-allowed' });
+      return;
+    }
+    if (disposition === 'ask') {
+      // Queue behind the prompt as /insert does: Allow applies the held
+      // replace. `ok:true` reports acceptance for delivery, not that the
+      // doc changed - there is no fresh token yet, so the caller keeps
+      // the one it has and the edit lands (or is discarded) unattended.
+      const queued = consentGate.enqueue(appId!, () => {
+        void broadcastReplace(source, text);
+      });
+      if (queued) {
+        jsonResponse(res, 200, { ok: true, pending: 'consent' });
+      } else {
+        jsonResponse(res, 200, { ok: false, error: 'not-allowed' });
+      }
+      return;
+    }
+    let result: { ok: boolean; error?: string; docTitle?: string; source?: string };
+    try {
+      result = await broadcastReplace(source, text);
+    } catch {
+      // Never let an unexpected broadcast failure hang the client.
+      jsonResponse(res, 500, { ok: false, error: 'internal' });
+      return;
+    }
+    if (result.ok) {
+      if (appId) noteSeen(appId);
+      jsonResponse(res, 200, { ok: true, source: result.source });
+      return;
+    }
+    if (result.error === 'bad-request') {
+      jsonResponse(res, 400, { ok: false, error: 'bad-request' });
+      return;
+    }
+    jsonResponse(res, 200, {
+      ok: false,
+      error: result.error,
+      ...(result.docTitle ? { docTitle: result.docTitle } : {}),
+    });
+    return;
+  }
+
   jsonResponse(res, 404, { ok: false, error: 'bad-request' });
 }
 
@@ -803,6 +1013,7 @@ export async function startFastPasteBridge(): Promise<void> {
   if (!ipcSubscribed) {
     ipcMain.on('external:insert-result', onRendererAck);
     ipcMain.on('external:jump-result', onJumpAck);
+    ipcMain.on('external:replace-result', onReplaceAck);
     ipcMain.on('external:consent-prompt-result', onConsentPromptAck);
     ipcMain.on('host:sync-external-consent', onConsentSync);
     ipcSubscribed = true;
@@ -860,6 +1071,11 @@ export async function stopFastPasteBridge(): Promise<void> {
     pending.resolve({ requestId: '', ok: false, error: 'not-mine' });
   }
   pendingJumpAcks.clear();
+  for (const pending of pendingReplaceAcks.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({ requestId: '', ok: false, error: 'not-mine' });
+  }
+  pendingReplaceAcks.clear();
   // Drop the IPC subscription so a subsequent `start` re-installs
   // it cleanly. Production only ever calls `start` once per app
   // lifetime, but tests cycle the bridge across describe/it blocks
@@ -871,6 +1087,7 @@ export async function stopFastPasteBridge(): Promise<void> {
     };
     im.removeListener?.('external:insert-result', onRendererAck);
     im.removeListener?.('external:jump-result', onJumpAck);
+    im.removeListener?.('external:replace-result', onReplaceAck);
     im.removeListener?.('external:consent-prompt-result', onConsentPromptAck);
     im.removeListener?.('host:sync-external-consent', onConsentSync);
     ipcSubscribed = false;

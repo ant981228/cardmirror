@@ -90,6 +90,25 @@ function fireRendererAck(ack: any): void {
   for (const l of listeners) l(null, ack);
 }
 
+/** The renderer -> main half of the replace contract, exactly as
+ *  external-replace-host.ts sends it. */
+function fireReplaceAck(ack: {
+  requestId: string;
+  ok: boolean;
+  error?: string;
+  docTitle?: string;
+  source?: string;
+}): void {
+  const listeners = ipcListeners.get('external:replace-result') ?? [];
+  for (const l of listeners) l(null, ack);
+}
+
+/** A cmsrc1 token shaped like the renderer's; docTitle is the only
+ *  field main decodes (for the doc-not-open message). */
+function sourceToken(docTitle: string, docId = 'd'): string {
+  return 'cmsrc1.' + Buffer.from(JSON.stringify({ docId, docTitle })).toString('base64url');
+}
+
 /** Push a consent mirror to the gate over the real sync IPC. */
 function fireConsentSync(state: { policy: string; apps: Record<string, string> }): void {
   const listeners = ipcListeners.get('host:sync-external-consent') ?? [];
@@ -485,6 +504,205 @@ describe('fast-paste-bridge', () => {
       expect(win.__restored).toBe(true);
     });
   });
+
+  // These tests use real waits, not fake timers: the request crosses a
+  // live loopback socket into a real http.Server, so the clock the
+  // route waits on is the OS clock. The 20ms waits let the in-flight
+  // request reach the stub renderer before the ack is fired (the
+  // pattern the /insert and /jump tests above already use), and the
+  // no-ack test deliberately runs out the real 1200ms ack timeout.
+  describe('POST /replace', () => {
+    const token = sourceToken('AT Cap K.docx');
+
+    const post = (body: unknown, port: number, fdpToken: string) =>
+      fetchJson({ method: 'POST', path: '/replace', port, token: fdpToken, body });
+
+    const replaceSent = () => sentToRenderer.filter((s) => s.channel === 'external:replace-text');
+
+    it('rejects a missing token', async () => {
+      const ep = bridge.getRunningEndpoint()!;
+      const r = await fetchJson({
+        method: 'POST', path: '/replace', port: ep.port,
+        body: { source: token, text: 'hi' },
+      });
+      expect(r.status).toBe(403);
+      expect(r.json).toEqual({ ok: false, error: 'unauthorized' });
+    });
+
+    it('rewrites the token and answers with the fresh token the renderer minted', async () => {
+      const win = makeMockWindow();
+      setMockAllWindows([win]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'The plan causes poverty.' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      const sent = replaceSent();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.payload).toMatchObject({
+        source: token,
+        text: 'The plan causes poverty.',
+      });
+      expect(typeof sent[0]!.payload.requestId).toBe('string');
+      // A real re-mint differs from the token that was sent: its anchor
+      // quote names the NEW text. Distinct on purpose, so this can't
+      // pass on a route that merely echoes what it was given.
+      const fresh =
+        'cmsrc1.' +
+        Buffer.from(
+          JSON.stringify({ docId: 'd', docTitle: 'AT Cap K.docx', quote: 'The plan causes poverty.' }),
+        ).toString('base64url');
+      expect(fresh).not.toBe(token);
+      fireReplaceAck({ requestId: sent[0]!.payload.requestId, ok: true, source: fresh });
+      const r = await replaced;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: true, source: fresh });
+    });
+
+    it('never shows, focuses or restores the window that took the edit', async () => {
+      // The reason /replace exists instead of a /jump + /insert pair:
+      // ebb calls it on every settled keystroke, so a window that comes
+      // forward here would fight the reader for their own screen. A
+      // minimized window stays minimized.
+      const win = makeMockWindow({ minimized: true });
+      setMockAllWindows([win]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      fireReplaceAck({
+        requestId: replaceSent()[0]!.payload.requestId,
+        ok: true,
+        source: sourceToken('AT Cap K.docx'),
+      });
+      expect((await replaced).json.ok).toBe(true);
+      expect(win.__shown).toBe(false);
+      expect(win.__focused).toBe(false);
+      expect(win.__restored).toBe(false);
+    });
+
+    it.each([
+      ['a null body', null],
+      ['a missing source', { text: 'hi' }],
+      ['a source without the cmsrc1 prefix', { source: 'x.abc', text: 'hi' }],
+      ['a non-string text', { source: sourceToken('d.docx'), text: 42 }],
+      ['empty text', { source: sourceToken('d.docx'), text: '' }],
+      ['whitespace-only text', { source: sourceToken('d.docx'), text: '  \t ' }],
+      ['text with a newline', { source: sourceToken('d.docx'), text: 'one\ntwo' }],
+      ['text with a carriage return', { source: sourceToken('d.docx'), text: 'one\rtwo' }],
+      ['text over the cap', { source: sourceToken('d.docx'), text: 'x'.repeat(8 * 1024 + 1) }],
+    ])('400s %s and dispatches nothing', async (_label, body) => {
+      const ep = bridge.getRunningEndpoint()!;
+      const r = await post(body, ep.port, ep.token);
+      expect(r.status).toBe(400);
+      expect(r.json).toEqual({ ok: false, error: 'bad-request' });
+      expect(replaceSent()).toHaveLength(0);
+    });
+
+    it('400s a malformed body', async () => {
+      const ep = bridge.getRunningEndpoint()!;
+      const res = await fetch(`http://127.0.0.1:${ep.port}/replace`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-fdp-token': ep.token,
+          'x-app-id': 'testapp',
+          connection: 'close',
+        },
+        body: '{ broken',
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'bad-request' });
+    });
+
+    it('all not-mine → doc-not-open with the docTitle from the token', async () => {
+      setMockAllWindows([makeMockWindow(), makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      for (const s of replaceSent()) {
+        fireReplaceAck({ requestId: s.payload.requestId, ok: false, error: 'not-mine' });
+      }
+      const r = await replaced;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: false, error: 'doc-not-open', docTitle: 'AT Cap K.docx' });
+    });
+
+    it.each(['not-found', 'doc-readonly', 'body-text'])('passes a %s ack through', async (error) => {
+      setMockAllWindows([makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      fireReplaceAck({ requestId: replaceSent()[0]!.payload.requestId, ok: false, error });
+      const r = await replaced;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: false, error });
+    });
+
+    it('a complaining window beats a silent one', async () => {
+      // One window holds the doc and reports it read-only; the other
+      // simply isn't the holder. The real complaint must win rather
+      // than degrading to doc-not-open.
+      setMockAllWindows([makeMockWindow(), makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      const sent = replaceSent();
+      fireReplaceAck({ requestId: sent[0]!.payload.requestId, ok: false, error: 'not-mine' });
+      fireReplaceAck({ requestId: sent[1]!.payload.requestId, ok: false, error: 'doc-readonly' });
+      expect((await replaced).json).toEqual({ ok: false, error: 'doc-readonly' });
+    });
+
+    it('body-text beats another window not-found', async () => {
+      // A window that holds the doc and refuses the target has answered
+      // about that target; another window's not-found is the absence of
+      // an answer, and a caller told "not-found" would re-anchor and try
+      // again against card body text forever.
+      setMockAllWindows([makeMockWindow(), makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      const sent = replaceSent();
+      fireReplaceAck({ requestId: sent[0]!.payload.requestId, ok: false, error: 'not-found' });
+      fireReplaceAck({ requestId: sent[1]!.payload.requestId, ok: false, error: 'body-text' });
+      expect((await replaced).json).toEqual({ ok: false, error: 'body-text' });
+    });
+
+    it('an ok ack with no fresh token is internal, never a bare success', async () => {
+      // Without a re-mint the caller's stored token still anchors the
+      // pre-edit text, so exactly one edit per cell would ever land.
+      setMockAllWindows([makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      fireReplaceAck({ requestId: replaceSent()[0]!.payload.requestId, ok: true });
+      const r = await replaced;
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: false, error: 'internal' });
+    });
+
+    it('answers doc-not-open when no window ever acks', async () => {
+      // The ack timeout, not the socket, ends this request: a silent
+      // renderer must never hang the sending app's edit loop.
+      setMockAllWindows([makeMockWindow()]);
+      const ep = bridge.getRunningEndpoint()!;
+      const r = await post({ source: sourceToken('Silent.docx'), text: 'edited' }, ep.port, ep.token);
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: false, error: 'doc-not-open', docTitle: 'Silent.docx' });
+    });
+
+    it('skips the timer pop-out, which has no replace listener', async () => {
+      const docWin = makeMockWindow();
+      setMockAllWindows([docWin, makeMockWindow({ url: 'http://localhost/timer.html' })]);
+      const ep = bridge.getRunningEndpoint()!;
+      const replaced = post({ source: token, text: 'edited' }, ep.port, ep.token);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(replaceSent()).toHaveLength(1);
+      fireReplaceAck({
+        requestId: replaceSent()[0]!.payload.requestId,
+        ok: true,
+        source: sourceToken('AT Cap K.docx'),
+      });
+      expect((await replaced).json.ok).toBe(true);
+    });
+  });
 });
 
 describe('external-app consent (identity gate)', () => {
@@ -659,6 +877,57 @@ describe('external-app consent (identity gate)', () => {
       body: { source: 'cmsrc1.abc' },
     });
     expect(r.json).toEqual({ ok: true, jumped: false, pending: 'consent' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const prompt = sent('external:consent-prompt')[0]!;
+    fireConsentPromptResult({ requestId: prompt.payload.requestId, outcome: 'dismissed' });
+  });
+
+  it('unidentified /replace is turned away with the same guidance as /insert', async () => {
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/replace', port: ep.port, token: ep.token, appId: null,
+      body: { source: sourceToken('d.docx'), text: 'edited' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.ok).toBe(false);
+    expect(r.json.error).toBe('unidentified');
+    expect(r.json.message).toContain('X-App-Id');
+    expect(sent('external:replace-text')).toHaveLength(0);
+  });
+
+  it('master toggle off → inserts-disabled on /replace too', async () => {
+    fireConsentSync({ policy: 'off', apps: { testapp: 'allow' } });
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/replace', port: ep.port, token: ep.token,
+      body: { source: sourceToken('d.docx'), text: 'edited' },
+    });
+    expect(r.json).toEqual({ ok: false, error: 'inserts-disabled' });
+    expect(sent('external:replace-text')).toHaveLength(0);
+  });
+
+  it('a denied app cannot rewrite text either', async () => {
+    fireConsentSync({ policy: 'ask', apps: { testapp: 'deny' } });
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/replace', port: ep.port, token: ep.token,
+      body: { source: sourceToken('d.docx'), text: 'edited' },
+    });
+    expect(r.json).toEqual({ ok: false, error: 'not-allowed' });
+    expect(sent('external:replace-text')).toHaveLength(0);
+  });
+
+  it('pending consent on /replace answers ok with pending and no token', async () => {
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/replace', port: ep.port, token: ep.token, appId: 'newapp',
+      body: { source: sourceToken('d.docx'), text: 'edited' },
+    });
+    // `pending` is neither success nor retry: nothing was rewritten, so
+    // there is no fresh token for the caller to write back.
+    expect(r.json).toEqual({ ok: true, pending: 'consent' });
+    expect(r.json.source).toBeUndefined();
+    expect(sent('external:replace-text')).toHaveLength(0);
     await new Promise((resolve) => setTimeout(resolve, 20));
     const prompt = sent('external:consent-prompt')[0]!;
     fireConsentPromptResult({ requestId: prompt.payload.requestId, outcome: 'dismissed' });

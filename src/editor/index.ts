@@ -73,6 +73,7 @@ import { installExternalConsent } from './external-consent-ui.js';
 import { maybeSnapshotVersion } from './version-history.js';
 import { awaitWithSaveWatchdog, warnIfSlow } from './save-watchdog.js';
 import { installExternalInsertHost } from './external-insert-host.js';
+import { installExternalReplaceHost } from './external-replace-host.js';
 import { installPluginRegistry } from './plugin-registry.js';
 import { createPluginApi } from './plugin-api.js';
 import { installPluginJumpHost } from './plugin-jump-host.js';
@@ -10136,6 +10137,13 @@ installExternalInsertHost({
 // answer `external:jump`, regardless of the `pluginsEnabled` switch.
 // No-ops when the preload bridge is absent (web / old shells).
 installPluginJumpHost({
+  findViewForDocId: (docId) => findViewForDocId(docId),
+});
+// Inbound /replace handler - the same per-window token resolution the
+// jump host does, but silent: it mutates the addressed range and never
+// focuses, raises or scrolls anything (a flowing app calls it on every
+// settled keystroke). No-ops when the preload bridge is absent.
+installExternalReplaceHost({
   findViewForDocId: (docId) => findViewForDocId(docId),
 });
 // External-app consent: mirror the toggle + per-app decisions to main
