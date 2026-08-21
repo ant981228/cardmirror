@@ -284,6 +284,43 @@ describe('fast-paste-bridge', () => {
     await inserted;
   });
 
+  it('POST /insert relays the renderer\'s provenance tokens in order', async () => {
+    const ep = bridge.getRunningEndpoint()!;
+    const inserted = fetchJson({
+      method: 'POST', path: '/insert', port: ep.port, token: ep.token,
+      body: { text: 'one\ntwo', role: 'analytic', newParagraph: true },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const sources = [sourceToken('mydoc.cmir', 'd1'), sourceToken('mydoc.cmir', 'd2')];
+    fireRendererAck({
+      requestId: sentToRenderer[0]!.payload.requestId,
+      ok: true,
+      docTitle: 'mydoc.cmir',
+      sources,
+    });
+    const r = await inserted;
+    // Untouched and in order: main can't tell which token names which
+    // line, so it relays the list or nothing.
+    expect(r.json).toEqual({ ok: true, inserted: true, docTitle: 'mydoc.cmir', sources });
+  });
+
+  it('POST /insert drops a provenance list that is not ours', async () => {
+    const ep = bridge.getRunningEndpoint()!;
+    const inserted = fetchJson({
+      method: 'POST', path: '/insert', port: ep.port, token: ep.token,
+      body: { text: 'one', role: 'analytic', newParagraph: true },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    fireRendererAck({
+      requestId: sentToRenderer[0]!.payload.requestId,
+      ok: true,
+      sources: ['not-a-cardmirror-token'],
+    });
+    // The text landed, so this is still a success - just one the caller
+    // gets no handle from.
+    expect((await inserted).json).toEqual({ ok: true, inserted: true });
+  });
+
   it('POST /insert: no-target-doc ack → 200 ok:false', async () => {
     const ep = bridge.getRunningEndpoint()!;
     const inserted = fetchJson({
@@ -1014,6 +1051,27 @@ describe('external-app consent (identity gate)', () => {
     expect(direct).toHaveLength(2);
     fireRendererAck({ requestId: direct[1]!.payload.requestId, ok: true });
     expect((await again).json.ok).toBe(true);
+  });
+
+  it('a queued heading insert answers pending with no provenance', async () => {
+    // Nothing has happened yet, so there is nothing to name — and the
+    // tokens the renderer mints when the user's Allow replays this have
+    // no reply left to travel on. The caller learns it holds no handle.
+    const ep = bridge.getRunningEndpoint()!;
+    const r = await fetchJson({
+      method: 'POST', path: '/insert', port: ep.port, token: ep.token, appId: 'newapp',
+      body: { text: 'held analytic', role: 'analytic', newParagraph: true },
+    });
+    expect(r.json).toEqual({ ok: true, inserted: false, pending: 'consent' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const prompt = sent('external:consent-prompt')[0]!;
+    fireConsentPromptResult({ requestId: prompt.payload.requestId, outcome: 'allow-once' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The replay does reach the renderer; its ack (tokens and all) has
+    // nowhere to go, and the caller was never told otherwise.
+    const inserts = sent('external:insert-text');
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]!.payload.role).toBe('analytic');
   });
 
   it('Deny while pending discards the held insert and sticks', async () => {

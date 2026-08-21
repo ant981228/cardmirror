@@ -88,6 +88,13 @@ interface RendererAck {
   ok: boolean;
   error?: string;
   docTitle?: string;
+  /** Minted tokens for the textblocks the insert created, in document
+   *  order - one per line of `text`. OPTIONAL, unlike the replace /
+   *  insert-after acks: only a heading role produces addressable
+   *  blocks, and the renderer drops the field wholesale rather than
+   *  hand back a list it couldn't verify. Absent is never an error
+   *  here; the text landed either way. */
+  sources?: string[];
 }
 
 interface JumpAck {
@@ -907,7 +914,18 @@ async function handleRequest(
         (targetUid
           ? docDirectory?.listDocs().find((d) => d.uid === targetUid)?.filename ?? undefined
           : undefined);
-      jsonResponse(res, 200, { ok: true, inserted: true, docTitle });
+      // Provenance for the blocks that landed, relayed untouched. Every
+      // entry must be one of our tokens: a malformed list is dropped
+      // whole, the same all-or-nothing the renderer applies, since a
+      // caller can't tell which entry of a short list belongs to which
+      // line. Absent stays absent - `sources` is a handle, not a receipt.
+      const sources =
+        Array.isArray(ack.sources) &&
+        ack.sources.length > 0 &&
+        ack.sources.every((s) => typeof s === 'string' && s.startsWith(SOURCE_TOKEN_PREFIX))
+          ? ack.sources
+          : undefined;
+      jsonResponse(res, 200, { ok: true, inserted: true, docTitle, sources });
       return;
     }
     if (ack.error === 'no-target-doc' || ack.error === 'doc-readonly') {

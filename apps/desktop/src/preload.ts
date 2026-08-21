@@ -918,6 +918,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ok: boolean;
     error?: string;
     docTitle?: string;
+    /** One provenance token per textblock the insert created, in
+     *  document order. Heading roles only: a body line lands as card
+     *  body text, which the write-back routes refuse, so there is
+     *  nothing to hand back for it. */
+    sources?: string[];
   }): void => {
     ipcRenderer.send('external:insert-result', result);
   },

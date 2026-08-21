@@ -43,6 +43,20 @@ see `DETAILED_CHANGELOG.md`.
   in a document, and nothing changes at all if you don't use a
   companion app.
 
+- **A companion app can now keep track of the lines it sends into your
+  document.** Sending a tag, an analytic or a pocket/hat/block from
+  another app already puts it in your outline; the app is now told where
+  each line went, so from then on it can update that line, add under it,
+  or take you to it - the same way it can for a passage it received from
+  you. Nothing about the insert itself changes: the text lands in the
+  same place, one line per line you sent, and this only concerns what
+  the sending app is told afterwards. Lines that arrive as card body
+  text - the everyday "send this passage" case - are not tracked, since
+  the body of a card is never editable from outside anyway. Governed by
+  the permission you already gave that app under Settings → Plugins →
+  External apps, and nothing changes at all if you don't use a companion
+  app.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed

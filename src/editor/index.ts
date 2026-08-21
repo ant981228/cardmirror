@@ -10132,6 +10132,20 @@ installExternalInsertHost({
   // registry resolves a uid to its live view in this window, three-
   // pane aware, focused or not.
   resolveViewForUid: (uid) => getSpeechDocResolver().viewForUid(uid),
+  // The doc a heading-role insert is minting provenance tokens against.
+  // Focused path mints the docId if the doc has never been saved (same
+  // step `/extract` takes on its first emit) — the caller's token has to
+  // survive the save. A targeted pane's id is read, not minted: stamping
+  // an id onto a doc the user isn't looking at belongs to that pane's own
+  // first save, so an unsaved one simply reports no identity and the
+  // insert answers without `sources`.
+  getDocIdentity: (uid) => {
+    if (uid) {
+      const docId = resolveDocPersistentId(uid);
+      return docId ? { docId, docTitle: resolveDocFilename(uid) || 'Untitled' } : null;
+    }
+    return { docId: ensureActiveDocId(), docTitle: activeFile().filename || 'Untitled' };
+  },
 });
 // Inbound /jump handler — core-owned surface (spec 6): the fast-paste
 // bridge advertises schema 2 unconditionally, so a window must always

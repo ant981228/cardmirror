@@ -602,7 +602,8 @@ since 0.1.0-beta.23 it also requires `X-App-Id` and consent (see
 above). The full wire contract is in `cardmirror-integration-spec.md`
 in this folder. In short: the body is
 `{ "text": "...", "role": "...", "newParagraph": true, "omitted": false }`,
-and the response is `{ "ok": true, "inserted": true, "docTitle": "..." }`
+and the response is
+`{ "ok": true, "inserted": true, "docTitle": "...", "sources": ["cmsrc1..."] }`
 or `{ "ok": false, "error": "no-target-doc" | "doc-readonly" | "bad-request" }`
 — plus the consent-layer responses above.
 
@@ -642,6 +643,45 @@ own structure and marks.
 may include `"citeTokens": ["Smith", "24"]` — verbatim substrings of
 the first line styled with the cite mark on arrival. Ignored by older
 CardMirrors and when `html` is used.
+
+**Provenance: `sources`.** On success a heading-role insert also
+carries `sources` - one `cmsrc1` token per line of `text`, in document
+order, minted for the heading that line became. They are the same
+tokens `/extract` emits, so each one is a full handle to the line you
+just dictated: `/replace` rewrites it, `/insert-after` adds under it,
+`/jump` steers the user to it. Store them the way you store extracted
+items; nothing else in the reply identifies what you wrote.
+
+`sources` is ABSENT, not empty, in every other case:
+
+- **A body-ish role** - `card`, `body`, `cite`, or `inline` /
+  `newParagraph: false` with one of them. Those land as card body text
+  or a loose paragraph, and `/replace` and `/insert-after` refuse both
+  as `body-text` - so a token there would be a handle to a line you
+  could never use. The route does not link this kind of insert at all.
+  (A heading role still reports its headings under
+  `newParagraph: false`: the role outranks the flag, so what landed is
+  a heading either way.)
+- **A queued insert** (`{ "ok": true, "inserted": false, "pending":
+  "consent" }`). Nothing has landed yet, and the tokens minted when the
+  user's Allow replays it have no reply left to travel on.
+- **An older CardMirror**, which never sent the field.
+- **A doc-targeted heading insert into a document that has never been
+  saved.** A token names a document, and an unsaved one has no
+  persistent id to name yet. The focus-follow path mints that id on the
+  spot; an addressed background pane does not, because stamping an
+  identity onto a document the user is not looking at belongs to that
+  document's own first save.
+- **A heading insert CardMirror could not verify.** Every token is
+  checked against the document that actually landed; if one heading is
+  not where it was expected, the whole field is dropped rather than
+  shipped short or naming the wrong line. An absent `sources` is
+  provenance lost, never an insert that failed: `ok` and `inserted`
+  still report what happened to the text.
+
+So test for the field, never for its length, and treat "no `sources`"
+as "this line is not linked" - not as an error and not as a reason to
+re-send.
 
 **Targeting.** Two modes, the caller's choice per request:
 

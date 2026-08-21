@@ -222,6 +222,89 @@ That is the honest cost of queueing rather than dropping the request,
 and the reference docs state the consequence - `pending` is not a
 success, and re-sending after an allow adds the line twice.
 
+### Added: `POST /insert` reports where its text landed (`sources`)
+
+`/extract` hands an item out with a token, `/replace` re-mints one,
+`/insert-after` mints one for the line it adds - and `/insert`, the
+oldest write route, answered `{ ok, inserted, docTitle }` and named
+nothing. So a flowing app that pushed a tag or an analytic into a
+document had written text it could not address: no `/replace` on it, no
+`/insert-after` under it, no `/jump` to it, and no way to show its user
+that the line is linked. The one route that CREATES outline structure
+was the one route whose result was unaddressable. The success reply now
+carries `sources`: one `cmsrc1` token per inserted textblock, in
+document order, as many entries as `text` had lines.
+
+Purely additive: no field changes meaning, no error changes code,
+`/ping`'s `schema` stays 2, and a caller that ignores `sources` behaves
+exactly as before. `buildExternalInsertTransaction`
+(`src/editor/external-insert.ts`) now returns an `ExternalInsertPlan`
+(`{ tr, headings }`) rather than a bare `Transaction` - one way to build
+the transaction, not two - minting happens in
+`src/editor/external-insert-host.ts`, and the field rides the existing
+`external:insert-result` ack (`apps/desktop/src/preload.ts`,
+`apps/desktop/src/fast-paste-bridge.ts`). Tests:
+`tests/editor/external-insert.test.ts`,
+`tests/editor/external-insert-host.test.ts`,
+`tests/desktop/fast-paste-bridge.test.ts`.
+
+**Heading roles only, and the reason is what the other routes refuse.**
+`body` / `card` / `cite`, and inline mode (`newParagraph: false` outside
+a heading role, which outranks the flag), land as `card_body` or a
+doc-level `paragraph`, and both `/replace` and `/insert-after`
+refuse those as `body-text` (`EXTERNAL_WRITABLE_TYPES`) - quoted source
+text is the one thing in the document an outside app must never rewrite.
+A token there would be a handle to a line the caller can never use: it
+would resolve, look valid, and fail on first use. So the plan reports no
+headings for those paths and the field is ABSENT rather than empty - "we
+don't link this kind" and "this CardMirror doesn't mint tokens" read the
+same to a caller that tests for the field, which is the only test that
+works across versions.
+
+**Minted against the landed document, never the arithmetic.** The plan
+reports each heading's computed content start, and the host re-resolves
+every one against the doc the dispatch produced: the parent must be that
+heading type, `parentOffset` must be 0, and `textContent` must equal the
+line that was sent - the same verification `insertAfterTokenInView`
+does. One node per line is predictable arithmetic today, so this rail
+will not fire; it exists because the day `nearestValidInsertPos` or the
+slice fitting changes, a token minted over the wrong range would name a
+neighbour's line, and the caller's next `/replace` would rewrite text
+the user wrote. The failure has to land as lost provenance here, not as
+silent corruption three routes later.
+
+**All-or-nothing, and never fatal.** A single heading that doesn't
+verify drops the whole field, because a caller has no way to tell which
+entry of a short list belongs to which line. What it never does is fail
+the insert: the text is in the document, so the reply stays
+`ok: true, inserted: true` and simply carries no handle - a missing
+`sources` is a caller losing provenance, never a write that didn't
+happen. Main applies the same rule to the ack it relays (every entry
+must be a `cmsrc1` token, or the list is dropped), so the two halves
+cannot disagree about a partial list.
+
+**Identity comes from the host, because only the host knows which
+document took the insert.** A token names a `docId`, and the primitive
+is doc-blind, so `ExternalInsertHostOpts.getDocIdentity(uid?)` answers
+for the focused doc or for an addressed pane. The focused path mints a
+docId for a never-saved document the way `/extract` does on its first
+emit - without it the everyday "fresh file" case would silently lose
+provenance - and it is called only once a heading actually landed, so an
+insert with nothing to name never stamps an identity. A targeted
+background pane's id is READ, not minted: stamping an identity (and
+rekeying that doc's Learn annotations) onto a document the user is not
+looking at belongs to that document's own first save, so an unsaved
+addressed pane answers no `sources`. The heading id in each token is the
+`newHeadingId()` the primitive stamped, so tokens resolve by UUID and
+survive the line being retyped; the text anchor is the fallback, and is
+omitted for a blank line, where an empty quote would match anywhere.
+
+**A queued insert carries none.** Consent `ask` answers
+`{ ok: true, inserted: false, pending: "consent" }` before anything has
+happened, and the tokens the renderer mints when the user's Allow
+replays the insert have no reply left to travel on - the same honest
+cost `/insert-after` documents for its queued adds.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)
