@@ -192,9 +192,11 @@ export function insertAfterTokenInView(
     source: mintSourceToken({
       docId: payload.docId,
       docTitle: payload.docTitle,
-      // A fresh heading owns its own id; for an undertag or a cite the
-      // governing heading is still the one the anchor's token named.
-      headingId: plan.headingId ?? payload.headingId,
+      // A fresh heading names itself. An undertag or a cite names no
+      // heading; it inherits the anchor's scope, so its own anchor
+      // resolves inside the card it landed in.
+      headingId: plan.headingId,
+      scopeId: plan.headingId ?? payload.scopeId ?? payload.headingId,
       anchor: buildDescriptor(doc, plan.contentStart, plan.contentStart + text.length),
     }),
   };

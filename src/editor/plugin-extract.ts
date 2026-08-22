@@ -101,11 +101,14 @@ function collectItems(
     const type = node.type.name;
     let kind: ExtractedKind | null = null;
     let text = '';
+    /** The heading this item IS, as opposed to the one it lives under. */
+    let ownHeadingId: string | null = null;
     if (type in TYPE_TO_LEVEL) {
       kind = type as ExtractedKind;
       text = node.textContent;
       const id = node.attrs['id'];
       lastHeadingId = typeof id === 'string' && id ? id : lastHeadingId;
+      ownHeadingId = typeof id === 'string' && id ? id : null;
     } else if (type === 'undertag') {
       kind = 'undertag';
       text = node.textContent;
@@ -125,7 +128,11 @@ function collectItems(
       source: mintSourceToken({
         docId: ident.docId,
         docTitle: ident.docTitle,
-        headingId: lastHeadingId,
+        // An undertag or a cite names no heading: its governing heading is
+        // SCOPE for the anchor, and naming it as the target is what used to
+        // resolve those items to the tag above them.
+        headingId: ownHeadingId,
+        scopeId: lastHeadingId,
         anchor,
       }),
     });

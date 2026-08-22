@@ -84,7 +84,7 @@ describe('installExternalReplaceHost', () => {
       findViewForDocId: (docId) => (docId === 'd1' ? view : null),
     });
 
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r1', source: token, text: 'The plan causes poverty.' });
 
     expect(bridge.acks).toHaveLength(1);
@@ -109,7 +109,7 @@ describe('installExternalReplaceHost', () => {
       findViewForDocId: (docId) => (docId === 'd1' ? view : null),
     });
 
-    const token = mintSourceToken({ docId: 'other', docTitle: 'O', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'other', docTitle: 'O', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r2', source: token, text: 'nope' });
 
     expect(bridge.acks[0]).toEqual({ requestId: 'r2', ok: false, error: 'not-mine' });
@@ -125,7 +125,7 @@ describe('installExternalReplaceHost', () => {
     view.setProps({ editable: () => false });
     installExternalReplaceHost({ findViewForDocId: () => view });
 
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r3', source: token, text: 'locked out' });
 
     expect(bridge.acks[0]).toEqual({ requestId: 'r3', ok: false, error: 'doc-readonly' });
@@ -152,7 +152,7 @@ describe('installExternalReplaceHost', () => {
     const unsubscribe = installExternalReplaceHost({ findViewForDocId: () => view });
 
     unsubscribe();
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r5', source: token, text: 'after teardown' });
 
     expect(bridge.acks).toHaveLength(0);

@@ -408,6 +408,35 @@ current format starts with the `cmsrc1` prefix. The token is opaque:
   tokens. A future format change bumps the prefix, and old tokens stay
   valid.
 
+What a token survives, and what it does not:
+
+- **The line being rewritten in CardMirror.** A heading kind - pocket,
+  hat, block, tag, analytic - carries a stable id, so retyping the line
+  leaves the token resolving.
+- **A cut and paste can give the pasted heading a new id.** The token then
+  falls back to its text and the context around it, which a move
+  changes, so expect `not-found` after the user moves a line by
+  clipboard. A nav-pane drag moves the node whole and keeps the id.
+- **An undertag or a cite has no id**, so a token naming one resolves by
+  its text and the context around it, searched INSIDE the card (or
+  section) it was extracted from. Two cards worded identically therefore
+  never get confused for each other, and a token whose own line is gone
+  answers `not-found` rather than retargeting a look-alike elsewhere. A
+  rewrite of nearby text survives; a move of the line to another card does
+  not.
+- **A token names one line, never its heading.** An undertag's token
+  addresses that undertag, and a cite's addresses that cite - `/replace`
+  and `/insert-after` act on the line you were given, not on the tag above
+  it. Tokens minted by earlier builds conflated the two; they are still
+  accepted and resolve to the right line, and a `/replace` through one
+  hands back a corrected token - which is one more reason to store every
+  token a route returns.
+- **Deleting the line loses it**, which is the honest answer:
+  `not-found`.
+- **A move to a DIFFERENT document loses it.** A token names one
+  document, and the routes refuse a token whose document is not the one
+  they resolve against.
+
 ## 4. The cardmirror-bridge handshake
 
 This section and section 5 are the frozen cross-app contract. Flowing

@@ -32,7 +32,7 @@ function makeDoc(children: PMNode[]): PMNode {
 }
 
 function payload(over: Partial<SourcePayload>): SourcePayload {
-  return { docId: 'd1', docTitle: 'T', headingId: null, anchor: null, ...over };
+  return { docId: 'd1', docTitle: 'T', headingId: null, scopeId: null, anchor: null, ...over };
 }
 
 /** Content range of the doc's first `tag`, so no test hard-codes an offset

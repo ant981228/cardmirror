@@ -57,6 +57,23 @@ see `DETAILED_CHANGELOG.md`.
   External apps, and nothing changes at all if you don't use a companion
   app.
 
+### Fixed
+
+- **An edit a companion app makes to an undertag or a cite no longer
+  overwrites the card's tag.** Every line CardMirror hands a flowing app
+  came with a note about which card it belonged to, and for anything that
+  is not itself a heading - an undertag, a cite - that note was mistaken
+  for the line's own address. So when the app sent back an edited
+  qualifier, the tag above it was rewritten instead: silently, with no
+  window raised and nothing scrolled, destroying the tag you wrote. The
+  same confusion put an added line after the tag rather than after the
+  line it belonged to, and jumped you to the tag when you asked for the
+  qualifier. A line's address now names that line, and the card it sits in
+  is only used to look inside the right card - which also means two cards
+  worded the same are never mistaken for each other. Anything a companion
+  app already stored still works and is corrected the first time it is
+  used.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed

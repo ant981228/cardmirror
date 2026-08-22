@@ -85,7 +85,7 @@ describe('installExternalInsertAfterHost', () => {
       findViewForDocId: (docId) => (docId === 'd1' ? view : null),
     });
 
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r1', source: token, text: 'And it causes poverty.' });
 
     expect(bridge.acks).toHaveLength(1);
@@ -113,7 +113,7 @@ describe('installExternalInsertAfterHost', () => {
       findViewForDocId: (docId) => (docId === 'd1' ? view : null),
     });
 
-    const token = mintSourceToken({ docId: 'other', docTitle: 'O', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'other', docTitle: 'O', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r2', source: token, text: 'nope' });
 
     expect(bridge.acks[0]).toEqual({ requestId: 'r2', ok: false, error: 'not-mine' });
@@ -129,7 +129,7 @@ describe('installExternalInsertAfterHost', () => {
     view.setProps({ editable: () => false });
     installExternalInsertAfterHost({ findViewForDocId: () => view });
 
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r3', source: token, text: 'locked out' });
 
     expect(bridge.acks[0]).toEqual({ requestId: 'r3', ok: false, error: 'doc-readonly' });
@@ -156,7 +156,7 @@ describe('installExternalInsertAfterHost', () => {
     const unsubscribe = installExternalInsertAfterHost({ findViewForDocId: () => view });
 
     unsubscribe();
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     bridge.fire({ requestId: 'r5', source: token, text: 'after teardown' });
 
     expect(bridge.acks).toHaveLength(0);

@@ -54,12 +54,13 @@ function anchorToken(doc: PMNode, name: string): string {
     docId: 'd1',
     docTitle: 'T',
     headingId: null,
+    scopeId: null,
     anchor: buildDescriptor(doc, pos + 1, pos + node.nodeSize - 1),
   });
 }
 
 function uuidToken(headingId: string, docId = 'd1'): string {
-  return mintSourceToken({ docId, docTitle: 'T', headingId, anchor: null });
+  return mintSourceToken({ docId, docTitle: 'T', headingId, scopeId: headingId, anchor: null });
 }
 
 function makeView(doc: PMNode, opts: { editable?: boolean; caret?: number } = {}) {

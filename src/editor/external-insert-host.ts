@@ -247,7 +247,10 @@ function mintSources(
         mintSourceToken({
           docId: ident.docId,
           docTitle: ident.docTitle,
+          // Every line `/insert` creates is a heading kind, so it names
+          // itself and is its own scope.
           headingId: h.headingId,
+          scopeId: h.headingId,
           // No anchor for a blank line: the heading id resolves it, and an
           // empty quote would match anywhere (`plugin-extract.ts` guards
           // its zero-length ranges the same way).

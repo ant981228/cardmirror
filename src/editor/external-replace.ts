@@ -35,6 +35,7 @@
 
 import { type EditorState, type Transaction } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
+import { HEADING_TYPE_NAMES } from '../schema/ids.js';
 import { buildDescriptor } from './learn-anchor.js';
 import { resolveSourceRange } from './plugin-source-range.js';
 import { mintSourceToken, parseSourceToken } from './plugin-source-token.js';
@@ -119,9 +120,13 @@ export function replaceTokenInView(
   const range = resolveSourceRange(view.state.doc, payload);
   if (!range) return { ok: false, error: 'not-found', docTitle: payload.docTitle };
   // `from` is a content position, so its parent IS the named textblock.
-  if (!EXTERNAL_WRITABLE_TYPES[view.state.doc.resolve(range.from).parent.type.name]) {
+  const target = view.state.doc.resolve(range.from).parent;
+  if (!EXTERNAL_WRITABLE_TYPES[target.type.name]) {
     return { ok: false, error: 'body-text', docTitle: payload.docTitle };
   }
+  // Which line the token turned out to name decides the shape of the
+  // re-mint below: only a heading names itself.
+  const namesAHeading = HEADING_TYPE_NAMES.has(target.type.name);
   const tr = buildExternalReplaceTransaction(view.state, {
     from: range.from,
     to: range.to,
@@ -139,7 +144,13 @@ export function replaceTokenInView(
     source: mintSourceToken({
       docId: payload.docId,
       docTitle: payload.docTitle,
-      headingId: payload.headingId,
+      // A heading names itself and is its own scope. Anything else names no
+      // heading: the governing heading is scope only, so a legacy token that
+      // carried it as a target comes back corrected rather than promoted.
+      headingId: namesAHeading ? payload.headingId : null,
+      scopeId: namesAHeading
+        ? payload.headingId
+        : (payload.scopeId ?? payload.headingId),
       anchor: buildDescriptor(view.state.doc, range.from, range.from + text.length),
     }),
   };

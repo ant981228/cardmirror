@@ -305,6 +305,57 @@ happened, and the tokens the renderer mints when the user's Allow
 replays the insert have no reply left to travel on - the same honest
 cost `/insert-after` documents for its queued adds.
 
+### Fixed: a token names its own line, not the heading above it
+
+`/extract` mints every item's token with the GOVERNING heading in
+`headingId` (`plugin-extract.ts`, and the field's own doc comment said
+"governing"), while `resolveSourceRange` treated a resolvable `headingId`
+as naming the target and returned final on it - deliberately, so a renamed
+heading could not retarget a stale quote. The two never agreed about what
+the field meant, and for every item that is not itself a heading the
+editor resolved the wrong line:
+
+- `/replace` on an undertag or a cite **overwrote the card's tag** -
+  silently, since the route raises no window and scrolls nothing. A
+  qualifier edited in the flow destroyed the tag the debater wrote.
+- `/insert-after` on one added its line after the tag instead of after the
+  line it was anchored to.
+- `/jump` to one selected the tag.
+- The API doc's promise that undertags and cites "resolve by text anchor"
+  was false: the anchor was minted and then never consulted while the
+  governing heading still existed.
+
+The payload now separates the two meanings. `headingId` is the TARGET and
+is set only for heading kinds; `scopeId` is the governing heading and is
+scope only - it says where the anchor may resolve, never what it names.
+`resolveSourceRange` reads them in that order: a target heading wins
+outright, otherwise the anchor decides inside the scope's section.
+
+Scope earns its keep beyond the fix: a living scope is AUTHORITATIVE, so an
+undertag worded identically in two cards resolves inside its own, and when
+the named line is gone the answer is `not-found` rather than a look-alike
+in another card - the same "a coincidental match is not the source"
+reasoning that already excludes mirrored `self_ref` content. Only a scope
+whose heading is itself gone falls back to a whole-document search.
+
+**Tokens already stored in companion apps keep working.** They carry a
+governing `headingId` and no `scopeId`, and that absence is what marks
+them: for such a token the resolver tries the anchor inside that heading's
+section first, and when it lands on a different line inside the section,
+that line is what the token named. A heading's own token quotes its own
+text, so the shim cannot retarget one. `/replace` re-mints in the
+corrected shape (a non-heading target comes back with `headingId: null`
+and the governing heading as `scopeId`), so a caller that stores what the
+route returns leaves the legacy shape behind after one edit.
+
+`tests/editor/source-token-targets.test.ts` is the regression, and it
+failed on eight assertions before the fix, every one resolving to the tag:
+the undertag and cite targets, the payload shape, scope authority when the
+named line is deleted, the legacy shim, `/replace` leaving the tag alone,
+and `/insert-after` both placing its line and naming it correctly. Four
+assertions in `plugin-extract.test.ts` moved from `headingId` to `scopeId`
+- they encoded the conflation.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

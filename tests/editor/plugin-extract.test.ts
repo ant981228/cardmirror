@@ -89,16 +89,21 @@ describe('extractSelection', () => {
     expect(res.items[2]!.text).toBe('Smith 24');
     expect(res.items.some((i) => i.text.includes('never leave'))).toBe(false);
   });
-  it('attributes undertag and cite to the parent tag heading id', () => {
+  it('names each heading and only scopes the undertag and the cite to it', () => {
     const doc = sampleDoc();
     const res = extractSelection(fakeView(doc, 3, doc.content.size - 2), IDENT);
     if (!res.ok) throw new Error(res.error);
     const byKind = Object.fromEntries(res.items.map((i) => [i.kind, i]));
-    expect(parseSourceToken(byKind['block']!.source)!.headingId).toBe(blockId);
-    expect(parseSourceToken(byKind['tag']!.source)!.headingId).toBe(tagId);
-    expect(parseSourceToken(byKind['undertag']!.source)!.headingId).toBe(tagId);
-    expect(parseSourceToken(byKind['cite']!.source)!.headingId).toBe(tagId);
-    expect(parseSourceToken(byKind['tag']!.source)!.docTitle).toBe('Test.docx');
+    const at = (kind: string) => parseSourceToken(byKind[kind]!.source)!;
+    expect(at('block').headingId).toBe(blockId);
+    expect(at('tag').headingId).toBe(tagId);
+    // An undertag and a cite name NO heading: the governing tag is scope for
+    // their anchor. Naming it made them resolve to the tag's own line.
+    expect(at('undertag').headingId).toBeNull();
+    expect(at('undertag').scopeId).toBe(tagId);
+    expect(at('cite').headingId).toBeNull();
+    expect(at('cite').scopeId).toBe(tagId);
+    expect(at('tag').docTitle).toBe('Test.docx');
   });
   it('explicit selection wins and skips loose paragraphs', () => {
     const doc = sampleDoc();
@@ -134,26 +139,27 @@ describe('extractSelection', () => {
     expect(framework.length).toBe(1);
   });
 
-  it('emits analytic nodes with their own heading id', () => {
+  it('names an analytic itself and scopes its undertag to it', () => {
     const anId = newHeadingId();
     const doc = makeDoc([analyticUnit(heading('analytic', 'A1', anId), undertag('detail'))]);
     const res = extractSelection(fakeView(doc, 1, doc.content.size - 1), IDENT);
     if (!res.ok) throw new Error(res.error);
     expect(res.items.map((i) => i.kind)).toEqual(['analytic', 'undertag']);
     const ut = res.items.find((i) => i.kind === 'undertag')!;
-    expect(parseSourceToken(ut.source)!.headingId).toBe(anId);
+    expect(parseSourceToken(res.items[0]!.source)!.headingId).toBe(anId);
+    expect(parseSourceToken(ut.source)!.scopeId).toBe(anId);
   });
 
-  it('attributes a top-level undertag to the nearest preceding heading', () => {
+  it('scopes a top-level undertag to the nearest preceding heading', () => {
     const bId = newHeadingId();
     const doc = makeDoc([heading('block', 'Section', bId), undertag('loose note')]);
     const res = extractSelection(fakeView(doc, 1, doc.content.size - 1), IDENT);
     if (!res.ok) throw new Error(res.error);
     const ut = res.items.find((i) => i.kind === 'undertag')!;
-    expect(parseSourceToken(ut.source)!.headingId).toBe(bId);
+    expect(parseSourceToken(ut.source)!.scopeId).toBe(bId);
   });
 
-  it('attributes a mid-card selection with the tag outside the range', () => {
+  it('scopes a mid-card selection to the tag outside the range', () => {
     const tId = newHeadingId();
     const doc = makeDoc([card(heading('tag', 'Tag here', tId), undertag('mid detail'))]);
     const utPos = posOf(doc, 'undertag');
@@ -161,7 +167,7 @@ describe('extractSelection', () => {
     const res = extractSelection(fakeView(doc, utPos + 2, utPos + 6), IDENT);
     if (!res.ok) throw new Error(res.error);
     expect(res.items.map((i) => i.kind)).toEqual(['undertag']);
-    expect(parseSourceToken(res.items[0]!.source)!.headingId).toBe(tId);
+    expect(parseSourceToken(res.items[0]!.source)!.scopeId).toBe(tId);
   });
 
   it('anchors resolve back to the item text', () => {
