@@ -608,6 +608,44 @@ describe('catch-up skips rows the stream already delivered', () => {
   }, 10_000);
 });
 
+describe('a failed inbound import batch is not on the catch-up skip list', () => {
+  it('rows from a batch importBatch rejected are re-fetched and imported by catch-up', async () => {
+    // The skip list (T8) records stream-delivered seqs so catch-up does
+    // not re-import them. Recording them BEFORE the import meant a batch
+    // that failed (one corrupt frame fails the whole importBatch) had
+    // every row in it skipped by every later catch-up — a permanent gap
+    // (knock-on audit 2026-09-02). Now the seqs are recorded only after a
+    // successful import.
+    const { host, hostView, joiner, joinView } = await hostAndJoin(simpleDoc('seed'));
+    try {
+      const ldoc = (joiner as unknown as { loroDoc: { importBatch: (b: Uint8Array[]) => unknown } }).loroDoc;
+      const orig = ldoc.importBatch.bind(ldoc);
+      let failures = 0;
+      ldoc.importBatch = (b: Uint8Array[]) => {
+        if (failures === 0) {
+          failures++;
+          throw new Error('simulated corrupt frame');
+        }
+        return orig(b);
+      };
+      typeAfter(hostView, 'seed', ' AFTER');
+      await sleep(400);
+      expect(failures, 'the stream batch was rejected').toBe(1);
+      expect(docText(joinView.state.doc)).not.toContain('AFTER');
+      const skippedBefore = joiner.debugState().catchUpRowsSkipped;
+      await joiner.catchUp();
+      await sleep(200);
+      expect(docText(joinView.state.doc), 'catch-up re-fetched the row').toContain('AFTER');
+      expect(joiner.debugState().catchUpRowsSkipped, 'the failed batch was not skipped').toBe(skippedBefore);
+    } finally {
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('snapshot export memo', () => {
   it('two exports at the same version share one buffer; an edit invalidates it', async () => {
     const { session, shareCode } = await CollabSession.host({ pmDoc: simpleDoc('memo'), client, ...FAST });

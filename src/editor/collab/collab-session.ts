@@ -774,6 +774,8 @@ export class CollabSession {
    *  as the cursor passes them; cleared outright past the cap (a
    *  re-import is merely redundant, never wrong). */
   private importedSeqs = new Set<number>();
+  /** Relay seqs of the frames in inboundBuf, index-aligned. */
+  private inboundSeqs: number[] = [];
   private static readonly IMPORTED_SEQS_CAP = 5000;
   private catchUpRowsSkipped = 0;
   /** Byte bound on one inbound importBatch: a push burst (a reconnect
@@ -1111,8 +1113,7 @@ export class CollabSession {
     // plaintext order, not seq order. Harmless for a CRDT import batch —
     // never assume seq ordering here.
     this.inboundBuf.push(plain);
-    if (this.importedSeqs.size >= CollabSession.IMPORTED_SEQS_CAP) this.importedSeqs.clear();
-    this.importedSeqs.add(u.seq);
+    this.inboundSeqs.push(u.seq);
     this.inboundTimer ??= setTimeout(() => {
       this.inboundTimer = null;
       this.drainInbound();
@@ -1131,7 +1132,9 @@ export class CollabSession {
       n++;
     }
     const batch = this.inboundBuf.slice(0, n);
+    const batchSeqs = this.inboundSeqs.slice(0, n);
     this.inboundBuf = this.inboundBuf.slice(n);
+    this.inboundSeqs = this.inboundSeqs.slice(n);
     if (this.inboundBuf.length > 0 && this.inboundTimer === null) {
       this.inboundTimer = setTimeout(() => {
         this.inboundTimer = null;
@@ -1140,7 +1143,20 @@ export class CollabSession {
     }
     this.inboundDrains++;
     this.flush(); // capture local diff before import (see module doc)
-    const status = this.loroDoc.importBatch(batch);
+    let status: ReturnType<LoroDoc['importBatch']>;
+    try {
+      status = this.loroDoc.importBatch(batch);
+    } catch (err) {
+      // A corrupt frame fails the whole batch. NOT marking these seqs as
+      // imported is what lets the next catch-up re-fetch them (knock-on
+      // audit 2026-09-02: recording them before the import would have
+      // skipped a failed batch's rows forever).
+      console.warn('[collab] inbound import batch failed — catch-up will re-fetch:', (err as Error)?.message ?? err);
+      return;
+    }
+    // Only now are these rows "already imported" for catch-up's skip list.
+    if (this.importedSeqs.size + batchSeqs.length > CollabSession.IMPORTED_SEQS_CAP) this.importedSeqs.clear();
+    for (const seq of batchSeqs) this.importedSeqs.add(seq);
     this.notePending(status);
     this.markImportedSent();
     // The cursor does NOT advance from stream frames — ONLY from
@@ -1655,6 +1671,7 @@ export class CollabSession {
     if (this.inboundTimer) clearTimeout(this.inboundTimer);
     this.inboundTimer = null;
     this.inboundBuf = [];
+    this.inboundSeqs = [];
     if (this.flushTimer) clearInterval(this.flushTimer);
     if (this.catchUpTimer) clearInterval(this.catchUpTimer);
     if (this.auditTimer) clearInterval(this.auditTimer);
