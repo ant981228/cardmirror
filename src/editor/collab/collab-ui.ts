@@ -433,8 +433,14 @@ async function sessionPrepOverlay(text: string): Promise<() => void> {
   card.textContent = text;
   overlay.appendChild(card);
   document.body.appendChild(overlay);
+  // Escape hatch: if the flow that owns the release is ever interrupted
+  // between here and its finally, a modal veil must not be permanent.
+  const failsafe = setTimeout(() => overlay.remove(), 120_000);
   await new Promise((r) => setTimeout(r, 30));
-  return () => overlay.remove();
+  return () => {
+    clearTimeout(failsafe);
+    overlay.remove();
+  };
 }
 
 function installSeams(
@@ -733,10 +739,8 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       const sess = getSess();
       if (!sess || !sessions.has(sess.ownerUid)) return;
       const wasHost = sess.session.role === 'host';
-      const wasChip = isChipSession(sess.ownerUid);
       void teardownSession(sess).catch((e) => surfaceError('collab teardown', e));
-      void wasChip;
-      refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
+      refreshChipForFocus(); // repaint from live truth (a stale snapshot left ghost chips — field find, 2026-08-12)
       // Rebuild the OWNER doc's plugin stack — refreshing the focused view
       // left an unfocused owner pane holding dead session plugins (audit
       // find, 2026-07-10).
@@ -759,10 +763,8 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       // offline chip forever (audit find, 2026-07-10). Tear down but KEEP
       // the record so the user can rejoin from the Sessions list when
       // someone leaves.
-      const wasChip = isChipSession(sess.ownerUid);
       void teardownSession(sess, /* keepRecord */ true).catch((e) => surfaceError('collab teardown', e));
-      void wasChip;
-      refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
+      refreshChipForFocus(); // repaint from live truth (a stale snapshot left ghost chips — field find, 2026-08-12)
       if (deps.refreshPluginsForUid) deps.refreshPluginsForUid(sess.ownerUid);
       else deps.refreshPlugins();
       showToast(
@@ -823,7 +825,10 @@ export async function startSessionFlow(deps: CollabUiDeps): Promise<void> {
     showToast('This document already has a session — end or leave it first');
     return;
   }
-  if (startsInFlight.has(ownerUid)) return;
+  if (startsInFlight.has(ownerUid)) {
+    showToast('Starting the session — one moment');
+    return;
+  }
   startsInFlight.add(ownerUid);
   try {
     await startSessionFlowInner(deps, view, ownerUid);
@@ -1446,7 +1451,6 @@ export async function inviteTargetFlow(
  *  succeeds. */
 async function endOrLeaveSession(sess: ActiveSession): Promise<boolean> {
   const isHost = sess.session.role === 'host';
-  const wasChip = isChipSession(sess.ownerUid);
   // Disconnect first (final drain attempt), THEN tombstone for a host end —
   // and only tear down once the room is actually gone. endRoomOnRelay treats
   // an already-ended/expired room (410/404) as success.
@@ -1469,8 +1473,7 @@ async function endOrLeaveSession(sess: ActiveSession): Promise<boolean> {
   // Registry drop before the record delete, so a late stream frame's
   // onEnded no-ops.
   const cleared = teardownSession(sess);
-  void wasChip;
-      refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
+  refreshChipForFocus(); // repaint from live truth (a stale snapshot left ghost chips — field find, 2026-08-12)
   await cleared; // record actually gone before we return
   return true;
 }
@@ -1483,7 +1486,6 @@ async function endOrLeaveSession(sess: ActiveSession): Promise<boolean> {
 async function closeKeepResumableSession(uid: string): Promise<boolean> {
   const sess = sessionFor(uid);
   if (!sess) return true;
-  const wasChip = isChipSession(sess.ownerUid);
   await sess.session.stop(); // disconnect only — the room + record survive
   // Capture the final state (incl. any still-unsynced edits) AFTER the drain so
   // sentVersion is accurate — VERIFIED: the close path drops the recovery
@@ -1495,8 +1497,7 @@ async function closeKeepResumableSession(uid: string): Promise<boolean> {
     return false;
   }
   void teardownSession(sess, /* keepRecord */ true).catch((e) => surfaceError('collab teardown', e));
-  void wasChip;
-      refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
+  refreshChipForFocus(); // repaint from live truth (a stale snapshot left ghost chips — field find, 2026-08-12)
   return true;
 }
 

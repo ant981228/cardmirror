@@ -84,6 +84,9 @@ export function attachSessionHistory(
 ): HistoryHandle {
   const host: HistoryHostLike | null = hostForTests ?? getElectronHost();
   let disposed = false;
+  // Set synchronously by dispose(): an in-flight write's finally must not
+  // re-arm the schedule while the dispose-time write is still draining.
+  let stopping = false;
   let tail: Promise<void> = Promise.resolve();
   let startedAt = Date.now();
   let changeTimes: HistoryChangeTime[] = [];
@@ -156,7 +159,7 @@ export function attachSessionHistory(
   const schedule = (delay: number): void => {
     timer = setTimeout(() => {
       void write().finally(() => {
-        if (!disposed) {
+        if (!disposed && !stopping) {
           schedule(lastSnapshotBytes > BIG_SNAPSHOT_BYTES ? HISTORY_PERSIST_SLOW_MS : HISTORY_PERSIST_MS);
         }
       });
@@ -180,6 +183,7 @@ export function attachSessionHistory(
       // One last write so the file covers the session's final state,
       // then stop. The file itself is retained unconditionally — a
       // remote tombstone must not be able to destroy the evidence.
+      stopping = true;
       void write().finally(() => {
         disposed = true;
       });
