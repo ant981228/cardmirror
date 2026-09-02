@@ -575,6 +575,34 @@ describe('audit runs behind a fresh catch-up', () => {
   }, 10_000);
 });
 
+describe('catch-up skips rows the stream already delivered', () => {
+  it('stream-delivered frames are not decrypted and imported a second time by catch-up', async () => {
+    // The cursor deliberately advances only in catch-up, so the periodic
+    // catch-up re-fetched, re-decrypted (one await each) and re-imported
+    // every row the stream had pushed since — hundreds of no-op imports
+    // per cycle in a busy room (2026-09-01 review, T8). The row is still
+    // FETCHED (the cursor invariant is untouched); the work is skipped.
+    const { host, hostView, joiner, joinView } = await hostAndJoin(simpleDoc('skip me'));
+    try {
+      for (let i = 0; i < 5; i++) {
+        typeAfter(hostView, 'skip me', ` s${i}`);
+        await sleep(FAST.flushMs * 3);
+      }
+      await sleep(200);
+      expect(docText(joinView.state.doc)).toContain('s4');
+      const before = joiner.debugState().catchUpRowsSkipped;
+      await joiner.catchUp();
+      expect(joiner.debugState().catchUpRowsSkipped - before, 'the 5 pushed rows were skipped').toBeGreaterThanOrEqual(5);
+      expect(joiner.debugState().lastSeq, 'the cursor still advanced past them').toBeGreaterThan(0);
+    } finally {
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

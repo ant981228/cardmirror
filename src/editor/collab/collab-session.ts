@@ -678,6 +678,7 @@ export class CollabSession {
     consecutiveSendFailures: number;
     consecutiveSnapshotFailures: number;
     lastCatchUpError: string | null;
+    catchUpRowsSkipped: number;
     transport: TransportStats;
     stream: StreamStats | null;
   } {
@@ -695,6 +696,7 @@ export class CollabSession {
       consecutiveSendFailures: this.consecutiveSendFailures,
       consecutiveSnapshotFailures: this.consecutiveSnapshotFailures,
       lastCatchUpError: this.lastCatchUpError,
+      catchUpRowsSkipped: this.catchUpRowsSkipped,
       transport: this.client.stats,
       stream: this.stream?.stats ?? null,
     };
@@ -702,6 +704,15 @@ export class CollabSession {
 
   /** A catch-up requested while one was running (see catchUp). */
   private catchUpRerun: { expectMissingDeps: boolean } | null = null;
+  /** Relay seqs above the cursor whose frames the STREAM already
+   *  delivered (decrypted + buffered for import). Catch-up still
+   *  fetches those rows — the cursor advances only from pages, never
+   *  from frames — but skips decrypting and re-importing them. Pruned
+   *  as the cursor passes them; cleared outright past the cap (a
+   *  re-import is merely redundant, never wrong). */
+  private importedSeqs = new Set<number>();
+  private static readonly IMPORTED_SEQS_CAP = 5000;
+  private catchUpRowsSkipped = 0;
   private consecutiveSendFailures = 0;
   private consecutiveSnapshotFailures = 0;
   private lastCatchUpError: string | null = null;
@@ -979,6 +990,8 @@ export class CollabSession {
     // full cycle per frame (perf study 2026-08-06).
     this.foldTailMeta(u.seq, plain);
     this.inboundBuf.push(plain);
+    if (this.importedSeqs.size >= CollabSession.IMPORTED_SEQS_CAP) this.importedSeqs.clear();
+    this.importedSeqs.add(u.seq);
     this.inboundTimer ??= setTimeout(() => {
       this.inboundTimer = null;
       this.drainInbound();
@@ -1066,15 +1079,26 @@ export class CollabSession {
             console.warn('[collab] undecryptable room snapshot — skipped');
           }
         }
-        for (const u of page.updates) {
-          if (u.seq <= this.lastSeq) continue;
-          try {
-            const plain = await decryptBlob(this.key, u.blob);
-            this.foldTailMeta(u.seq, plain);
-            blobs.push(plain);
-          } catch {
-            /* skip undecryptable frame (see applyRemote) */
+        // Rows the stream already delivered are skipped (their metadata
+        // was folded at arrival); the rest decrypt in PARALLEL — the old
+        // one-await-per-row loop serialized up to 200 WebCrypto round
+        // trips on the join path (2026-09-01 review, T8).
+        const fresh = page.updates.filter((u) => {
+          if (u.seq <= this.lastSeq) return false;
+          if (this.importedSeqs.has(u.seq)) {
+            this.catchUpRowsSkipped++;
+            return false;
           }
+          return true;
+        });
+        const plains = await Promise.all(
+          fresh.map((u) => decryptBlob(this.key, u.blob).catch(() => null)),
+        );
+        for (let i = 0; i < fresh.length; i++) {
+          const plain = plains[i];
+          if (!plain) continue; // undecryptable frame (see applyRemote)
+          this.foldTailMeta(fresh[i]!.seq, plain);
+          blobs.push(plain);
         }
         if (blobs.length > 0) {
           importedAny = true;
@@ -1089,7 +1113,10 @@ export class CollabSession {
           this.notePending(status);
         }
         const advanced = page.lastSeq > this.lastSeq;
-        if (advanced) this.lastSeq = page.lastSeq;
+        if (advanced) {
+          this.lastSeq = page.lastSeq;
+          for (const seq of this.importedSeqs) if (seq <= this.lastSeq) this.importedSeqs.delete(seq);
+        }
         if (!page.more) break;
         // Progress guard: a `more` page whose cursor did not advance (a
         // proxy-mangled body, a half-deployed relay) would otherwise loop
@@ -1121,14 +1148,14 @@ export class CollabSession {
               console.warn('[collab] undecryptable room snapshot in resync — skipped');
             }
           }
-          for (const u of page.updates) {
-            try {
-              const plain = await decryptBlob(this.key, u.blob);
-              this.foldTailMeta(u.seq, plain);
-              blobs.push(plain);
-            } catch {
-              /* skip undecryptable frame */
-            }
+          const plains = await Promise.all(
+            page.updates.map((u) => decryptBlob(this.key, u.blob).catch(() => null)),
+          );
+          for (let i = 0; i < page.updates.length; i++) {
+            const plain = plains[i];
+            if (!plain) continue; // undecryptable frame
+            this.foldTailMeta(page.updates[i]!.seq, plain);
+            blobs.push(plain);
           }
           const next = page.lastSeq;
           if (page.more && next <= after) {
@@ -1307,13 +1334,10 @@ export class CollabSession {
           /* undecryptable snapshot — audit what we can */
         }
       }
-      for (const u of page.updates) {
-        try {
-          blobs.push(await decryptBlob(this.key, u.blob));
-        } catch {
-          /* skip */
-        }
-      }
+      const plains = await Promise.all(
+        page.updates.map((u) => decryptBlob(this.key, u.blob).catch(() => null)),
+      );
+      for (const plain of plains) if (plain) blobs.push(plain);
       for (const b of blobs) {
         try {
           const meta = decodeImportBlobMeta(b, false);
