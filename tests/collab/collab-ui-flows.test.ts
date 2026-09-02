@@ -481,6 +481,56 @@ describe('collab UI flows through the editor seams', () => {
     }
   }, 20_000);
 
+  it('two concurrent joins of the same code create ONE session, not two writers on one room', async () => {
+    // startSessionFlow had an in-flight guard; join/resume did not. A
+    // double-click (or an invite pill + Sessions row) raced: the second
+    // call passed the "already installed?" check before the first had
+    // installed anything, and two ActiveSessions (two persist writers on
+    // one IndexedDB key, two history writers where liveHandles.set
+    // silently clobbered the first) ran on one room (2026-09-01 review,
+    // PH-A6).
+    const client = new RoomsClient({ baseUrl: () => mock.url, token: () => mock.token });
+    const { session: rawHost, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('double join'),
+      client,
+      flushMs: 25,
+      minBackoffMs: 20,
+      maxBackoffMs: 60,
+    });
+    const hostView = mkView(rawHost.plugins());
+    await settle();
+    rawHost.start();
+    await sleep(80);
+    const viewJ = mkIndexStyleView('doc-DJ');
+    const depsJ = {
+      getView: () => viewJ,
+      getOwnerUid: () => 'doc-DJ',
+      getViewForUid: (u: string): EditorView | null => (u === 'doc-DJ' ? viewJ : null),
+      refreshPlugins: () =>
+        viewJ.updateState(viewJ.state.reconfigure({ plugins: buildMiniPlugins('doc-DJ') })),
+      newSessionDoc: () => true,
+    };
+    const joinSpy = vi.spyOn(CollabSession, 'join');
+    try {
+      const [r1, r2] = await Promise.all([
+        collabUi.joinSessionWithCode(depsJ, shareCode),
+        collabUi.joinSessionWithCode(depsJ, shareCode),
+      ]);
+      expect(r1 || r2).toBe(true);
+      expect(joinSpy, 'one session created').toHaveBeenCalledTimes(1);
+      expect(collabPluginSourceFor('doc-DJ')).not.toBeNull();
+    } finally {
+      joinSpy.mockRestore();
+      const endP = collabUi.endSessionFlow(depsJ);
+      await settle();
+      clickPromptButton('Leave Session');
+      await endP;
+      await rawHost.stop();
+      hostView.destroy();
+      viewJ.destroy();
+    }
+  }, 20_000);
+
   it('room-full on join tears the session down COMPLETELY (stops the session, not just the UI)', async () => {
     // onFull disposed cursors/comments/persist/history but never called
     // session.stop(): the orphaned CollabSession kept its flush /

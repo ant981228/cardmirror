@@ -145,7 +145,7 @@ export function attachSessionHistory(
   };
 
   // Self-rescheduling timer so the cadence can slow for huge docs.
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const schedule = (delay: number): void => {
     timer = setTimeout(() => {
       void write().finally(() => {
@@ -176,12 +176,24 @@ export function attachSessionHistory(
       void write().finally(() => {
         disposed = true;
       });
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibility);
       liveHandles.delete(session.roomId);
     },
   };
+  // Never clobber a live writer for the same room: with two handles the
+  // first became unreachable (historyHandleFor / dispose only ever saw
+  // the last) while still writing. Keep the first; stop this one.
+  const existing = liveHandles.get(session.roomId);
+  if (existing) {
+    console.warn('[collab-history] a history writer is already live for this room — keeping it');
+    if (timer !== null) clearTimeout(timer);
+    disposed = true;
+    window.removeEventListener('pagehide', onPageHide);
+    document.removeEventListener('visibilitychange', onVisibility);
+    return existing;
+  }
   liveHandles.set(session.roomId, handle);
   return handle;
 }

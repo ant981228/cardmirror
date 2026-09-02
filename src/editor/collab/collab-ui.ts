@@ -912,7 +912,33 @@ export async function joinSessionFlow(deps: CollabUiDeps): Promise<void> {
  *  doesn't burn the share code. No view is required up front: the flow
  *  creates its own doc via deps.newSessionDoc (multi-pane may be an empty
  *  workspace at this point). */
+/** In-flight join/resume guards, keyed by room. startSessionFlow had one
+ *  (startsInFlight); join and resume did not, so a double-click (or an
+ *  invite pill + a Sessions row) raced past the "already installed?"
+ *  check before the first call had installed anything — two
+ *  ActiveSessions on one room: two persist writers on one IndexedDB
+ *  key, two history writers with one silently orphaned (2026-09-01
+ *  review, PH-A6). Separate sets: a join that finds a record delegates
+ *  to resume for the same room. */
+const joinsInFlight = new Set<string>();
+const resumesInFlight = new Set<string>();
+
 export async function joinSessionWithCode(
+  deps: CollabUiDeps,
+  code: string,
+  opts?: { guestPass?: string | null },
+): Promise<boolean> {
+  const roomId = decodeShareCode(code.trim())?.roomId ?? null;
+  if (roomId && joinsInFlight.has(roomId)) return true; // already joining — consumed
+  if (roomId) joinsInFlight.add(roomId);
+  try {
+    return await joinSessionWithCodeInner(deps, code, opts);
+  } finally {
+    if (roomId) joinsInFlight.delete(roomId);
+  }
+}
+
+async function joinSessionWithCodeInner(
   deps: CollabUiDeps,
   code: string,
   opts?: { guestPass?: string | null },
@@ -1071,6 +1097,20 @@ export async function joinSessionWithCode(
  *  with a resumable record, and the Receive pill consumes the invite on
  *  true. */
 export async function resumeSessionFlow(
+  deps: CollabUiDeps,
+  roomId: string,
+  opts?: { existingDoc?: boolean },
+): Promise<boolean> {
+  if (resumesInFlight.has(roomId)) return true; // already resuming — consumed
+  resumesInFlight.add(roomId);
+  try {
+    return await resumeSessionFlowInner(deps, roomId, opts);
+  } finally {
+    resumesInFlight.delete(roomId);
+  }
+}
+
+async function resumeSessionFlowInner(
   deps: CollabUiDeps,
   roomId: string,
   opts?: { existingDoc?: boolean },
