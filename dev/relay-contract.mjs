@@ -148,7 +148,9 @@ if (process.env.HB === '1') {
   });
   check('connect rejected while dormant (4xx, not 5xx/2xx)', c.status >= 400 && c.status < 500, String(c.status));
   const w = await fetch(`${BASE}/ghost-webhook`, { method: 'POST', body: '{}' });
-  check('webhook 404 while dormant', w.status === 404, String(w.status));
+  // Dormant (no GHOST_WEBHOOK_SECRET) → 404; armed → an unsigned post is 401.
+  const armed = !!process.env.WEBHOOK_SECRET;
+  check(armed ? 'webhook 401 for an unsigned post while armed' : 'webhook 404 while dormant', w.status === (armed ? 401 : 404), String(w.status));
 }
 // ── Rooms (collaboration sessions) ──────────────────────────────────
 if (process.env.ROOMS !== '0') {
@@ -445,6 +447,74 @@ if (process.env.ROOMS !== '0') {
     check('seats: legacy confirmEvict evicts the oldest (A) and links D (200)', d2.status === 200, String(d2.status));
     const aRenew2 = await connect({ connectCode: '', routingCode: A }, aRenew.body?.entitlement);
     check('seats: A is now the evicted one', aRenew2.status === 409 && aRenew2.body?.detail?.error === 'youWereEvicted', String(aRenew2.status));
+  }
+}
+
+// 17. Ghost webhook: signed deliveries flip lapsed⇄active but NEVER touch
+// evicted seats (2026-09-02). Needs the relay booted with
+// GHOST_WEBHOOK_SECRET and the same value in WEBHOOK_SECRET here, plus dev
+// fake-session mode for /connect-code; skipped otherwise.
+{
+  const secret = process.env.WEBHOOK_SECRET || '';
+  const mint = async (member) => {
+    const r = await fetch(`${BASE}/connect-code`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionJwt: member }),
+    });
+    return r.status === 200 ? (await r.json()).code : null;
+  };
+  const connect = async (body, bearer) => {
+    const r = await fetch(`${BASE}/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  };
+  const member = `hook-member-${Date.now()}`;
+  const code0 = secret ? await mint(member) : null;
+  if (!secret || !code0) {
+    console.log('  --  webhook: WEBHOOK_SECRET unset or /connect-code unavailable — section skipped');
+  } else {
+    const { createHmac } = await import('node:crypto');
+    const deliver = async (payload, sig) => {
+      const body = JSON.stringify(payload);
+      const ts = String(Date.now());
+      const mac = createHmac('sha256', secret).update(body + ts).digest('hex');
+      const r = await fetch(`${BASE}/ghost-webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Ghost-Signature': sig ?? `sha256=${mac}, t=${ts}` },
+        body,
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    };
+    const t = Date.now();
+    const X = `hookX-${t}`, Y = `hookY-${t}`, Z = `hookZ-${t}`;
+    const x = await connect({ connectCode: code0, routingCode: X, deviceLabel: 'X' });
+    const y = await connect({ connectCode: await mint(member), routingCode: Y, deviceLabel: 'Y' });
+    const z1 = await connect({ connectCode: await mint(member), routingCode: Z, deviceLabel: 'Z' });
+    const z = await connect({ connectCode: z1.body?.detail?.retryCode, routingCode: Z, confirmEvict: true, evict: X });
+    check('webhook: fixture — X evicted, Y + Z active', x.status === 200 && y.status === 200 && z.status === 200, `${x.status}/${y.status}/${z.status}`);
+    const bad = await deliver({ member: { current: { uuid: member, status: 'free' } } }, 'sha256=deadbeef, t=1');
+    check('webhook: bad signature → 401', bad.status === 401, String(bad.status));
+    const lapse = await deliver({ member: { current: { uuid: member, status: 'free', email: 'm@example.com' }, previous: { status: 'paid' } } });
+    check('webhook: member → free lapses the 2 ACTIVE seats only (updated=2)', lapse.status === 200 && lapse.body?.updated === 2, JSON.stringify(lapse.body));
+    const yLapsed = await connect({ connectCode: '', routingCode: Y }, y.body?.entitlement);
+    check('webhook: lapsed Y renews inside grace (200, grace:true)', yLapsed.status === 200 && yLapsed.body?.grace === true, `${yLapsed.status} ${JSON.stringify(yLapsed.body).slice(0, 80)}`);
+    const xEv1 = await connect({ connectCode: '', routingCode: X }, x.body?.entitlement);
+    check('webhook: evicted X stays evicted after the lapse', xEv1.status === 409 && xEv1.body?.detail?.error === 'youWereEvicted', String(xEv1.status));
+    const back = await deliver({ member: { current: { uuid: member, status: 'paid', email: 'm@example.com' }, previous: { status: 'free' } } });
+    check('webhook: member → paid reactivates the 2 LAPSED seats only (updated=2)', back.status === 200 && back.body?.updated === 2, JSON.stringify(back.body));
+    const yBack = await connect({ connectCode: '', routingCode: Y }, yLapsed.body?.entitlement);
+    check('webhook: Y renews normally again (200, no grace) — unblocked without re-linking', yBack.status === 200 && !yBack.body?.grace, `${yBack.status} ${JSON.stringify(yBack.body).slice(0, 80)}`);
+    const xEv2 = await connect({ connectCode: '', routingCode: X }, x.body?.entitlement);
+    check('webhook: evicted X is NOT resurrected by the reactivation', xEv2.status === 409 && xEv2.body?.detail?.error === 'youWereEvicted', String(xEv2.status));
+    const idem = await deliver({ member: { current: { uuid: member, status: 'paid' } } });
+    check('webhook: repeat "paid" delivery is a no-op (updated=0)', idem.status === 200 && idem.body?.updated === 0, JSON.stringify(idem.body));
+    const gone = await deliver({ member: { previous: { uuid: member, status: 'paid' } } });
+    check('webhook: member.deleted (previous only) lapses the active seats (updated=2)', gone.status === 200 && gone.body?.updated === 2, JSON.stringify(gone.body));
+    const unknown = await deliver({ member: { current: { uuid: 'nobody-here', status: 'paid' } } });
+    check('webhook: unknown member → 200, updated=0', unknown.status === 200 && unknown.body?.updated === 0, JSON.stringify(unknown.body));
   }
 }
 
