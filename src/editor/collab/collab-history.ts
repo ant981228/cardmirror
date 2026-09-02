@@ -157,8 +157,15 @@ export function attachSessionHistory(
   };
   schedule(INITIAL_WRITE_DELAY_MS);
   const onPageHide = (): void => void write();
+  // Only the HIDE transition: visibilitychange also fires on tab-in, and
+  // a write is a synchronous full snapshot export (0.3-0.8s on a 20 MB
+  // master) — alt-tabbing BACK to a big co-edited doc froze the renderer
+  // (2026-09-01 review). pagehide stays unconditional.
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'hidden') void write();
+  };
   window.addEventListener('pagehide', onPageHide);
-  document.addEventListener('visibilitychange', onPageHide);
+  document.addEventListener('visibilitychange', onVisibility);
 
   const handle: HistoryHandle = {
     flush: () => write(),
@@ -171,7 +178,7 @@ export function attachSessionHistory(
       });
       clearTimeout(timer);
       window.removeEventListener('pagehide', onPageHide);
-      document.removeEventListener('visibilitychange', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
       liveHandles.delete(session.roomId);
     },
   };

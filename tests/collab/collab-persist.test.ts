@@ -183,6 +183,37 @@ describe('M3 session persistence', () => {
     view.destroy();
   }, 20_000);
 
+  it('visibilitychange: persists when the tab HIDES, never when it comes back', async () => {
+    const { session, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('vis me'),
+      client,
+      flushMs: 40,
+    });
+    const view = mkView(session.plugins());
+    await settle();
+    session.start();
+    const handle = attachSessionPersistence(session, shareCode, () => 'Vis Doc');
+    await handle.flush();
+    const before = (await loadSessionRecord(session.roomId))!;
+    typeAfter(view, 'vis', ' MORE');
+    await sleep(80);
+    const setVisibility = (state: 'visible' | 'hidden'): void => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    setVisibility('visible');
+    await sleep(80);
+    const afterVisible = (await loadSessionRecord(session.roomId))!;
+    expect(afterVisible.updatedAt, 'tab-in must not write').toBe(before.updatedAt);
+    setVisibility('hidden');
+    await sleep(80);
+    const afterHidden = (await loadSessionRecord(session.roomId))!;
+    expect(afterHidden.updatedAt, 'tab-out writes').toBeGreaterThan(before.updatedAt);
+    await handle.clear();
+    await session.stop();
+    view.destroy();
+  }, 20_000);
+
   it('clear() serializes behind an in-flight write so the record cannot be resurrected', async () => {
     // The race the promise tail guards: a write already past its `disposed`
     // check when clear() runs would otherwise re-save the record right

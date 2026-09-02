@@ -156,15 +156,20 @@ export function attachSessionPersistence(
 
   const timer = setInterval(() => void write(), PERSIST_MS);
   const onPageHide = (): void => void write();
+  // Hide transition only — the same tab-in write cost collab-history
+  // paid (a compaction tick here is a full snapshot export too).
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'hidden') void write();
+  };
   window.addEventListener('pagehide', onPageHide);
-  document.addEventListener('visibilitychange', onPageHide);
+  document.addEventListener('visibilitychange', onVisibility);
   void write();
 
   const stop = (): void => {
     disposed = true;
     clearInterval(timer);
     window.removeEventListener('pagehide', onPageHide);
-    document.removeEventListener('visibilitychange', onPageHide);
+    document.removeEventListener('visibilitychange', onVisibility);
   };
 
   return {

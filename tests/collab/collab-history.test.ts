@@ -302,6 +302,31 @@ describe('the writer', () => {
     peer.destroy();
   });
 
+  it('visibilitychange: writes when the tab HIDES, never when it comes back', async () => {
+    // Field cost: the handler fired on both transitions, and a write is a
+    // synchronous full snapshot export (0.3-0.8s on a 20 MB master) — so
+    // alt-tabbing BACK to a big co-edited doc froze the renderer.
+    const { session, peer, edit } = await fakeSession();
+    const { host, writes } = captureHost();
+    const handle = attachSessionHistory(session, () => 'Vis Doc', host);
+    await handle.flush();
+    expect(writes.length).toBe(1);
+    edit();
+    await settle();
+    const setVisibility = (state: 'visible' | 'hidden'): void => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    setVisibility('visible');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(writes.length, 'tab-in must not export a snapshot').toBe(1);
+    setVisibility('hidden');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(writes.length, 'tab-out flushes').toBe(2);
+    handle.dispose();
+    peer.destroy();
+  });
+
   it('dispose writes one final time and NEVER deletes; handle unregisters', async () => {
     const { session, peer, edit } = await fakeSession();
     const { host, writes } = captureHost();
