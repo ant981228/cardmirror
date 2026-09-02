@@ -500,6 +500,7 @@ export class CollabSession {
   }
 
   start(): void {
+    this.stopping = false;
     if (this.ended || this.stream) return;
     this.stream = new RoomStream({
       baseUrl: this.client.opts.baseUrl,
@@ -577,6 +578,12 @@ export class CollabSession {
       this.inboundTimer = null;
     }
     this.drainInbound();
+    // A REAL final drain: await the send already in flight (bounded by
+    // its request deadline) rather than returning past it, and stop the
+    // failure path from re-arming a retry timer after we clear it
+    // (2026-09-01 review, SC10). What can't be sent stays in the queue
+    // — the persisted record captures it for resume.
+    this.stopping = true;
     this.flush();
     await this.drainQueue().catch(() => {});
     if (this.flushTimer) clearInterval(this.flushTimer);
@@ -710,8 +717,23 @@ export class CollabSession {
     void this.drainQueue();
   }
 
-  private async drainQueue(): Promise<void> {
-    if (this.sending || this.ended) return;
+  /** The in-flight drain, so stop() can await it instead of no-oping
+   *  past it (drainQueue returns at once while `sending` is set). */
+  private drainPromise: Promise<void> | null = null;
+  /** Set by stop(): suppresses retry timers that would outlive the
+   *  session; cleared by start(). */
+  private stopping = false;
+
+  private drainQueue(): Promise<void> {
+    if (this.sending || this.ended) return this.drainPromise ?? Promise.resolve();
+    const p = this.drainQueueInner().finally(() => {
+      if (this.drainPromise === p) this.drainPromise = null;
+    });
+    this.drainPromise = p;
+    return p;
+  }
+
+  private async drainQueueInner(): Promise<void> {
     this.sending = true;
     try {
       while (this.outQueue.length > 0) {
@@ -803,7 +825,7 @@ export class CollabSession {
   private sendRetryMs = 1000;
 
   private scheduleSendRetry(): void {
-    if (this.sendRetryTimer || this.ended) return;
+    if (this.sendRetryTimer || this.ended || this.stopping) return;
     const jitter = 0.7 + Math.random() * 0.6;
     const delay = this.sendRetryMs * jitter;
     this.sendRetryMs = Math.min(this.sendRetryMs * 2, 30_000);

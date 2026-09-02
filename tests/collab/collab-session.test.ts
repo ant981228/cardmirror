@@ -401,6 +401,48 @@ describe('catch-up re-entry (a concurrent request must not be dropped)', () => {
   }, 10_000);
 });
 
+describe('stop() is a real final drain', () => {
+  it('stop() waits for an in-flight send and nothing posts after it resolves', async () => {
+    // drainQueue() returned at once when `sending` was already true, so
+    // stop()'s "final flush attempt" was a no-op whenever a POST was in
+    // flight; stop() also never set a stopping flag, so the in-flight
+    // failure re-armed sendRetryTimer AFTER stop() cleared the old one —
+    // a timer (and a POST) outliving the session (2026-09-01 review, SC10).
+    const tClient = new RoomsClient({
+      baseUrl: () => mock.url,
+      token: () => mock.token,
+      postTimeoutMs: 150,
+    });
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('final drain'),
+      client: tClient,
+      ...FAST,
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const roomId = decodeShareCode(shareCode)!.roomId;
+    await sleep(60);
+    try {
+      mock.hangNextUpdates(1); // the next POST is swallowed by a half-open socket
+      typeAfter(hostView, 'final drain', ' EDIT');
+      await sleep(80); // now in flight inside drainQueue
+      const t0 = Date.now();
+      await host.stop();
+      const took = Date.now() - t0;
+      expect(took, 'stop() awaited the in-flight send (bounded by its deadline)').toBeGreaterThanOrEqual(50);
+      const posted = mock.updateCount(roomId);
+      await sleep(1500); // the old retry timer would have fired inside this window
+      expect(mock.updateCount(roomId), 'no POST after stop()').toBe(posted);
+      expect(host.debugState().sending).toBe(false);
+    } finally {
+      mock.hangNextUpdates(0);
+      await host.stop();
+      hostView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict
