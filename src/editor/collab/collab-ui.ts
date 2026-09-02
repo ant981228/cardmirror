@@ -528,6 +528,13 @@ function installSeams(
  *  record-clear promise so terminal callers can await deletion (so a re-read of
  *  the Sessions list doesn't flash a stale row); most callers ignore it. */
 function teardownSession(sess: ActiveSession, keepRecord = false): Promise<void> {
+  // Stop the SESSION itself, not just its UI: the room-full and join/resume
+  // failure paths reached here without an explicit stop, and the orphaned
+  // CollabSession kept its flush / catch-up / audit timers (and the audit's
+  // full-history repost) alive for the window's life against a room this
+  // window was no longer in (2026-09-01 review). stop() is idempotent, so
+  // the End/Leave/close paths that already stopped are unaffected.
+  void sess.session.stop().catch(() => {});
   unregisterCollabPluginSource(sess.ownerUid);
   sessions.delete(sess.ownerUid);
   // Release the cross-window live-session claim (registered in installSeams).

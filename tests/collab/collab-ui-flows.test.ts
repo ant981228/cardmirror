@@ -403,6 +403,72 @@ describe('collab UI flows through the editor seams', () => {
     viewB.destroy();
   }, 20_000);
 
+  it('room-full on join tears the session down COMPLETELY (stops the session, not just the UI)', async () => {
+    // onFull disposed cursors/comments/persist/history but never called
+    // session.stop(): the orphaned CollabSession kept its flush /
+    // catch-up / audit timers for the window's life, fetching a room this
+    // window was no longer in (2026-09-01 review, PH-A2).
+    //
+    // The room is hosted OUTSIDE the UI (a raw session writes no persist
+    // record) — a UI-hosted room in this same window would make the join
+    // resolve to "already active here" via the record instead of joining.
+    const client = new RoomsClient({ baseUrl: () => mock.url, token: () => mock.token });
+    const { session: rawHost, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('full room contents'),
+      client,
+      flushMs: 25,
+      minBackoffMs: 20,
+      maxBackoffMs: 60,
+    });
+    const hostView = mkView(rawHost.plugins());
+    await settle();
+    rawHost.start();
+    await sleep(80);
+    const decoded = decodeShareCode(shareCode)!;
+    // Fill the room: the host holds one stream; nine raw ones reach the cap.
+    const raws: AbortController[] = [];
+    for (let i = 0; i < 9; i++) {
+      const ac = new AbortController();
+      raws.push(ac);
+      void fetch(`${mock.url}/rooms/${decoded.roomId}/stream?sid=raw${i}`, {
+        headers: { Authorization: `Bearer ${mock.token}` },
+        signal: ac.signal,
+      }).catch(() => {});
+    }
+    await sleep(150);
+    expect(mock.streamCount(decoded.roomId)).toBe(10);
+
+    const viewJ = mkIndexStyleView('doc-J');
+    const depsJ = {
+      getView: () => viewJ,
+      getOwnerUid: () => 'doc-J',
+      getViewForUid: (u: string): EditorView | null => (u === 'doc-J' ? viewJ : null),
+      refreshPlugins: () =>
+        viewJ.updateState(viewJ.state.reconfigure({ plugins: buildMiniPlugins('doc-J') })),
+      newSessionDoc: () => true,
+    };
+    const stopSpy = vi.spyOn(CollabSession.prototype, 'stop');
+    try {
+      const joined = await collabUi.joinSessionWithCode(depsJ, shareCode);
+      expect(joined).toBe(true); // the REST half succeeds; the stream 409s
+      await sleep(400);
+      expect(collabPluginSourceFor('doc-J'), 'UI side torn down').toBeNull();
+      // `contexts` = the `this` of each call; the raw host is not stopped
+      // here, so any stop() on this room is the orphaned joiner's.
+      const joinerStopped = stopSpy.mock.contexts.some(
+        (s) => (s as unknown as CollabSession).roomId === decoded.roomId,
+      );
+      expect(joinerStopped, 'the orphaned session must be stopped, not leaked').toBe(true);
+    } finally {
+      // Clean up even on failure — leftover live sessions poison later tests.
+      stopSpy.mockRestore();
+      for (const ac of raws) ac.abort();
+      await rawHost.stop();
+      hostView.destroy();
+      viewJ.destroy();
+    }
+  }, 20_000);
+
   it('exposes per-doc copresence for the shell footer, isolated per session', async () => {
     const viewA = mkIndexStyleView('cp-A');
     const viewB = mkIndexStyleView('cp-B');
