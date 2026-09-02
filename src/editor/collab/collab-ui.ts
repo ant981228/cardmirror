@@ -20,6 +20,7 @@ import { LoroUndoPlugin, loroSyncPluginKey, loroUndoPluginKey, undo as loroUndo,
 import { settings } from '../settings.js';
 import { showToast } from '../toast.js';
 import { surfaceError } from '../error-surface.js';
+import { warmCausalMarkIndex } from './causal-mark-heal.js';
 import { RELAY_FIX_PATH } from '../relay-decline.js';
 import { postNotice } from '../status-notices.js';
 import { promptForText, promptForRouteChoice, confirmDialog } from '../text-prompt.js';
@@ -446,6 +447,16 @@ function installSeams(
   // Recover Previous Version's durable record: full-history snapshots
   // that survive session end (deliberately including a remote
   // tombstone — an attacker ending the session must not destroy it).
+  // Build the causal-heal history index at idle rather than inside the
+  // first remote frame's appendTransaction (a full op-log decode on a
+  // big doc). Idempotent; the plugin rebuilds on demand regardless.
+  const idle = (fn: () => void): void => {
+    const ric = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number })
+      .requestIdleCallback;
+    if (ric) ric(fn, { timeout: 5000 });
+    else setTimeout(fn, 1500);
+  };
+  idle(() => warmCausalMarkIndex(session.loroDoc));
   const history = attachSessionHistory(
     session,
     () => sessionDocTitle(ownerUid) || sharedDocTitle(session),

@@ -85,15 +85,25 @@ interface ChangeRec {
   start: number;
   end: number; // exclusive op-counter bound
   deps: { peer: PeerID; counter: number }[];
+  /** Memoized frontiersToVV(deps) — resolved once per change, not once
+   *  per (character × candidate) in the heal loop. */
+  vv?: Map<string, number> | null;
 }
 
 interface HistIndex {
-  markOps: MarkOpRec[];
+  /** container id → style key → mark ops, so a text node's candidates
+   *  are a direct lookup, not a filter over every mark op ever seen. */
+  markOps: Map<string, Map<string, MarkOpRec[]>>;
+  markOpCount: number;
   /** Per peer, ordered by start counter (append-only per peer). */
   changes: Map<string, ChangeRec[]>;
   /** VV (as toJSON map) the index is current through. */
   upTo: Map<`${number}`, number>;
 }
+
+/** Diagnostics for tests: how many heal passes ran, and how many
+ *  seed/init transactions were skipped. */
+export const causalHealStats = { passes: 0, skippedInit: 0 };
 
 type JsonUpdates = {
   changes: {
@@ -114,7 +124,8 @@ function parseOpId(id: string): { peer: string; counter: number } {
  *  decode of the ops imported since the last heal, not the full log. */
 function updateIndex(doc: LoroDoc): HistIndex {
   const idx: HistIndex = indexCache.get(doc) ?? {
-    markOps: [],
+    markOps: new Map(),
+    markOpCount: 0,
     changes: new Map(),
     upTo: new Map(),
   };
@@ -123,6 +134,7 @@ function updateIndex(doc: LoroDoc): HistIndex {
   // Peer compression OFF: compressed ids index a peers[] table and
   // would never match real container ids or op ids.
   const json = doc.exportJsonUpdates(from, now, false) as unknown as JsonUpdates;
+  const touched = new Set<string>();
   for (const ch of json.changes) {
     const { peer, counter: start } = parseOpId(ch.id);
     let end = start;
@@ -138,7 +150,12 @@ function updateIndex(doc: LoroDoc): HistIndex {
         typeof c.style_key === 'string' &&
         CAUSALLY_GOVERNED_MARKS.has(c.style_key)
       ) {
-        idx.markOps.push({ peer, counter: op.counter, styleKey: c.style_key, container: op.container });
+        let byStyle = idx.markOps.get(op.container);
+        if (!byStyle) idx.markOps.set(op.container, (byStyle = new Map()));
+        let list = byStyle.get(c.style_key);
+        if (!list) byStyle.set(c.style_key, (list = []));
+        list.push({ peer, counter: op.counter, styleKey: c.style_key, container: op.container });
+        idx.markOpCount++;
       }
     }
     const arr = idx.changes.get(peer) ?? [];
@@ -151,8 +168,13 @@ function updateIndex(doc: LoroDoc): HistIndex {
       }),
     });
     idx.changes.set(peer, arr);
+    touched.add(peer);
   }
-  for (const arr of idx.changes.values()) arr.sort((a, b) => a.start - b.start);
+  // Only the peers appended to this pass — re-sorting every peer's whole
+  // change list on every pass grew with session length (2026-09-01
+  // review, SC6). Changes arrive in ascending counter order per peer,
+  // so this is nearly a no-op sort on an already-ordered array.
+  for (const peer of touched) idx.changes.get(peer)!.sort((a, b) => a.start - b.start);
   idx.upTo = now.toJSON();
   indexCache.set(doc, idx);
   return idx;
@@ -186,11 +208,25 @@ function knows(
   if (a.peer === b.peer) return b.counter <= a.counter;
   const ch = changeOf(idx, a.peer, a.counter);
   if (!ch || ch.deps.length === 0) return false;
+  if (ch.vv === undefined) {
+    try {
+      ch.vv = doc.frontiersToVV(ch.deps).toJSON() as Map<string, number>;
+    } catch {
+      ch.vv = null; // pruned/foreign frontier — keep (fail-safe)
+    }
+  }
+  if (!ch.vv) return false;
+  return (ch.vv.get(b.peer) ?? 0) > b.counter;
+}
+
+/** Pre-build the history index off the critical path (idle time after
+ *  a session mounts), so the first remote frame doesn't pay the full
+ *  op-log decode synchronously. Idempotent. */
+export function warmCausalMarkIndex(doc: LoroDoc): void {
   try {
-    const vv = doc.frontiersToVV(ch.deps).toJSON();
-    return (vv.get(b.peer as `${number}`) ?? 0) > b.counter;
+    updateIndex(doc);
   } catch {
-    return false; // pruned/foreign frontier — keep (fail-safe)
+    /* diagnostics only — the plugin rebuilds on demand */
   }
 }
 
@@ -262,7 +298,19 @@ function changedRanges(tr: Transaction): Range[] {
 
 export function causalMarkHealPlugin(loroDoc: LoroDoc): Plugin {
   return new Plugin({
-    appendTransaction(trs, _oldState, newState) {
+    appendTransaction(trs, oldState, newState) {
+      // The binding's INIT transaction replaces the empty starter doc
+      // with the whole CRDT state (the ~10s join freeze on a tournament
+      // master): its changed range is the entire document, so this pass
+      // would decode the full op log and walk every governed run —
+      // inside the freeze. Nothing is lost by skipping: the verdict is a
+      // pure function of op history, and the next real remote frame
+      // touching a run heals it (fail-safe direction is KEEP anyway)
+      // (2026-09-01 review, SC5).
+      if (oldState.doc.content.size <= 2 && newState.doc.content.size > 2) {
+        causalHealStats.skippedInit++;
+        return null;
+      }
       // Binding transactions only: remote imports and session undo.
       // Local typing is never healed — a local insert inside a visible
       // mark is the SEEN case by construction.
@@ -304,7 +352,8 @@ export function causalMarkHealPlugin(loroDoc: LoroDoc): Plugin {
       if (!syncState?.doc || !syncState.mapping) return null;
 
       const idx = updateIndex(loroDoc);
-      if (idx.markOps.length === 0) return null;
+      if (idx.markOpCount === 0) return null;
+      causalHealStats.passes++;
 
       // Inverted container mapping (PM node → container id), built once
       // per pass — only reached when governed marks are in play.
@@ -335,10 +384,8 @@ export function causalMarkHealPlugin(loroDoc: LoroDoc): Plugin {
             // Container-exact: only mark ops on THIS block's own text
             // container vouch for its runs — a highlight elsewhere in
             // the doc must not keep an inherited one here.
-            const candidates = idx.markOps.filter(
-              (m) => m.styleKey === mark.type.name && m.container === mapped.cid,
-            );
-            if (candidates.length === 0) continue; // keep (fail-safe)
+            const candidates = idx.markOps.get(mapped.cid)?.get(mark.type.name);
+            if (!candidates || candidates.length === 0) continue; // keep (fail-safe)
             // Per-char verdicts over the overlap, coalesced to ranges.
             let runStart = -1;
             for (let p = overlapFrom; p < overlapTo; p++) {

@@ -23,7 +23,7 @@ import {
   findText,
   type LoroPeer,
 } from './_loro-helpers.js';
-import { causalMarkHealPlugin } from '../../src/editor/collab/causal-mark-heal.js';
+import { causalMarkHealPlugin, causalHealStats } from '../../src/editor/collab/causal-mark-heal.js';
 
 function card(tag: string, body: string): PMNode {
   return schema.nodes['card']!.createChecked(null, [
@@ -80,6 +80,30 @@ function isHighlighted(p: LoroPeer, needle: string): boolean {
   });
   return all;
 }
+
+describe('causal heal — cost discipline (2026-09-01 review, SC5)', () => {
+  it('the binding\u2019s init transaction is skipped; a real remote frame still runs a pass', async () => {
+    // A joiner's init replaces the empty starter with the whole doc —
+    // one binding transaction whose changed range is everything. Running
+    // the heal there decoded the full op log and walked every governed
+    // run inside the ~10s join freeze.
+    const seed = mixedDoc();
+    const before = { ...causalHealStats };
+    const peers = await healedPeers(seed, 2);
+    const [a, b] = peers as [LoroPeer, LoroPeer];
+    expect(causalHealStats.skippedInit - before.skippedInit, 'both inits skipped').toBeGreaterThanOrEqual(2);
+    expect(causalHealStats.passes - before.passes, 'no pass on init').toBe(0);
+    // A highlights a run and B receives it: a real remote frame → a pass.
+    const r = findText(a.view.state.doc, 'quick');
+    a.view.dispatch(a.view.state.tr.addMark(r.from, r.to, schema.marks['highlight']!.create({ color: 'cyan' })));
+    await settle();
+    const passesBefore = causalHealStats.passes;
+    b.import(a.exportAll());
+    await settle();
+    expect(causalHealStats.passes, 'remote frame with a governed mark → pass').toBeGreaterThan(passesBefore);
+    for (const p of peers) p.destroy();
+  });
+});
 
 describe('causal heal — both sides of inserter intent', () => {
   it('UNSEEN interior retype is stripped everywhere (the field case)', async () => {
