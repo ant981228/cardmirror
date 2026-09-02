@@ -369,12 +369,29 @@ export function groupVersionRows(
  *  getOrCreateContainer writes (a cut landing mid-node leaves a map
  *  missing its children/attributes container) are ordinary edits
  *  rather than readonly-checkout violations. */
+/** A reusable materializer over ONE imported source doc: the recover
+ *  dialog materializes per preview click and again on "Open copy", and
+ *  each call re-imported the whole snapshot (plus, on Open copy,
+ *  re-decoded its base64) (2026-09-01 review, PH-A7). The per-version
+ *  checkout itself is unchanged — and still never checkout()s. */
+export function createVersionMaterializer(
+  snapshot: Uint8Array,
+): (frontier: VersionRow['frontier']) => PMNode {
+  const source = new LoroDoc();
+  source.import(snapshot);
+  return (frontier) => materializeFrom(source, frontier);
+}
+
 export function materializeVersion(
   snapshot: Uint8Array,
   frontier: VersionRow['frontier'],
 ): PMNode {
   const source = new LoroDoc();
   source.import(snapshot);
+  return materializeFrom(source, frontier);
+}
+
+function materializeFrom(source: LoroDoc, frontier: VersionRow['frontier']): PMNode {
   const vv = source.frontiersToVV(frontier);
   const prefix = source.exportJsonUpdates(undefined, vv);
   const ldoc = new LoroDoc();

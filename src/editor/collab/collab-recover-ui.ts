@@ -27,10 +27,10 @@ import { showToast } from '../toast.js';
 import type { CollabSession } from './collab-session.js';
 import {
   collapseSeedPrefix,
+  createVersionMaterializer,
   deriveVersionRows,
   groupVersionRows,
   historyHandleFor,
-  materializeVersion,
   snapshotFromEnvelope,
   type VersionGroup,
   type VersionRow,
@@ -203,6 +203,10 @@ function openVersionDialog(
   // user's own preview clicks — never as an eager background sweep
   // that would freeze the renderer — and cached per row.
   const snapshot = snapshotFromEnvelope(envelope);
+  // One imported source doc for the dialog's lifetime: preview clicks
+  // and "Open copy" used to re-import the whole snapshot (and re-decode
+  // its base64) per call (2026-09-01 review, PH-A7).
+  const materialize = createVersionMaterializer(snapshot);
   const currentStats = currentDoc ? computeSnapshotStats(currentDoc) : null;
   const statsByRow = new Map<VersionRow, SnapshotStats>();
   const selectables = new Set<HTMLElement>();
@@ -246,7 +250,7 @@ function openVersionDialog(
       if (closed || seq !== previewSeq) return;
       let node: PMNode;
       try {
-        node = materializeVersion(snapshot, row.frontier);
+        node = materialize(row.frontier);
       } catch (err) {
         console.error('[recover] failed to materialize preview:', err);
         loading.textContent = 'Could not reconstruct this version — the history may be damaged.';
@@ -269,6 +273,7 @@ function openVersionDialog(
         previewRow,
         selectables,
         registerGroup: (refs) => groupRefs.push(refs),
+        materialize,
       }),
     );
   }
@@ -313,6 +318,8 @@ interface GroupRowCtx {
     delta: HTMLElement;
     badge: HTMLElement;
   }) => void;
+  /** Shared materializer over the dialog's one imported source doc. */
+  materialize: (frontier: VersionRow['frontier']) => PMNode;
 }
 
 function groupRow(
@@ -351,7 +358,7 @@ function groupRow(
 
   // The group's recover target is its LAST change — "the document as it
   // stood at the end of this burst of editing".
-  const open = recoverButton(endRow, envelope, closeDialog, openDoc);
+  const open = recoverButton(endRow, envelope, closeDialog, openDoc, ctx.materialize);
 
   head.append(expand, label, meta, open);
   wrap.appendChild(head);
@@ -395,7 +402,7 @@ function groupRow(
       const who = document.createElement('span');
       who.className = 'pmd-recover-row-peer';
       who.textContent = row.isSeed ? 'session started (initial document)' : `editor …${row.peer.slice(-4)}`;
-      line.append(t, who, recoverButton(row, envelope, closeDialog, openDoc));
+      line.append(t, who, recoverButton(row, envelope, closeDialog, openDoc, ctx.materialize));
       line.classList.add('pmd-recover-row-clickable');
       ctx.selectables.add(line);
       line.addEventListener('click', (e) => {
@@ -413,7 +420,8 @@ function recoverButton(
   row: VersionRow,
   envelope: HistoryEnvelope,
   closeDialog: () => void,
-  openDoc?: OpenRecoveredDoc,
+  openDoc: OpenRecoveredDoc | undefined,
+  materialize: (frontier: VersionRow['frontier']) => PMNode,
 ): HTMLElement {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -427,7 +435,7 @@ function recoverButton(
     // synchronous rebuild that freezes the renderer for ~10s on a
     // tournament-master-sized file.
     void new Promise((r) => setTimeout(r, 30))
-      .then(() => recoverVersion(row, envelope, openDoc))
+      .then(() => recoverVersion(row, envelope, openDoc, materialize))
       .then((ok) => {
         if (ok) closeDialog();
       })
@@ -442,12 +450,13 @@ function recoverButton(
 async function recoverVersion(
   row: VersionRow,
   envelope: HistoryEnvelope,
-  openDoc?: OpenRecoveredDoc,
+  openDoc: OpenRecoveredDoc | undefined,
+  materialize: (frontier: VersionRow['frontier']) => PMNode,
 ): Promise<boolean> {
   const host = getElectronHost();
   if (!host) return false;
   try {
-    const node = materializeVersion(snapshotFromEnvelope(envelope), row.frontier);
+    const node = materialize(row.frontier);
     const bytes = serializeNative(node, { appVersion });
     const name = envelope.docTitle || 'Recovered document';
     if (openDoc) {

@@ -19,6 +19,7 @@ import type { HistoryEnvelope, HistoryEnvelopeWrite } from '../../src/editor/hos
 import {
   attachSessionHistory,
   collapseSeedPrefix,
+  createVersionMaterializer,
   deriveVersionRows,
   groupVersionRows,
   historyHandleFor,
@@ -115,6 +116,35 @@ describe('round-trip: derived frontier → checkout → materialize', () => {
     // The final row is the current document.
     const final = materializeVersion(snapshot, rows[rows.length - 1]!.frontier);
     expect(final.eq(a.view.state.doc)).toBe(true);
+    peers.forEach((p) => p.destroy());
+  }, 120_000);
+
+  it('a shared materializer over ONE imported source matches per-call materialization for every row', async () => {
+    // The recover dialog materializes per preview click and again on
+    // "Open copy"; each call re-imported the whole snapshot (2026-09-01
+    // review, PH-A7). One source doc, same output.
+    const peers = await createLoroPeers(seed(), 2);
+    const [a, b] = peers as [LoroPeer, LoroPeer];
+    for (let i = 0; i < 3; i++) {
+      const ra = findText(a.view.state.doc, `ANCHOR${i}`);
+      a.view.dispatch(a.view.state.tr.insert(ra.to, schema.text(`-A${i}`)));
+      await settle();
+      await syncAll(peers);
+      const rb = findText(b.view.state.doc, `ANCHOR${i + 1}`);
+      b.view.dispatch(b.view.state.tr.insert(rb.to, schema.text(`-B${i}`)));
+      await settle();
+      await syncAll(peers);
+    }
+    const snapshot = a.exportAll();
+    const scratch = new LoroDoc();
+    scratch.import(snapshot);
+    const rows = deriveVersionRows(scratch, []);
+    const materialize = createVersionMaterializer(snapshot);
+    for (const [i, row] of rows.entries()) {
+      const shared = materialize(row.frontier);
+      const direct = materializeVersion(snapshot, row.frontier);
+      expect(shared.eq(direct), `row ${i} identical via the shared source`).toBe(true);
+    }
     peers.forEach((p) => p.destroy());
   }, 120_000);
 
