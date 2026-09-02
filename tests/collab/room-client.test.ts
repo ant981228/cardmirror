@@ -56,6 +56,22 @@ describe('RoomsClient', () => {
     expect((err as RoomsError).status).toBe(410);
   });
 
+  it('carries the relay\u2019s error detail on non-2xx (413 texts differ and must reach the user)', async () => {
+    // The relay answers 413 for BOTH 'update too large' and 'room storage
+    // cap reached'; discarding the body left the field with a bare
+    // 'rooms request failed: 413' (2026-09-01 review, T9).
+    const { roomId } = await client.createRoom();
+    mock.setUpdateFailure({ status: 413, detail: 'room storage cap reached' });
+    try {
+      await expect(client.postUpdate(roomId, bytes('x'))).rejects.toMatchObject({
+        status: 413,
+        message: expect.stringContaining('room storage cap reached'),
+      });
+    } finally {
+      mock.setUpdateFailure(null);
+    }
+  });
+
   it('surfaces a clear RoomsError when an interceptor answers HTML instead of JSON', async () => {
     // A school content filter (Securly — field bug 2026-07-10), captive
     // portal, or misconfigured relay URL answers 200 + an HTML page; the

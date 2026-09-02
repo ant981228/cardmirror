@@ -47,6 +47,10 @@ export interface RoomsMock {
   setStuckPaging(on: boolean): void;
   /** Total updates-GET requests served (paging-loop cost probe). */
   updateFetches(): number;
+  /** Fail every update POST with this status + FastAPI-shaped body
+   *  (`{detail}`) — the relay's real 413 texts differ ('update too
+   *  large' vs 'room storage cap reached') and must reach the caller. */
+  setUpdateFailure(f: { status: number; detail: string } | null): void;
 }
 
 const MAX_STREAMS_PER_ROOM = 10;
@@ -65,6 +69,7 @@ export function startRoomsMock(): Promise<RoomsMock> {
   let portalMode = false;
   let stuckPaging = false;
   let updateFetches = 0;
+  let updateFailure: { status: number; detail: string } | null = null;
 
   const json = (res: http.ServerResponse, status: number, body?: unknown) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -140,6 +145,7 @@ export function startRoomsMock(): Promise<RoomsMock> {
       const room = roomOr(res, roomId);
       if (!room) return;
       const raw = await readBody(req);
+      if (updateFailure) return json(res, updateFailure.status, { detail: updateFailure.detail });
       if (raw.length === 0) return json(res, 400, { error: 'empty update' });
       const seq = ++seqCounter;
       const blob = raw.toString('base64');
@@ -265,6 +271,9 @@ export function startRoomsMock(): Promise<RoomsMock> {
           stuckPaging = on;
         },
         updateFetches: () => updateFetches,
+        setUpdateFailure: (f) => {
+          updateFailure = f;
+        },
         close: () =>
           new Promise<void>((r) => {
             for (const room of rooms.values()) for (const s of room.streams) s.destroy();

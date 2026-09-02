@@ -29,6 +29,26 @@ export type RoomsFetch = typeof fetch;
 const boundFetch: RoomsFetch = (input, init) => fetch(input, init);
 
 /** Typed transport failure; `status` is 0 for network-level errors. */
+/** Best-effort ' — <detail>' suffix from a non-2xx body (FastAPI's
+ *  `{detail}` or the mock's `{error}`; a non-JSON body contributes a
+ *  short trimmed prefix). Never throws; at most 512 bytes read. */
+async function errorDetail(res: Response): Promise<string> {
+  try {
+    const text = (await res.text()).slice(0, 512).trim();
+    if (!text) return '';
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown; error?: unknown };
+      const d = parsed.detail ?? parsed.error;
+      if (typeof d === 'string' && d) return ` — ${d}`;
+      return '';
+    } catch {
+      return /^</.test(text) ? '' : ` — ${text.slice(0, 120)}`;
+    }
+  } catch {
+    return '';
+  }
+}
+
 export class RoomsError extends Error {
   constructor(
     readonly status: number,
@@ -103,7 +123,13 @@ export class RoomsClient {
       throw new RoomsError(0, (err as Error).message ?? 'network error');
     }
     if (!res.ok) {
-      throw new RoomsError(res.status, `rooms request failed: ${res.status}`);
+      // Fold the relay's own detail into the error: its 413 alone covers
+      // both 'update too large' and 'room storage cap reached', and pool
+      // exhaustion is a distinct 503 — a bare status was undiagnosable in
+      // the field (2026-09-01 review). Bounded read: an interceptor's
+      // HTML page must not be inhaled whole. Reading also releases the
+      // connection back to the pool (an abandoned body holds it).
+      throw new RoomsError(res.status, `rooms request failed: ${res.status}${await errorDetail(res)}`);
     }
     return res;
   }
@@ -420,13 +446,19 @@ export class RoomStream {
         },
         signal: this.controller.signal,
       });
+      // Release bodies we don't read: an abandoned response body holds
+      // its pool connection until GC — one per retry, for hours, during
+      // an outage (2026-09-01 review).
+      const drop = (): void => void res.body?.cancel().catch(() => {});
       if (res.status === 410 || res.status === 404) {
         // Tombstoned (or GC'd all the way to gone): the session is over.
+        drop();
         this.stopped = true;
         this.opts.callbacks.onEnded();
         return;
       }
       if (res.status === 409) {
+        drop();
         // On a FIRST join, full means full — terminal. On a RECONNECT,
         // the count may include our own not-yet-reaped ghost connection
         // from the drop; the server clears those within a heartbeat
@@ -462,6 +494,7 @@ export class RoomStream {
         return;
       }
       if (!res.ok || !res.body) {
+        drop();
         this.scheduleRetry();
         return;
       }
