@@ -730,6 +730,42 @@ describe('a send that keeps failing is reported, not retried in silence (2026-09
   }, 15_000);
 });
 
+describe('holdings ledger buckets rows (2026-09-01 review, SC9)', () => {
+  it('many rows fold into few buckets, so the ledger does not overflow into whole-room audit downloads', async () => {
+    const { session: host, shareCode } = await CollabSession.host({ pmDoc: simpleDoc('ledger'), client, ...FAST });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const joiner = await CollabSession.join({
+      ...decodeShareCode(shareCode)!,
+      client,
+      ...FAST,
+      tailBucketRows: 4,
+      tailMetasCap: 10, // per-row ledgering would overflow at 10 rows
+    });
+    const joinView = mkView(joiner.plugins());
+    await settle();
+    joiner.start();
+    await sleep(80);
+    try {
+      for (let i = 0; i < 15; i++) {
+        typeAfter(hostView, 'ledger', ` r${i}`);
+        for (let w = 0; w < 40 && host.debugState().queued > 0; w++) await sleep(10);
+      }
+      await sleep(300);
+      expect(docText(joinView.state.doc)).toContain('r14');
+      const d = joiner.debugState();
+      expect(d.tailBuckets, '15 rows → ≤4 buckets of 4').toBeLessThanOrEqual(4);
+      expect(d.tailOverflow, 'no overflow → no whole-room re-download at audit time').toBe(false);
+    } finally {
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

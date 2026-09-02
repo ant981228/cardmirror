@@ -144,6 +144,8 @@ export interface CollabSessionOptions {
   inboundBatchBytes?: number;
   resyncSliceBytes?: number;
   sendStuckAfter?: number;
+  tailBucketRows?: number;
+  tailMetasCap?: number;
   /** Stream backoff bounds, injectable for tests. */
   minBackoffMs?: number;
   resetAfterMs?: number;
@@ -322,6 +324,8 @@ export class CollabSession {
     this.inboundBatchBytes = opts.inboundBatchBytes ?? 8 * 1024 * 1024;
     this.resyncSliceBytes = opts.resyncSliceBytes ?? 8 * 1024 * 1024;
     this.sendStuckAfter = opts.sendStuckAfter ?? 6;
+    this.tailBucketRows = opts.tailBucketRows ?? 64;
+    this.tailMetasCap = opts.tailMetasCap ?? CollabSession.TAIL_METAS_CAP;
     this.updateByteLimitBase = opts.updateByteLimit ?? 4_500_000;
     this.lastSentVersion = this.loroDoc.version();
     this.ackedVersion = this.lastSentVersion;
@@ -354,6 +358,8 @@ export class CollabSession {
     inboundBatchBytes?: number;
     resyncSliceBytes?: number;
     sendStuckAfter?: number;
+    tailBucketRows?: number;
+    tailMetasCap?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -415,6 +421,8 @@ export class CollabSession {
     inboundBatchBytes?: number;
     resyncSliceBytes?: number;
     sendStuckAfter?: number;
+    tailBucketRows?: number;
+    tailMetasCap?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -484,6 +492,8 @@ export class CollabSession {
     inboundBatchBytes?: number;
     resyncSliceBytes?: number;
     sendStuckAfter?: number;
+    tailBucketRows?: number;
+    tailMetasCap?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -716,6 +726,7 @@ export class CollabSession {
     catchUpRowsSkipped: number;
     inboundDrains: number;
     resyncSlices: number;
+    tailBuckets: number;
     transport: TransportStats;
     stream: StreamStats | null;
   } {
@@ -736,6 +747,7 @@ export class CollabSession {
       catchUpRowsSkipped: this.catchUpRowsSkipped,
       inboundDrains: this.inboundDrains,
       resyncSlices: this.resyncSlices,
+      tailBuckets: this.tailMetas.length,
       transport: this.client.stats,
       stream: this.stream?.stats ?? null,
     };
@@ -973,21 +985,46 @@ export class CollabSession {
   // --- room-holdings bookkeeping (incremental audit) ---
 
   private static readonly TAIL_METAS_CAP = 4000;
+  /** Ledger granularity: rows are folded into BUCKETS of this many rows
+   *  ({maxSeq, merged vv}); a bucket is pruned only once the verified
+   *  snapshot covers its maxSeq — the same non-transitive trust, ~64×
+   *  the headroom. Per-row entries hit the cap in under ten minutes of
+   *  a busy five-typist room, and an overflowed ledger made the
+   *  30-minute audit re-download the whole room every cycle (a partial
+   *  return of the egress problem the incremental audit killed;
+   *  2026-09-01 review, SC9). */
+  private readonly tailBucketRows: number;
+  private readonly tailMetasCap: number;
+  private tailBucketRowsInHead = 0;
 
   /** Fold one update row's meta into the tail ledger. `plain` is the
    *  DECRYPTED blob (imports) or the pre-encryption bytes (our posts). */
   private foldTailMeta(seq: number, plain: Uint8Array): void {
     if (seq <= this.verifiedSnapCovers) return; // already inside the verified snapshot
-    if (this.tailMetas.length >= CollabSession.TAIL_METAS_CAP) {
+    let meta: ReturnType<typeof decodeImportBlobMeta>;
+    try {
+      meta = decodeImportBlobMeta(plain, false);
+    } catch {
+      return; /* undecodable — the audit's escalation full-scan remains the backstop */
+    }
+    const head = this.tailMetas[this.tailMetas.length - 1];
+    if (head && this.tailBucketRowsInHead < this.tailBucketRows) {
+      // Merge into the open bucket (vv maxima; bucket maxSeq advances).
+      const merged = new Map(head.vv);
+      for (const [peer, counter] of meta.partialEndVersionVector.toJSON()) {
+        if ((merged.get(peer) ?? 0) < counter) merged.set(peer, counter);
+      }
+      head.vv = [...merged];
+      if (seq > head.seq) head.seq = seq;
+      this.tailBucketRowsInHead++;
+      return;
+    }
+    if (this.tailMetas.length >= this.tailMetasCap) {
       this.tailOverflow = true;
       return;
     }
-    try {
-      const meta = decodeImportBlobMeta(plain, false);
-      this.tailMetas.push({ seq, vv: [...meta.partialEndVersionVector.toJSON()] });
-    } catch {
-      /* undecodable — the audit's escalation full-scan remains the backstop */
-    }
+    this.tailMetas.push({ seq, vv: [...meta.partialEndVersionVector.toJSON()] });
+    this.tailBucketRowsInHead = 1;
   }
 
   /** A snapshot whose CONTENT we have actually decoded (downloaded and
@@ -1002,8 +1039,12 @@ export class CollabSession {
       this.roomSnapVv = vv;
       this.verifiedSnapCovers = covers;
       if (covers > this.knownSnapCovers) this.knownSnapCovers = covers;
+      // Buckets are keyed by their MAX seq: one survives until the
+      // verified snapshot covers every row in it (conservative).
+      const before = this.tailMetas.length;
       this.tailMetas = this.tailMetas.filter((t) => t.seq > covers);
-      this.tailOverflow = this.tailMetas.length >= CollabSession.TAIL_METAS_CAP;
+      if (this.tailMetas.length !== before && this.tailMetas.length === 0) this.tailBucketRowsInHead = 0;
+      this.tailOverflow = this.tailMetas.length >= this.tailMetasCap;
     } catch {
       /* undecodable snapshot — keep the previous verified state */
     }
