@@ -71,3 +71,19 @@ describe('base64 helpers', () => {
     expect(base64ToBytes(bytesToBase64(bytes))).toEqual(bytes);
   });
 });
+
+describe('base64 fast path (2026-09-01 review, T14)', () => {
+  it('encodes/decodes byte-exact across sizes, including multi-MB', async () => {
+    const { bytesToBase64, base64ToBytes } = await import('../../src/editor/collab/collab-crypto.js');
+    for (const n of [0, 1, 2, 3, 255, 4096, 100_000, 2 * 1024 * 1024 + 1]) {
+      const src = new Uint8Array(n);
+      for (let i = 0; i < n; i++) src[i] = (i * 7919 + 13) & 0xff;
+      const b64 = bytesToBase64(src);
+      // Canonical: the platform's own encoder must agree.
+      expect(b64).toBe(Buffer.from(src).toString('base64'));
+      const back = base64ToBytes(b64);
+      expect(back.length).toBe(n);
+      expect(Buffer.compare(Buffer.from(back), Buffer.from(src))).toBe(0);
+    }
+  });
+});

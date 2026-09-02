@@ -61,7 +61,23 @@ export async function decryptBlob(key: CryptoKey, sealed: Uint8Array): Promise<U
 
 // --- base64 / base64url (portable: browser + Node, no Buffer) ---
 
+// Native base64 (Uint8Array.fromBase64 / .toBase64, Chromium 144+ /
+// Node 25+): a multi-megabyte compaction snapshot used to be decoded by
+// a per-character JS loop over a multi-megabyte binary string — on the
+// join path, behind the "working…" veil (2026-09-01 review, T14). The
+// loop stays as the fallback everywhere the native API is absent.
+type NativeB64 = {
+  fromBase64?: (s: string) => Uint8Array;
+};
+const nativeU8 = Uint8Array as unknown as NativeB64;
+const hasNativeDecode = typeof nativeU8.fromBase64 === 'function';
+const hasNativeEncode =
+  typeof (Uint8Array.prototype as unknown as { toBase64?: unknown }).toBase64 === 'function';
+
 export function bytesToBase64(bytes: Uint8Array): string {
+  if (hasNativeEncode) {
+    return (bytes as unknown as { toBase64: () => string }).toBase64();
+  }
   let bin = '';
   const CHUNK = 0x8000; // String.fromCharCode arg-count limit guard
   for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -71,6 +87,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
 }
 
 export function base64ToBytes(b64: string): Uint8Array {
+  if (hasNativeDecode) return nativeU8.fromBase64!(b64);
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
