@@ -540,6 +540,24 @@ describe('request deadlines + stream stall watchdog (2026-09-01 review, SC3/T1/T
     }
   });
 
+  it('a slow catch-up page is not cut off by the control-call deadline', async () => {
+    // Pages run to 4MB (and the first one carries the room snapshot), so
+    // a slow link legitimately takes longer than a control call. Under the
+    // 15s control deadline a big room on a slow link re-fetched the same
+    // page into the same timeout forever (knock-on audit 2026-09-02);
+    // bulk GETs carry the long deadline.
+    const c = new RoomsClient({
+      baseUrl: () => mock.url,
+      token: () => mock.token,
+      requestTimeoutMs: 100,
+    });
+    const { roomId } = await c.createRoom();
+    await c.postUpdate(roomId, bytes('big page'));
+    mock.delayNextUpdatesFetch(300);
+    const page = await c.fetchUpdates(roomId, 0);
+    expect(page.updates.length, 'the page arrived instead of timing out').toBe(1);
+  });
+
   it('a silently dead stream (heartbeats stop) is detected and restarted', async () => {
     const { roomId } = await client.createRoom();
     mock.setHeartbeat(40);

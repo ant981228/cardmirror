@@ -128,6 +128,10 @@ export interface RoomsClientOptions {
    *  dropped connection. */
   requestTimeoutMs?: number;
   postTimeoutMs?: number;
+  /** Deadline for BULK reads (updates pages run to 4MB and the first one
+   *  carries the room snapshot) — a slow link legitimately exceeds the
+   *  control-call deadline on these. Default = postTimeoutMs (120s). */
+  bulkTimeoutMs?: number;
 }
 
 /** Compose the caller's signal (if any) with a deadline. */
@@ -303,7 +307,7 @@ export class RoomsClient {
     const path = `/rooms/${roomId}/updates?after=${after}${cond}`;
     const res = await this.request(path, {
       headers: this.headers(),
-    });
+    }, this.opts.bulkTimeoutMs ?? this.opts.postTimeoutMs ?? 120_000);
     const body = await this.readJson<{
       snapshot?: { blob: string; coversThroughSeq: number };
       snapshotUnchanged?: boolean;

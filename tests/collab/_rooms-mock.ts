@@ -55,6 +55,9 @@ export interface RoomsMock {
    *  and then NEVER answered — the sockets stay open until the mock
    *  closes (a real half-open connection never errors out). 0 = off. */
   hangNextUpdates(n: number): void;
+  /** Delay the next updates-page GET by `ms` before answering (a slow
+   *  link on a big page); one-shot. */
+  delayNextUpdatesFetch(ms: number): void;
   /** SSE heartbeat comments (`: hb`) every `ms` on every open stream;
    *  0 disables (the default — the real relay sends them every 25s). */
   setHeartbeat(ms: number): void;
@@ -81,6 +84,7 @@ export function startRoomsMock(): Promise<RoomsMock> {
   let updateFetches = 0;
   let updateFailure: { status: number; detail: string } | null = null;
   let hangRemaining = 0;
+  let fetchDelayMs = 0;
   const hung = new Set<http.ServerResponse>();
   let heartbeatMs = 0;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -188,6 +192,11 @@ export function startRoomsMock(): Promise<RoomsMock> {
     }
 
     if (req.method === 'GET' && sub === 'updates') {
+      if (fetchDelayMs > 0) {
+        const d = fetchDelayMs;
+        fetchDelayMs = 0;
+        await new Promise((r) => setTimeout(r, d));
+      }
       const room = roomOr(res, roomId);
       if (!room) return;
       updateFetches++;
@@ -306,6 +315,9 @@ export function startRoomsMock(): Promise<RoomsMock> {
         },
         hangNextUpdates: (n) => {
           hangRemaining = n;
+        },
+        delayNextUpdatesFetch: (ms) => {
+          fetchDelayMs = ms;
         },
         setHeartbeat: (ms) => {
           heartbeatMs = ms;
