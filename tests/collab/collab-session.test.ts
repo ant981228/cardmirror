@@ -236,12 +236,14 @@ describe('collab session end-to-end', () => {
     const decoded = decodeShareCode(shareCode)!;
     // Slow reconnect backoff keeps the joiner stream-blind while the
     // host publishes, so the catch-up runs INSIDE the blind window.
+    // (Retries land at 30-100% of the backoff: 15s keeps the earliest
+    // possible reconnect, 4.5s, past the ~2-3s typing loop below.)
     const joiner = await CollabSession.join({
       ...decoded,
       client,
       flushMs: 25,
-      minBackoffMs: 4000,
-      maxBackoffMs: 4000,
+      minBackoffMs: 15_000,
+      maxBackoffMs: 15_000,
       catchUpMs: 600_000,
       backlogNoticeMinBlindMs: 30,
       callbacks: { onBacklogMerged: (n) => merged.push(n) },
@@ -252,16 +254,19 @@ describe('collab session end-to-end', () => {
     await sleep(200);
 
     // Sever the joiner's stream while the relay is down; it stays down
-    // for the 4s backoff even after the relay comes back.
+    // for the backoff even after the relay comes back.
     mock.pause();
     joiner.restart();
     await sleep(80); // connect fails → onDown → blind window opens
     mock.resume();
 
     // The host (stream alive, posts retrying) publishes ≥25 frames the
-    // joiner cannot see.
+    // joiner cannot see — one relay ROW per edit: the outbound queue
+    // coalesces adjacent ticks, so wait for each edit to land before
+    // the next (the notice threshold counts rows).
     for (let i = 0; i < 30; i++) {
       typeAfter(hostView, 'riverbank', ` b${i}`);
+      for (let w = 0; w < 40 && host.debugState().queued > 0; w++) await sleep(10);
       await sleep(30);
     }
     await sleep(300);
@@ -601,6 +606,27 @@ describe('catch-up skips rows the stream already delivered', () => {
       joinView.destroy();
     }
   }, 10_000);
+});
+
+describe('snapshot export memo', () => {
+  it('two exports at the same version share one buffer; an edit invalidates it', async () => {
+    const { session, shareCode } = await CollabSession.host({ pmDoc: simpleDoc('memo'), client, ...FAST });
+    void shareCode;
+    const view = mkView(session.plugins());
+    await settle();
+    try {
+      const a = session.exportSnapshot();
+      const b = session.exportSnapshot();
+      expect(b, 'same version → memoized buffer (persist + history share one export)').toBe(a);
+      typeAfter(view, 'memo', ' changed');
+      await settle();
+      const c = session.exportSnapshot();
+      expect(c).not.toBe(a);
+    } finally {
+      await session.stop();
+      view.destroy();
+    }
+  });
 });
 
 describe('join resilience', () => {

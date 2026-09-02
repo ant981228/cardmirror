@@ -504,10 +504,23 @@ export class CollabSession {
     return 'list';
   }
 
+  /** Full snapshot export, memoized on the doc version for a few
+   *  seconds: collab-persist (every 40th increment) and collab-history
+   *  (every 20-60s) each exported their own byte-identical snapshot —
+   *  a synchronous wasm call measured at 0.3-0.8s on a 20 MB master —
+   *  and paid it twice whenever their ticks coincided (2026-09-01
+   *  review, SC7/A14). The TTL bounds the extra doc-sized buffer. */
   exportSnapshot(): Uint8Array {
     this.loroDoc.commit();
-    return this.loroDoc.export({ mode: 'snapshot' });
+    const version = this.loroDoc.version().encode();
+    const memo = this.snapshotMemo;
+    if (memo && Date.now() - memo.at < 10_000 && bytesEq(memo.version, version)) return memo.bytes;
+    const bytes = this.loroDoc.export({ mode: 'snapshot' });
+    this.snapshotMemo = { version, bytes, at: Date.now() };
+    return bytes;
   }
+
+  private snapshotMemo: { version: Uint8Array; bytes: Uint8Array; at: number } | null = null;
 
   /** Incremental export since `from` (VersionVector.encode() bytes) —
    *  the persistence layer's cheap steady-state write. */

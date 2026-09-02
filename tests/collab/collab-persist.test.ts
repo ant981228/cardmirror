@@ -214,6 +214,40 @@ describe('M3 session persistence', () => {
     view.destroy();
   }, 20_000);
 
+  it('persist cadence slows for big snapshots (and stays quick for small ones)', async () => {
+    const mk = async (label: string, cadence: Parameters<typeof attachSessionPersistence>[4]) => {
+      const { session, shareCode } = await CollabSession.host({
+        pmDoc: simpleDoc(label),
+        client,
+        flushMs: 40,
+      });
+      const view = mkView(session.plugins());
+      await settle();
+      session.start();
+      const handle = attachSessionPersistence(session, shareCode, () => label, () => null, cadence);
+      await handle.flush();
+      const seen = new Set<number>();
+      const t0 = Date.now();
+      let n = 0;
+      while (Date.now() - t0 < 700) {
+        typeAfter(view, label, ` x${n++}`);
+        await sleep(60);
+        const r = await loadSessionRecord(session.roomId);
+        if (r) seen.add(r.updatedAt);
+      }
+      await handle.clear();
+      await session.stop();
+      view.destroy();
+      return seen.size;
+    };
+    // Small snapshot: the fast cadence — many writes in 700ms.
+    const fast = await mk('quick', { persistMs: 50, slowPersistMs: 400, bigSnapshotBytes: 1 << 30 });
+    expect(fast, 'small doc persists on the fast cadence').toBeGreaterThanOrEqual(5);
+    // "Big" snapshot (threshold 1 byte): the slow cadence — a handful at most.
+    const slow = await mk('bulky', { persistMs: 50, slowPersistMs: 400, bigSnapshotBytes: 1 });
+    expect(slow, 'big doc persists on the slow cadence').toBeLessThanOrEqual(3);
+  }, 20_000);
+
   it('clear() serializes behind an in-flight write so the record cannot be resurrected', async () => {
     // The race the promise tail guards: a write already past its `disposed`
     // check when clear() runs would otherwise re-save the record right
