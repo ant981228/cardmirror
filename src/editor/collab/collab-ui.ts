@@ -346,6 +346,11 @@ function updateChip(status: { connected: boolean; queuedUpdates: number } | null
 /** One colored dot per person in the room, hover for the name. */
 function renderPresenceDots(container: HTMLElement): void {
   const peers = chipSession()?.cursors.presence() ?? [];
+  // Skip the DOM rebuild when the roster is unchanged (the 3s presence
+  // timer and every chip update land here).
+  const sig = peers.map((p) => `${p.peer}\u0000${p.name}\u0000${p.color}\u0000${p.self ? 1 : 0}`).join('\n');
+  if (container.dataset['sig'] === sig) return;
+  container.dataset['sig'] = sig;
   container.replaceChildren();
   for (const p of peers) {
     const dot = document.createElement('span');
@@ -623,7 +628,13 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       // Reconnected → re-announce presence (partners saw us absent until
       // the 15s keepalive otherwise).
       if (s.connected && !sess.lastStatus?.connected) sess.cursors.rebroadcast();
+      // emitStatus fires from flush() and from every successful post —
+      // several times a second while typing. An unchanged status must
+      // not repaint every slot footer (each calls into the wasm presence
+      // store) and rebuild the presence dots (2026-09-01 review, PH-A11).
+      const prev = sess.lastStatus;
       sess.lastStatus = s;
+      if (prev && prev.connected === s.connected && prev.queuedUpdates === s.queuedUpdates) return;
       if (isChipSession(sess.ownerUid)) updateChip(s);
       notifyCollabCopresenceChange();
     },

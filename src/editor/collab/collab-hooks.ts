@@ -214,8 +214,27 @@ export function onCollabCopresenceChange(fn: () => void): () => void {
 
 /** Fire the copresence listeners — called by collab-ui whenever a session's
  *  status/presence changes or a session starts/ends. No-op with no listeners. */
+let copresenceNotifyTimer: ReturnType<typeof setTimeout> | null = null;
+let copresenceNotifyPending = false;
+/** Leading + trailing coalescing: the first call in a quiet period
+ *  fires synchronously (session start/end must paint at once); calls
+ *  inside the next 150ms collapse into ONE trailing notification.
+ *  While typing, emitStatus flips queuedUpdates 0→1→0 for every post,
+ *  and each flip repainted every slot footer — each calling into the
+ *  wasm presence store (2026-09-01 review, PH-A11). */
 export function notifyCollabCopresenceChange(): void {
+  if (copresenceNotifyTimer !== null) {
+    copresenceNotifyPending = true;
+    return;
+  }
   for (const fn of copresenceListeners) fn();
+  copresenceNotifyTimer = setTimeout(() => {
+    copresenceNotifyTimer = null;
+    if (copresenceNotifyPending) {
+      copresenceNotifyPending = false;
+      notifyCollabCopresenceChange();
+    }
+  }, 150);
 }
 
 /** Close-time session actions, provided by collab-ui. When a co-edited doc

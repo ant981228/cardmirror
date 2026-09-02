@@ -403,6 +403,47 @@ describe('collab UI flows through the editor seams', () => {
     viewB.destroy();
   }, 20_000);
 
+  it('typing does not storm copresence repaints when the status is unchanged', async () => {
+    // emitStatus fires from flush() and from every successful post —
+    // several times a second while typing — and onStatus notified every
+    // slot footer (each calling into the wasm presence store) and
+    // rebuilt the presence dots on EVERY one, even when {connected,
+    // queuedUpdates} was byte-identical (2026-09-01 review, PH-A11).
+    const view = mkIndexStyleView('doc-ST');
+    const deps = {
+      getView: () => view,
+      getOwnerUid: () => 'doc-ST',
+      refreshPlugins: () =>
+        view.updateState(view.state.reconfigure({ plugins: buildMiniPlugins('doc-ST') })),
+      newSessionDoc: () => true,
+    };
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() },
+    });
+    await startSession(deps);
+    await sleep(200); // settle into a steady connected state
+    let notifications = 0;
+    const off = onCollabCopresenceChange(() => notifications++);
+    try {
+      for (let i = 0; i < 12; i++) {
+        typeAfter(view, 'shared prep doc', ` t${i}`);
+        await sleep(30);
+      }
+      await sleep(400);
+      // ~360ms of typing → a handful of coalesced windows, not one repaint
+      // per status flip (10+ before).
+      expect(notifications, 'repaints are coalesced while typing').toBeLessThanOrEqual(4);
+    } finally {
+      off();
+      const endP = collabUi.endSessionFlow(deps);
+      await settle();
+      clickPromptButton('End Session');
+      await endP;
+      view.destroy();
+    }
+  }, 20_000);
+
   it('the mode-switch/quit handoff flushes session HISTORY, not just the record', async () => {
     // The handoff provider flushed persist (with the reason written down:
     // pagehide can be cut off mid-write) but not history, whose only
