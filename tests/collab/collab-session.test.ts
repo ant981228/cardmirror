@@ -443,6 +443,44 @@ describe('stop() is a real final drain', () => {
   }, 10_000);
 });
 
+describe('offline queue coalescing', () => {
+  it('a run of offline flush ticks drains as ONE update, not one POST per tick', async () => {
+    // flush() pushed one queue entry per 500ms tick and drainQueue posted
+    // them strictly one at a time: ten offline minutes ≈ 1200 sequential
+    // POSTs, 1200 relay rows, 1200 rows for every peer to fetch and
+    // decrypt (2026-09-01 review, SC2).
+    const { host, hostView, joiner, joinView } = await hostAndJoin(simpleDoc('coalesce'));
+    const roomId = host.roomId;
+    try {
+      mock.pause();
+      for (let i = 0; i < 6; i++) {
+        typeAfter(hostView, 'coalesce', ` e${i}`);
+        await sleep(FAST.flushMs * 2); // each edit lands in its own flush tick
+      }
+      await sleep(FAST.flushMs * 2);
+      // (Coalescing runs on every drain attempt, so the queue may already
+      // hold a single merged entry here — the POST count below is the
+      // real assertion.)
+      expect(host.debugState().queued).toBeGreaterThanOrEqual(1);
+      const before = mock.updateCount(roomId);
+      mock.resume();
+      // The stream never dropped (the mock's pause only 503s requests), so
+      // the next flush is what re-triggers the drain — one more edit.
+      typeAfter(hostView, 'coalesce', ' e6');
+      await sleep(600);
+      expect(host.debugState().queued).toBe(0);
+      expect(mock.updateCount(roomId) - before, 'the whole run went as one update').toBeLessThanOrEqual(1);
+      for (const e of ['e0', 'e5', 'e6']) expect(docText(joinView.state.doc)).toContain(e);
+    } finally {
+      mock.resume();
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

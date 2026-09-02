@@ -733,9 +733,29 @@ export class CollabSession {
     return p;
   }
 
+  /** Collapse a queued run into one entry: every entry carries `from`,
+   *  so one export from the head's `from` covers the whole run (plus any
+   *  remote ops imported since — harmless, idempotent). Ack bookkeeping
+   *  keeps working because `version` stays the run's last version. Ten
+   *  offline minutes used to be ~1200 sequential POSTs and 1200 relay
+   *  rows for every peer to fetch (2026-09-01 review, SC2). */
+  private coalesceQueue(): void {
+    if (this.outQueue.length < 2) return;
+    const head = this.outQueue[0]!;
+    const last = this.outQueue[this.outQueue.length - 1]!;
+    this.loroDoc.commit();
+    const blob = this.loroDoc.export({ mode: 'update', from: head.from });
+    this.outQueue = [{ blob, version: last.version, from: head.from }];
+  }
+
   private async drainQueueInner(): Promise<void> {
     this.sending = true;
     try {
+      // ONCE per drain, before the loop — never per iteration: the loop
+      // may split an oversized head into chunk entries, and re-coalescing
+      // those merges them back into the oversized blob (chunk → merge →
+      // chunk, forever).
+      this.coalesceQueue();
       while (this.outQueue.length > 0) {
         const entry = this.outQueue[0]!;
         try {
