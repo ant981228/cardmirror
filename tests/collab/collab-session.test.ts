@@ -697,6 +697,39 @@ describe('import batches are byte-bounded (2026-09-01 review, SC13/SC12)', () =>
   }, 10_000);
 });
 
+describe('a send that keeps failing is reported, not retried in silence (2026-09-01 review, SC14)', () => {
+  it('after N consecutive failures the session signals onSendStuck once; success clears it', async () => {
+    const stuck: number[] = [];
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('stuck'),
+      client,
+      ...FAST,
+      sendStuckAfter: 2,
+      callbacks: { onSendStuck: (n) => stuck.push(n) },
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    void shareCode;
+    await sleep(60);
+    try {
+      mock.setUpdateFailure({ status: 500, detail: 'poisoned' });
+      typeAfter(hostView, 'stuck', ' edit');
+      await sleep(2200); // failure #1 at once, #2 after the ~1s retry
+      expect(stuck.filter((n) => n > 0).length, 'signaled once').toBe(1);
+      mock.setUpdateFailure(null);
+      typeAfter(hostView, 'stuck edit', ' more');
+      await sleep(2500); // retry succeeds → cleared
+      expect(stuck[stuck.length - 1], 'cleared on success').toBe(0);
+      expect(host.debugState().queued).toBe(0);
+    } finally {
+      mock.setUpdateFailure(null);
+      await host.stop();
+      hostView.destroy();
+    }
+  }, 15_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

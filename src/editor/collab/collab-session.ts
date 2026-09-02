@@ -107,6 +107,12 @@ export interface CollabSessionCallbacks {
   /** An established session's reconnects keep 409ing (seat taken past
    *  the relay's reap window). Retrying continues; the UI should explain. */
   onCrowdedOut?: () => void;
+  /** The queue head has failed `sendStuckAfter` times in a row (a
+   *  poison entry, or a relay that keeps refusing): fired once with the
+   *  count when the threshold is crossed, and with 0 when a later send
+   *  succeeds. Retrying continues either way — this is the signal that
+   *  "edits aren't reaching the room" was previously silent. */
+  onSendStuck?: (consecutive: number) => void;
   /** Encrypted presence blob from a peer (cursor layer decodes). */
   onPresence?: (blob: Uint8Array) => void;
   /** A catch-up just imported a LARGE offline backlog (`count` update
@@ -137,6 +143,7 @@ export interface CollabSessionOptions {
   receiveBatchMs?: number;
   inboundBatchBytes?: number;
   resyncSliceBytes?: number;
+  sendStuckAfter?: number;
   /** Stream backoff bounds, injectable for tests. */
   minBackoffMs?: number;
   resetAfterMs?: number;
@@ -314,6 +321,7 @@ export class CollabSession {
     this.auditDelayMs = opts.auditDelayMs ?? 15_000;
     this.inboundBatchBytes = opts.inboundBatchBytes ?? 8 * 1024 * 1024;
     this.resyncSliceBytes = opts.resyncSliceBytes ?? 8 * 1024 * 1024;
+    this.sendStuckAfter = opts.sendStuckAfter ?? 6;
     this.updateByteLimitBase = opts.updateByteLimit ?? 4_500_000;
     this.lastSentVersion = this.loroDoc.version();
     this.ackedVersion = this.lastSentVersion;
@@ -345,6 +353,7 @@ export class CollabSession {
     receiveBatchMs?: number;
     inboundBatchBytes?: number;
     resyncSliceBytes?: number;
+    sendStuckAfter?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -405,6 +414,7 @@ export class CollabSession {
     receiveBatchMs?: number;
     inboundBatchBytes?: number;
     resyncSliceBytes?: number;
+    sendStuckAfter?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -473,6 +483,7 @@ export class CollabSession {
     receiveBatchMs?: number;
     inboundBatchBytes?: number;
     resyncSliceBytes?: number;
+    sendStuckAfter?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -754,6 +765,10 @@ export class CollabSession {
    *  preserved by folding every slice's status into the span ledger. */
   private readonly resyncSliceBytes: number;
   private resyncSlices = 0;
+  /** Consecutive send failures that count as "stuck" (default 6 ≈ one
+   *  minute at the escalating retry cadence). */
+  private readonly sendStuckAfter: number;
+  private sendStuckSignaled = false;
   private consecutiveSendFailures = 0;
   private consecutiveSnapshotFailures = 0;
   private lastCatchUpError: string | null = null;
@@ -869,6 +884,10 @@ export class CollabSession {
           this.postedCount++;
           this.sendRetryMs = 1000;
           this.consecutiveSendFailures = 0;
+          if (this.sendStuckSignaled) {
+            this.sendStuckSignaled = false;
+            this.callbacks.onSendStuck?.(0);
+          }
           if (this.stream?.connected) this.awaitingEcho = { seq, at: Date.now() };
           // Deliberately NOT advancing lastSeq to our own posted seq:
           // the cursor means "I have imported everything ≤ this", and a
@@ -915,6 +934,10 @@ export class CollabSession {
             continue;
           }
           this.consecutiveSendFailures++;
+          if (!this.sendStuckSignaled && this.consecutiveSendFailures >= this.sendStuckAfter) {
+            this.sendStuckSignaled = true;
+            this.callbacks.onSendStuck?.(this.consecutiveSendFailures);
+          }
           // Log the first failure and then every 5th, so a stuck queue
           // leaves evidence without flooding the console.
           if (this.consecutiveSendFailures === 1 || this.consecutiveSendFailures % 5 === 0) {

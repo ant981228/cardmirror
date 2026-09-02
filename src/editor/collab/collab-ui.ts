@@ -581,6 +581,7 @@ function teardownSession(sess: ActiveSession, keepRecord = false): Promise<void>
   sess.cursors.farewell(); // departure frame needs the stream — before stop()
   if (sess.offlineTimer !== null) clearTimeout(sess.offlineTimer);
   clearNotice('collab-offline');
+  clearNotice('collab-send-stuck');
   void sess.session.stop().catch(() => {});
   unregisterCollabPluginSource(sess.ownerUid);
   sessions.delete(sess.ownerUid);
@@ -709,6 +710,23 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
           RELAY_FIX_PATH +
           ' Your edits are saved locally and keep retrying.',
         key: 'collab-401',
+      });
+    },
+    onSendStuck: (n: number) => {
+      // Head-of-line blocking used to retry a poison queue entry forever
+      // with exponential backoff and no user-visible outcome (2026-09-01
+      // review, SC14).
+      if (n === 0) {
+        clearNotice('collab-send-stuck');
+        return;
+      }
+      postNotice({
+        severity: 'warning',
+        title: 'Edits aren\u2019t reaching the session',
+        body:
+          `The last ${n} attempts to send your edits were refused by the relay. They are saved ` +
+          'locally and keep retrying; if this persists, save the document and rejoin.',
+        key: 'collab-send-stuck',
       });
     },
     onCrowdedOut: () => {
