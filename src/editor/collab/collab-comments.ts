@@ -97,6 +97,16 @@ function threadsFromMap(root: LoroMap): Thread[] {
   return threads;
 }
 
+/** Diagnostics: local mutations that could not be mirrored because the
+ *  thread container was already gone (reply's silent no-op is the
+ *  documented delete-wins case; edit-text / set-resolved landing here
+ *  means the user's own pane shows a change the room never got). */
+export const commentsSyncStats = { droppedMutations: 0 };
+function noteDropped(kind: string, threadId: string): void {
+  commentsSyncStats.droppedMutations++;
+  console.warn(`[collab-comments] ${kind} on a thread the room no longer has (${threadId}) — not mirrored`);
+}
+
 export function installCommentsSync(
   doc: LoroDoc,
   getView: () => EditorView | null,
@@ -128,6 +138,8 @@ export function installCommentsSync(
         const existing = t?.get(meta.commentId);
         if (t && existing && typeof existing === 'object' && !(existing instanceof LoroMap)) {
           t.set(meta.commentId, { ...(existing as Comment), text: meta.text });
+        } else {
+          noteDropped('edit-text', meta.threadId);
         }
         break;
       }
@@ -137,6 +149,8 @@ export function installCommentsSync(
         const existing = t?.get(meta.threadId);
         if (t && existing && typeof existing === 'object' && !(existing instanceof LoroMap)) {
           t.set(meta.threadId, { ...(existing as Comment), resolved: meta.resolved });
+        } else {
+          noteDropped('set-resolved', meta.threadId);
         }
         break;
       }
@@ -158,11 +172,19 @@ export function installCommentsSync(
     doc.commit({ origin: COMMENTS_COMMIT_ORIGIN });
   };
 
+  // Last derived thread set this view was handed: a remote comments
+  // event that changes nothing derivable (a same-value LWW rewrite)
+  // used to rebuild every thread AND dispatch a transaction into the
+  // editor anyway (2026-09-01 review, PH-A12).
+  let lastPulledSig = '';
   const pull = (): void => {
     if (disposed) return;
     const view = getView();
     if (!view || view.isDestroyed) return;
     const threads = threadsFromMap(root);
+    const sig = JSON.stringify(threads);
+    if (sig === lastPulledSig) return;
+    lastPulledSig = sig;
     view.dispatch(markSyncOrigin(syncLoadThreads(view.state, threads)));
   };
 

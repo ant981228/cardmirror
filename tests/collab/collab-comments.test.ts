@@ -191,6 +191,36 @@ describe('collab comment-thread sync', () => {
     b.destroy();
   });
 
+  it('a remote comments event that changes nothing does not dispatch into the editor (2026-09-01 review, PH-A12)', async () => {
+    // pull() rebuilt every thread and dispatched a PM transaction on
+    // EVERY remote comments event — one partner toggling "resolved"
+    // materialized the whole thread set and fired a transaction on
+    // everyone, even when the derived threads were identical.
+    const [a, b] = await commentPeers();
+    a.view.dispatch(a.view.state.tr.setMeta(commentsKey, addThreadMeta(thread('20', 'steady'))));
+    await settle();
+    await syncAll([a, b]);
+    // First set lands the value (a real change → one dispatch, not counted).
+    a.view.dispatch(a.view.state.tr.setMeta(commentsKey, setResolvedMeta('20', false)));
+    await settle();
+    await syncAll([a, b]);
+    let syncDispatches = 0;
+    const inner = b.view.dispatch.bind(b.view);
+    (b.view as { dispatch: (tr: unknown) => void }).dispatch = (tr) => {
+      const t = tr as { getMeta: (k: unknown) => unknown };
+      if (t.getMeta(commentsKey)) syncDispatches++;
+      inner(tr as never);
+    };
+    // A re-sets the SAME value: the map changes bytes (LWW rewrite) but
+    // the derived threads on B are identical.
+    a.view.dispatch(a.view.state.tr.setMeta(commentsKey, setResolvedMeta('20', false)));
+    await settle();
+    await syncAll([a, b]);
+    expect(syncDispatches, 'no-change events must not dispatch').toBe(0);
+    a.destroy();
+    b.destroy();
+  });
+
   it('host seeding pushes pre-session threads; partner receives them', async () => {
     const [a, b] = await commentPeers();
     // threads that existed before the session (e.g. from a docx import)
