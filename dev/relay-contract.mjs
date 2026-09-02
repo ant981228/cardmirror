@@ -23,6 +23,24 @@ function check(name, ok, extra = '') {
   const r = await fetch(`${BASE}/health`);
   check('health 200', r.status === 200);
 }
+// 1b. readiness probes the database (2026-09-01 review, R14)
+{
+  const r = await fetch(`${BASE}/readyz`);
+  check('readyz 200 (DB reachable)', r.status === 200, String(r.status));
+}
+// 1c. an oversized Content-Length is refused before the body is read (R5)
+{
+  const http = await import('node:http');
+  const u = new URL(`${BASE}/messages`);
+  const status = await new Promise((resolve) => {
+    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST',
+      headers: { ...AUTH, 'Content-Type': 'application/json', 'Content-Length': '999999999' } }, (res) => resolve(res.statusCode));
+    req.on('error', () => resolve(0));
+    req.write('{}');
+    req.end();
+  });
+  check('oversized Content-Length → 413 before reading', status === 413, String(status));
+}
 // 2. auth required
 {
   const r1 = await fetch(`${BASE}/messages?recipient=x`);
@@ -320,6 +338,32 @@ if (process.env.ROOMS !== '0') {
   check('rooms: tombstone 410 (ended ≠ never existed)', g410.status === 410, String(g410.status));
   const s410 = await fetch(`${BASE}/rooms/${roomId}/stream`, { headers: AUTH });
   check('rooms: tombstoned stream 410', s410.status === 410, String(s410.status));
+}
+
+// 15. participant cap: a reconnect with the SAME sid replaces its own ghost
+// instead of counting against the cap (2026-09-01 review, R7)
+{
+  const mk = await fetch(`${BASE}/rooms`, { method: 'POST', headers: AUTH });
+  const { roomId } = await mk.json();
+  const ctls = [];
+  const open = async (sid) => {
+    const ctl = new AbortController();
+    const res = await fetch(`${BASE}/rooms/${roomId}/stream?sid=${sid}`, { headers: AUTH, signal: ctl.signal });
+    ctls.push(ctl);
+    return res.status;
+  };
+  const statuses = [];
+  for (let i = 0; i < 10; i++) statuses.push(await open(`sid${i}`));
+  check('rooms: 10 streams open', statuses.every((st) => st === 200), statuses.join(','));
+  const eleventh = await open('sid-new');
+  check('rooms: 11th distinct sid → 409', eleventh === 409, String(eleventh));
+  // Drop sid0 abruptly (no server-side reap yet) and reconnect AS sid0.
+  ctls[0].abort();
+  await new Promise((r2) => setTimeout(r2, 50));
+  const again = await open('sid0');
+  check('rooms: same-sid reconnect replaces its ghost (200, not 409)', again === 200, String(again));
+  for (const c of ctls) c.abort();
+  await fetch(`${BASE}/rooms/${roomId}`, { method: 'DELETE', headers: AUTH });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
