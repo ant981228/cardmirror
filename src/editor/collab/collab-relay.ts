@@ -125,6 +125,12 @@ export function relayClient(): RoomsClient | null {
     baseUrl: () => relayBaseUrl() || url,
     token: () => resolveCredential().token,
     routingCode: () => resolveCredential().routingCode,
+    // ONE resolution per request: the separate token/routingCode
+    // suppliers each re-ran the full resolution (~4 storage reads + the
+    // settings reads) — three times per request, at cursor-presence
+    // rates on the typing thread (2026-09-01 review, T13). Still
+    // re-read per request: no memo, no staleness.
+    credentials: () => resolveCredential(),
   });
 }
 

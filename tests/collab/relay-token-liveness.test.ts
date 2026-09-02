@@ -50,6 +50,28 @@ beforeEach(() => {
   settings.set('pairingRelayToken', '');
 });
 
+describe('one credential resolution per request (2026-09-01 review, T13)', () => {
+  it('a request resolves the credential once, not once per header', async () => {
+    const { vi } = await import('vitest');
+    settings.set('pairingRelayUrl', 'https://relay.example/relay');
+    settings.set('pairingRelayToken', 'tok-A');
+    const client = relayClient()!;
+    // Stub the wire: the request must still assemble its headers.
+    (client.opts as { fetchImpl?: unknown }).fetchImpl = async () =>
+      new Response('{"seq":1}', { status: 202, headers: { 'Content-Type': 'application/json' } });
+    const spy = vi.spyOn(window.localStorage, 'getItem');
+    await client.postUpdate('room', new Uint8Array([1, 2, 3]));
+    // Before: token() + routingCode() each ran the full resolution (dev
+    // relay 2 reads + web token 2 reads each) → ~8 storage reads for the
+    // credential alone. One combined resolution → at most ~4.
+    expect(spy.mock.calls.length).toBeLessThanOrEqual(6);
+    spy.mockRestore();
+    // Liveness unchanged: the next request sees a settings write at once.
+    settings.set('pairingRelayToken', 'tok-B');
+    expect(client.opts.credentials!().token).toBe('tok-B');
+  });
+});
+
 describe('relayClient credential liveness', () => {
   it('a renewed/relinked entitlement reaches an ALREADY-RUNNING session', () => {
     linkWebAccount('entitlement-A');

@@ -108,6 +108,10 @@ export interface RoomsClientOptions {
    *  bearer is an entitlement (machine binding). ''/absent = omit the
    *  header (shared-token or self-hosted relay — nothing to bind). */
   routingCode?: () => string;
+  /** Optional combined supplier: when present, a request resolves token
+   *  + routing code with ONE call instead of one each (the resolution
+   *  behind them is not free). Same per-request liveness contract. */
+  credentials?: () => { token: string; routingCode: string };
   /** True when the bearer is a room GUEST PASS — an immutable,
    *  room-scoped credential the client can never refresh (re-minting is
    *  a host-only endpoint). Lets the session treat a relay-confirmed
@@ -144,9 +148,11 @@ export class RoomsClient {
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
-    const routing = this.opts.routingCode?.() ?? '';
+    const cred = this.opts.credentials?.();
+    const routing = cred ? cred.routingCode : (this.opts.routingCode?.() ?? '');
+    const token = cred ? cred.token : this.opts.token();
     return {
-      Authorization: `Bearer ${this.opts.token()}`,
+      Authorization: `Bearer ${token}`,
       [RELAY_CLIENT_VERSION_HEADER]: appVersion,
       ...(routing ? { [RELAY_CLIENT_ROUTING_HEADER]: routing } : {}),
       ...extra,
@@ -181,7 +187,8 @@ export class RoomsClient {
     // by design) — fail locally instead of sending `Bearer ` to be
     // 401'd all night (2026-09-01 review, T5). The retry backoff still
     // applies, so a renewal heals it.
-    if (!this.opts.token()) {
+    const auth = (init?.headers as Record<string, string> | undefined)?.['Authorization'];
+    if (auth !== undefined && auth.trim() === 'Bearer') {
       const e = new RoomsError(0, 'no relay credential');
       this.noteFailure(e);
       throw e;
@@ -390,6 +397,8 @@ export interface RoomStreamOptions {
   sid?: string;
   callbacks: RoomStreamCallbacks;
   fetchImpl?: RoomsFetch;
+  /** Optional combined credential supplier (see RoomsClientOptions). */
+  credentials?: () => { token: string; routingCode: string };
   /** Backoff bounds, injectable for tests. */
   minBackoffMs?: number;
   maxBackoffMs?: number;
@@ -600,7 +609,7 @@ export class RoomStream {
 
   private async connectLoop(): Promise<void> {
     if (this.stopped) return;
-    if (!this.opts.token()) {
+    if (!(this.opts.credentials?.().token ?? this.opts.token())) {
       // An absent credential is unambiguously local — no need to burn
       // two round trips proving it. Signal auth-dead now; keep the
       // backoff so a renewal (or re-link) reconnects.
@@ -614,12 +623,14 @@ export class RoomStream {
     const fetchImpl = this.opts.fetchImpl ?? boundFetch;
     try {
       const sidQ = this.opts.sid ? `?sid=${encodeURIComponent(this.opts.sid)}` : '';
-      const routing = this.opts.routingCode?.() ?? '';
+      const cred = this.opts.credentials?.();
+      const routing = cred ? cred.routingCode : (this.opts.routingCode?.() ?? '');
+      const token = cred ? cred.token : this.opts.token();
       const res = await fetchImpl(`${this.opts.baseUrl()}/rooms/${this.opts.roomId}/stream${sidQ}`, {
         method: 'GET',
         headers: {
           Accept: 'text/event-stream',
-          Authorization: `Bearer ${this.opts.token()}`,
+          Authorization: `Bearer ${token}`,
           [RELAY_CLIENT_VERSION_HEADER]: appVersion,
           ...(routing ? { [RELAY_CLIENT_ROUTING_HEADER]: routing } : {}),
         },
