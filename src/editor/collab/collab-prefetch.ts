@@ -52,7 +52,9 @@ export async function prefetchInviteSeed(shareCode: string): Promise<void> {
         blobs.push(page.snapshot.blob);
       }
       for (const u of page.updates) blobs.push(u.blob);
-      after = page.lastSeq;
+      const next = page.lastSeq;
+      if (page.more && next <= after) break; // non-advancing page: never loop on it
+      after = next;
       if (!page.more) break;
     }
     if (blobs.length === 0) return;

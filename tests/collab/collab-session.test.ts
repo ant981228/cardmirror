@@ -334,6 +334,31 @@ describe('collab session end-to-end', () => {
   });
 });
 
+describe('paging loops never trust the server to make progress', () => {
+  it('a page that says `more` but does not advance the cursor terminates the loop', async () => {
+    // A proxy-mangled body or half-deployed relay answering {more:true,
+    // lastSeq:<same>} forever turned catch-up into an unbounded, un-delayed
+    // fetch loop pinning the relay (2026-09-01 review, T4).
+    const { host, hostView, joiner, joinView } = await hostAndJoin(simpleDoc('paging'));
+    mock.setStuckPaging(true);
+    try {
+      const before = mock.updateFetches();
+      const settled = await Promise.race([
+        joiner.catchUp().then(() => 'settled' as const),
+        sleep(1500).then(() => 'hung' as const),
+      ]);
+      expect(settled, 'catch-up must terminate on a non-advancing page').toBe('settled');
+      expect(mock.updateFetches() - before, 'and must not hammer the relay').toBeLessThan(10);
+    } finally {
+      mock.setStuckPaging(false);
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('room-history integrity (compaction-loss self-heal)', () => {
   it('P14: a compaction that destroyed a peer\'s ops is detected and repaired by the audit', async () => {
     const mock = await startRoomsMock();

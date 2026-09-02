@@ -914,8 +914,16 @@ export class CollabSession {
           pendingLeft = pendingLeft || (!!status.pending && status.pending.size > 0);
           if (pendingLeft) this.pendingImports = true;
         }
-        if (page.lastSeq > this.lastSeq) this.lastSeq = page.lastSeq;
+        const advanced = page.lastSeq > this.lastSeq;
+        if (advanced) this.lastSeq = page.lastSeq;
         if (!page.more) break;
+        // Progress guard: a `more` page whose cursor did not advance (a
+        // proxy-mangled body, a half-deployed relay) would otherwise loop
+        // forever with no delay, pinning the relay (2026-09-01 review).
+        if (!advanced) {
+          console.warn('[collab] catch-up page reported more without advancing — stopping');
+          break;
+        }
       }
       if (expectMissingDeps && !importedAny) pendingLeft = true;
       if (pendingLeft) {
@@ -948,7 +956,12 @@ export class CollabSession {
               /* skip undecryptable frame */
             }
           }
-          after = page.lastSeq;
+          const next = page.lastSeq;
+          if (page.more && next <= after) {
+            console.warn('[collab] resync page reported more without advancing — stopping');
+            break;
+          }
+          after = next;
           if (!page.more) break;
         }
         if (blobs.length > 0) {
@@ -1130,7 +1143,12 @@ export class CollabSession {
           /* undecodable blob */
         }
       }
-      after = page.lastSeq;
+      const next = page.lastSeq;
+      if (page.more && next <= after) {
+        console.warn('[collab] audit scan page reported more without advancing — stopping');
+        break;
+      }
+      after = next;
       if (!page.more) break;
     }
     return roomMax;

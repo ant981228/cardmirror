@@ -41,6 +41,12 @@ export interface RoomsMock {
    *  answers 401 with an HTML login page — the not-the-relay 401 shape
    *  the stream's auth-dead detection must ignore. */
   setPortalMode(on: boolean): void;
+  /** Broken-paging simulation: every updates GET answers `more: true`
+   *  with a NON-advancing lastSeq and no rows (a proxy-mangled body, a
+   *  half-deployed relay). A client that trusts `more` alone hot-loops. */
+  setStuckPaging(on: boolean): void;
+  /** Total updates-GET requests served (paging-loop cost probe). */
+  updateFetches(): number;
 }
 
 const MAX_STREAMS_PER_ROOM = 10;
@@ -57,6 +63,8 @@ export function startRoomsMock(): Promise<RoomsMock> {
   let streamAttempts = 0;
   let pushMuted = false;
   let portalMode = false;
+  let stuckPaging = false;
+  let updateFetches = 0;
 
   const json = (res: http.ServerResponse, status: number, body?: unknown) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -146,7 +154,11 @@ export function startRoomsMock(): Promise<RoomsMock> {
     if (req.method === 'GET' && sub === 'updates') {
       const room = roomOr(res, roomId);
       if (!room) return;
+      updateFetches++;
       const after = parseInt(url.searchParams.get('after') ?? '0', 10);
+      if (stuckPaging) {
+        return json(res, 200, { updates: [], more: true, lastSeq: after, snapCovers: 0 });
+      }
       const haveSnapRaw = url.searchParams.get('haveSnap');
       const haveSnap = haveSnapRaw === null ? null : parseInt(haveSnapRaw, 10);
       const out: Record<string, unknown> = {};
@@ -249,6 +261,10 @@ export function startRoomsMock(): Promise<RoomsMock> {
         setPortalMode: (on) => {
           portalMode = on;
         },
+        setStuckPaging: (on) => {
+          stuckPaging = on;
+        },
+        updateFetches: () => updateFetches,
         close: () =>
           new Promise<void>((r) => {
             for (const room of rooms.values()) for (const s of room.streams) s.destroy();
