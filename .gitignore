@@ -102,3 +102,4 @@ TOAST_AUDIT.md
 
 # Machine-local scratch tests (absolute-path deps; must never reach CI).
 tests/scratch/
+COLLAB_ADDITIVE_REVIEW.md
