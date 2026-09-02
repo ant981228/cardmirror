@@ -1239,7 +1239,8 @@ edition's mobile layout has neither.
 [debate-decoded.ghost.io/cardmirror-connect](https://debate-decoded.ghost.io/cardmirror-connect/)),
 sign in, and paste the code the page shows into the settings row. Codes are
 single-use and expire after ten minutes. A membership covers **two
-machines**; linking a third asks before it unlinks the oldest.
+machines**; linking a third shows your linked machines and asks which one to
+unlink (older relays unlink the oldest automatically).
 **Disconnect** unlinks this machine; regenerating your pairing code also
 unlinks it.
 

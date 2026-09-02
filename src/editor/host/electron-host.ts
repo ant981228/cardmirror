@@ -63,6 +63,8 @@ export interface PairingConnectResultIpc {
   email?: string;
   limit?: number;
   wouldEvict?: { routingCode: string; boundAt: string };
+  /** Seat picker list (relay ≥ 2026-09-02); absent on older relays. */
+  candidates?: Array<{ routingCode: string; boundAt: string; lastSeenAt?: string; label?: string }>;
   retryCode?: string;
 }
 
@@ -376,6 +378,8 @@ interface ElectronAPI {
   pairingConnectAccount?(payload: {
     connectCode: string;
     confirmEvict?: boolean;
+    /** Routing code of the seat to unlink (from `candidates`). */
+    evict?: string;
   }): Promise<PairingConnectResultIpc>;
   pairingAccountStatus?(): Promise<PairingAccountStatusIpc>;
   pairingDisconnectAccount?(): Promise<PairingAccountStatusIpc>;
@@ -1154,6 +1158,7 @@ export class ElectronHost implements Host {
   async pairingConnectAccount(payload: {
     connectCode: string;
     confirmEvict?: boolean;
+    evict?: string;
   }): Promise<PairingConnectResultIpc> {
     return (
       (await api().pairingConnectAccount?.(payload)) ?? { ok: false, error: 'disabled' }

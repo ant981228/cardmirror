@@ -35,6 +35,7 @@
 
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron';
 import { gzipSync } from 'node:zlib';
+import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createPairingKeystore, routingId, type PairingKeystore, type SealedBundle } from './pairing-crypto.js';
@@ -49,6 +50,7 @@ import {
   type ConnectOutcome,
   type ConnectResponseBody,
   type EntitlementState,
+  renewalRetryDelayMs,
 } from './pairing-entitlement.js';
 
 // Mirrors src/editor/relay-protocol.ts (the renderer's copy). Declared
@@ -263,7 +265,29 @@ function broadcastEntitlement(extra?: { evicted?: boolean; lapsed?: boolean }): 
   }
 }
 
-async function connectAccount(connectCode: string, confirmEvict: boolean): Promise<ConnectOutcome> {
+/** Machine name for the relay's seat picker: hostname + platform
+ *  ("Anthonys-MacBook-Pro (macOS)"). Sent on every connect and renewal
+ *  so seats bound before the field existed pick one up. */
+function deviceLabel(): string {
+  let host = '';
+  try {
+    host = os.hostname().replace(/\.local$/i, '');
+  } catch {
+    /* unavailable — the platform alone still helps */
+  }
+  const plat = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux';
+  return `${host ? `${host} ` : ''}(${plat})`.slice(0, 64);
+}
+
+/** Earliest time the automatic renewal may try again (see
+ *  renewalRetryDelayMs). A user-pasted code resets it. */
+let renewNotBefore = 0;
+
+async function connectAccount(
+  connectCode: string,
+  confirmEvict: boolean,
+  evict?: string,
+): Promise<ConnectOutcome> {
   await ensureEntitlementLoaded();
   // Code-less renewal must prove continuity: present the stored
   // entitlement (even a recently-expired one — the relay accepts a
@@ -284,6 +308,10 @@ async function connectAccount(connectCode: string, confirmEvict: boolean): Promi
         connectCode: connectCode.trim(),
         routingCode: ks().ownRoutingId(),
         confirmEvict,
+        // Seat picker: the machine the user chose to unlink (relay ≥
+        // 2026-09-02; older relays ignore it and evict the oldest).
+        ...(evict ? { evict } : {}),
+        deviceLabel: deviceLabel(),
       }),
     });
   } catch (err) {
@@ -292,6 +320,7 @@ async function connectAccount(connectCode: string, confirmEvict: boolean): Promi
   }
   const body = (await res.json().catch(() => ({}))) as ConnectResponseBody;
   const { outcome, next, evicted } = interpretConnectResponse(res.status, body, entitlementState);
+  renewNotBefore = Date.now() + renewalRetryDelayMs(outcome);
   const wasLapsed = membershipLapsed;
   membershipLapsed = nextLapsedFlag(membershipLapsed, outcome, evicted);
   if (next !== undefined) {
@@ -312,7 +341,7 @@ async function connectAccount(connectCode: string, confirmEvict: boolean): Promi
  *  never release one. Failures are logged and swallowed: the seat then
  *  stays held until an evict, which is all Disconnect ever did before
  *  this existed. */
-async function releaseSeat(entitlement: string): Promise<void> {
+async function releaseSeat(entitlement: string, routingCode = ks().ownRoutingId()): Promise<void> {
   try {
     const res = await fetch(`${relayUrl()}/disconnect`, {
       method: 'POST',
@@ -321,7 +350,9 @@ async function releaseSeat(entitlement: string): Promise<void> {
         Authorization: `Bearer ${entitlement}`,
         [RELAY_CLIENT_VERSION_HEADER]: app.getVersion(),
       },
-      body: JSON.stringify({ routingCode: ks().ownRoutingId() }),
+      // `routingCode` is explicit because a regenerate names the OLD
+      // routing id — the one the entitlement was minted for.
+      body: JSON.stringify({ routingCode }),
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) console.log('[pairing] seat released server-side');
@@ -339,6 +370,7 @@ async function maybeRenewEntitlement(): Promise<void> {
   await ensureEntitlementLoaded();
   if (entitlementState === null) return;
   if (!renewalDue(entitlementState, Date.now())) return;
+  if (Date.now() < renewNotBefore) return; // a refused renewal backs off (renewalRetryDelayMs)
   renewing = true;
   try {
     const outcome = await connectAccount('', false);
@@ -749,15 +781,23 @@ export function registerPairingIpc(): void {
   );
 
   ipcMain.handle('host:pairing-regenerate-key', (): { ownCode: string } => {
+    // The entitlement is bound to the OLD routing code — a new keypair
+    // needs a fresh connect from the blog page. Capture the old identity
+    // first: the seat release must name the routing id the entitlement
+    // was minted for. Without the release the old seat stayed held and
+    // the regenerated machine's re-link then evicted a machine the
+    // member still uses (relay identity audit 2026-09-02).
+    const oldRoutingId = ks().ownRoutingId();
+    const oldEntitlement = entitlementState?.entitlement ?? '';
     const ownCode = ks().regenerate();
     consumed.clear();
-    // The entitlement is bound to the OLD routing code — a new keypair
-    // needs a fresh connect from the blog page.
     if (entitlementState !== null || membershipLapsed) {
       entitlementState = null;
       membershipLapsed = false;
+      renewNotBefore = 0;
       void persistEntitlement();
       broadcastEntitlement();
+      if (oldEntitlement) void releaseSeat(oldEntitlement, oldRoutingId);
     }
     applyDelivery();
     return { ownCode };
@@ -767,11 +807,13 @@ export function registerPairingIpc(): void {
   // while the relay runs ungated; enforcement is a server-side flip.
   ipcMain.handle(
     'host:pairing-connect-account',
-    async (_e, payload: { connectCode: string; confirmEvict?: boolean }) => {
+    async (_e, payload: { connectCode: string; confirmEvict?: boolean; evict?: string }) => {
       if (typeof payload?.connectCode !== 'string' || !payload.connectCode.trim()) {
         return { ok: false, error: 'badCode' };
       }
-      return connectAccount(payload.connectCode, !!payload.confirmEvict);
+      renewNotBefore = 0; // a person is acting — never held back by a backoff
+      const evict = typeof payload.evict === 'string' && payload.evict.trim() ? payload.evict.trim() : undefined;
+      return connectAccount(payload.connectCode, !!payload.confirmEvict, evict);
     },
   );
   ipcMain.handle('host:pairing-account-status', async () => {
@@ -784,6 +826,7 @@ export function registerPairingIpc(): void {
       const entitlement = entitlementState?.entitlement ?? '';
       entitlementState = null;
       membershipLapsed = false;
+      renewNotBefore = 0;
       await persistEntitlement();
       broadcastEntitlement();
       // Release the seat server-side AFTER the local wipe (so a quick

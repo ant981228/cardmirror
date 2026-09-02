@@ -140,6 +140,36 @@ async function postConnect(
   return (await res.json()) as ConnectResponse;
 }
 
+/** Machine name for the relay's seat picker — the best a browser can
+ *  say about itself: "Google Chrome on macOS", "Safari on iOS". Never
+ *  identifying beyond that; '' when there is no navigator (tests). */
+export function webDeviceLabel(): string {
+  if (typeof navigator === 'undefined') return '';
+  const nav = navigator as Navigator & {
+    userAgentData?: { platform?: string; brands?: Array<{ brand: string }> };
+  };
+  const ua = nav.userAgent || '';
+  const platform =
+    nav.userAgentData?.platform ||
+    (/Windows/i.test(ua) ? 'Windows'
+      : /iPad|iPhone/i.test(ua) ? 'iOS'
+      : /Mac OS X|Macintosh/i.test(ua) ? 'macOS'
+      : /CrOS/i.test(ua) ? 'ChromeOS'
+      : /Android/i.test(ua) ? 'Android'
+      : /Linux/i.test(ua) ? 'Linux'
+      : '');
+  const brands = nav.userAgentData?.brands?.map((b) => b.brand) ?? [];
+  const named = brands.find((b) => !/Not.?A.?Brand|Chromium/i.test(b));
+  const browser =
+    named ||
+    (/Edg\//.test(ua) ? 'Edge'
+      : /Firefox\//.test(ua) ? 'Firefox'
+      : /Chrome\//.test(ua) ? 'Chrome'
+      : /Safari\//.test(ua) ? 'Safari'
+      : 'Browser');
+  return `${browser}${platform ? ` on ${platform}` : ''}`.slice(0, 64);
+}
+
 function store(rc: string, got: ConnectResponse): void {
   const s = ls();
   if (!s) return;
@@ -155,7 +185,7 @@ function store(rc: string, got: ConnectResponse): void {
 export async function webAccountConnect(
   relayBase: string,
   connectCode: string,
-  opts?: { confirmEvict?: boolean },
+  opts?: { confirmEvict?: boolean; evict?: string },
 ): Promise<WebAccountStatus> {
   const rc = await webRoutingCode();
   const proof = await signWebProof('connect');
@@ -163,6 +193,10 @@ export async function webAccountConnect(
     connectCode: connectCode.trim(),
     routingCode: rc,
     confirmEvict: opts?.confirmEvict === true,
+    // Seat picker: the machine the user chose to unlink (relay ≥
+    // 2026-09-02; older relays ignore it and evict the oldest).
+    ...(opts?.evict ? { evict: opts.evict } : {}),
+    deviceLabel: webDeviceLabel(),
     ...proof,
   });
   store(rc, got);
@@ -200,6 +234,7 @@ async function webAccountRenewInner(relayBase: string, force: boolean): Promise<
     const got = await postConnect(relayBase, {
       connectCode: '',
       routingCode: rc,
+      deviceLabel: webDeviceLabel(), // refreshes the seat picker's label
       ...proof,
     });
     store(rc, got);

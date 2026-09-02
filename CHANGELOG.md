@@ -5,6 +5,23 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **Choose which machine to unlink.** Linking a third machine to a
+  membership now lists the machines already linked (name, link date,
+  last active) and asks which one to unlink, instead of silently
+  unlinking the oldest one — which was often the machine you use most.
+
+### Fixed
+
+- **Regenerating your pairing code releases its seat.** The old code's
+  seat stayed held on the relay, so the regenerated machine's re-link
+  could push out a machine you still use.
+- **Refused account renewals back off** instead of retrying every few
+  minutes.
+
 ## 1.6.0 — 2026-09-01
 
 ### Added

@@ -51,6 +51,8 @@ interface PairingAccountStatusIpc {
   email: string;
 }
 interface PairingConnectResultIpc {
+  /** Seat picker list (relay ≥ 2026-09-02); absent on older relays. */
+  candidates?: Array<{ routingCode: string; boundAt: string; lastSeenAt?: string; label?: string }>;
   ok: boolean;
   error?: string;
   expiresAt?: number;
@@ -758,7 +760,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('pairing:unauthorized', listener);
   },
   /** Blog-account entitlement (gates nothing until relay-side enforcement). */
-  pairingConnectAccount: (payload: { connectCode: string; confirmEvict?: boolean }) =>
+  pairingConnectAccount: (payload: { connectCode: string; confirmEvict?: boolean; evict?: string }) =>
     ipcRenderer.invoke('host:pairing-connect-account', payload) as Promise<PairingConnectResultIpc>,
   pairingAccountStatus: () =>
     ipcRenderer.invoke('host:pairing-account-status') as Promise<PairingAccountStatusIpc>,

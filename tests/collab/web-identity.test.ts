@@ -49,6 +49,7 @@ import {
   webAccountUnlink,
   __resetWebAccountForTests,
   scheduleWebRenewal,
+  webDeviceLabel,
 } from '../../src/editor/collab/web-account.js';
 
 function b64urlToBytes(s: string): Uint8Array {
@@ -135,6 +136,21 @@ describe('web account linking', () => {
     expect(status.email).toBe('user@example.com');
     expect(webEntitlementToken()).toBe('ent-token-1');
     expect(webRoutingCodeSync()).toBe(String(lastBody['routingCode']));
+  });
+
+  it('connect carries the picked seat + a device label; renewal refreshes the label (2026-09-02)', async () => {
+    await webAccountConnect(BASE, 'code-1', { confirmEvict: true, evict: 'wk1.other-machine' });
+    expect(lastBody['confirmEvict']).toBe(true);
+    expect(lastBody['evict']).toBe('wk1.other-machine');
+    expect(typeof lastBody['deviceLabel']).toBe('string');
+    expect(String(lastBody['deviceLabel']).length).toBeGreaterThan(0);
+    expect(webDeviceLabel()).toBe(lastBody['deviceLabel']);
+    // No pick → no `evict` key at all (older relays never see it).
+    await webAccountConnect(BASE, 'code-2');
+    expect('evict' in lastBody).toBe(false);
+    await webAccountRenew(BASE, true);
+    expect(lastBody['connectCode']).toBe('');
+    expect(lastBody['deviceLabel']).toBe(webDeviceLabel());
   });
 
   it('an expired entitlement stops being served', async () => {

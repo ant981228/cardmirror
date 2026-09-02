@@ -14,6 +14,7 @@ import {
   interpretConnectResponse,
   nextLapsedFlag,
   type EntitlementState,
+  renewalRetryDelayMs,
 } from '../../apps/desktop/src/pairing-entitlement.js';
 
 const NOW = 1_800_000_000_000;
@@ -159,5 +160,46 @@ describe('nextLapsedFlag', () => {
       expect(nextLapsedFlag(true, { ok: false, error }, false), error).toBe(true);
       expect(nextLapsedFlag(false, { ok: false, error }, false), error).toBe(false);
     }
+  });
+});
+
+describe('seat picker (relay ≥ 2026-09-02)', () => {
+  it('409 seatLimit carries the candidate list when the relay sends one, state untouched', () => {
+    const candidates = [
+      { routingCode: 'rc-laptop-full', boundAt: '2026-08-16T00:00:00Z', lastSeenAt: '2026-09-01T00:00:00Z', label: 'Laptop (macOS)' },
+      { routingCode: 'rc-vm-full', boundAt: '2026-08-20T00:00:00Z', lastSeenAt: '2026-08-25T00:00:00Z', label: '' },
+    ];
+    const r = interpretConnectResponse(
+      409,
+      { detail: { error: 'seatLimit', limit: 2, retryCode: 'R2', wouldEvict: { routingCode: 'rc-lapt', boundAt: '2026-08-16T00:00:00Z' }, candidates } },
+      state(),
+    );
+    expect(r.outcome.error).toBe('seatLimit');
+    expect(r.outcome.candidates).toEqual(candidates);
+    expect(r.outcome.retryCode).toBe('R2');
+    expect(r.next).toBeUndefined();
+    expect(r.evicted).toBe(false);
+  });
+
+  it('an older relay (no candidates) leaves the field absent — the legacy confirm flow', () => {
+    const r = interpretConnectResponse(
+      409,
+      { detail: { error: 'seatLimit', limit: 2, retryCode: 'R', wouldEvict: { routingCode: 'abc', boundAt: 'x' } } },
+      state(),
+    );
+    expect(r.outcome.candidates).toBeUndefined();
+    expect(r.outcome.wouldEvict).toEqual({ routingCode: 'abc', boundAt: 'x' });
+  });
+});
+
+describe('renewalRetryDelayMs (refused renewals back off instead of retrying every poll)', () => {
+  it('refusals only a person can fix wait 6h; transient failures 15min; success and eviction 0', () => {
+    expect(renewalRetryDelayMs({ ok: true })).toBe(0);
+    expect(renewalRetryDelayMs({ ok: false, error: 'evicted' })).toBe(0);
+    for (const error of ['subscription', 'badCode', 'unsupported']) {
+      expect(renewalRetryDelayMs({ ok: false, error }), error).toBe(6 * HOUR);
+    }
+    expect(renewalRetryDelayMs({ ok: false, error: 'network' })).toBe(15 * 60 * 1000);
+    expect(renewalRetryDelayMs({ ok: false, error: 'http 502' })).toBe(15 * 60 * 1000);
   });
 });

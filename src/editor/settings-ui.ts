@@ -7,7 +7,7 @@
  * settings store immediately.
  */
 
-import { confirmDialog } from './text-prompt.js';
+import { confirmDialog, promptForRouteChoice } from './text-prompt.js';
 import { isLiteBuild } from './lite.js';
 import { entryConflictWarnings } from './custom-autocorrect-plugin.js';
 import {
@@ -88,6 +88,63 @@ import {
   DEFAULT_SPEECH_FILENAME_TEMPLATE,
   renderSpeechFilename,
 } from './speech-filename.js';
+
+interface SeatCandidateUi {
+  routingCode: string;
+  boundAt: string;
+  lastSeenAt?: string;
+  label?: string;
+}
+
+/** Seat-limit prompt. With a candidate list (relay ≥ 2026-09-02) the
+ *  user picks WHICH machine to unlink — route-style buttons with 1/2/3
+ *  keys, one per seat, labelled with the machine name that build
+ *  reported plus its link and last-active dates. Without one (older
+ *  relay) it is the legacy "unlink the oldest?" confirm. Resolves to the
+ *  routing code to evict, `undefined` for the legacy confirm, or
+ *  'cancel'. The relay used to evict the OLDEST link unconditionally,
+ *  which was a member's long-used primary machine whenever a stale
+ *  seat (a wiped laptop, a VM) had been linked later (identity audit
+ *  2026-09-02). */
+async function pickSeatToUnlink(
+  candidates: SeatCandidateUi[],
+  limit: number,
+  legacyBoundAt: string | undefined,
+  thisKind: 'machine' | 'browser',
+): Promise<string | undefined | 'cancel'> {
+  const fmt = (iso?: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+  };
+  if (candidates.length > 0) {
+    const choices = candidates.map((c) => {
+      const linked = fmt(c.boundAt);
+      const seen = fmt(c.lastSeenAt);
+      return {
+        value: c.routingCode,
+        label: `Unlink ${c.label?.trim() || `the machine linked ${linked || 'earlier'}`}`,
+        description: [linked ? `Linked ${linked}` : '', seen ? `last active ${seen}` : '']
+          .filter(Boolean)
+          .join(' · '),
+      };
+    });
+    const picked = await promptForRouteChoice({
+      message:
+        `Your membership covers ${limit} machines and every seat is taken. ` +
+        `Choose a machine to unlink so this ${thisKind} can be linked:`,
+      choices,
+      cancelLabel: 'Keep my current machines',
+    });
+    return picked ?? 'cancel';
+  }
+  const go = await confirmDialog(
+    `Your membership covers ${limit} machines and both seats are taken. ` +
+      `Link this ${thisKind} anyway and unlink the machine added ${fmt(legacyBoundAt) || 'earlier'}?`,
+    { okLabel: thisKind === 'browser' ? 'Link This Browser' : 'Link This Machine' },
+  );
+  return go ? undefined : 'cancel';
+}
 
 /**
  * Body fonts for the font dropdowns, grouped into `<optgroup>`s.
@@ -2602,13 +2659,17 @@ function buildPairingAccountEditor(row: HTMLElement): HTMLElement {
     disabled: 'Account linking isn\u2019t enabled in this build.',
   };
 
-  async function connect(code: string, confirmEvict: boolean): Promise<void> {
+  async function connect(code: string, confirmEvict: boolean, evict?: string): Promise<void> {
     const electron = getElectronHost();
     if (!electron?.pairingConnectAccount) return;
     connectBtn.disabled = true;
     message.textContent = 'Connecting\u2026';
     try {
-      const res = await electron.pairingConnectAccount({ connectCode: code, confirmEvict });
+      const res = await electron.pairingConnectAccount({
+        connectCode: code,
+        confirmEvict,
+        ...(evict ? { evict } : {}),
+      });
       if (res.ok) {
         message.textContent = '';
         input.value = '';
@@ -2618,19 +2679,17 @@ function buildPairingAccountEditor(row: HTMLElement): HTMLElement {
         return;
       }
       if (res.error === 'seatLimit' && res.retryCode) {
-        const when = res.wouldEvict?.boundAt
-          ? new Date(res.wouldEvict.boundAt).toLocaleDateString()
-          : 'earlier';
-        const go = await confirmDialog(
-          `Your membership covers ${res.limit ?? 2} machines and both seats are taken. ` +
-            `Link this machine anyway and unlink the machine added ${when}?`,
-          { okLabel: 'Link This Machine' },
+        const pick = await pickSeatToUnlink(
+          res.candidates ?? [],
+          res.limit ?? 2,
+          res.wouldEvict?.boundAt,
+          'machine',
         );
-        if (go) {
-          await connect(res.retryCode, true);
-        } else {
+        if (pick === 'cancel') {
           message.textContent = 'Not linked — your existing machines keep their seats.';
+          return;
         }
+        await connect(res.retryCode, true, pick);
         return;
       }
       message.textContent = ERROR_TEXT[res.error ?? ''] ?? `Couldn\u2019t connect (${res.error}).`;
@@ -2672,12 +2731,13 @@ function buildPairingAccountEditor(row: HTMLElement): HTMLElement {
       const st = account.webAccountStatus();
       renderStatus({ connected: st.connected, expiresAt: st.expiresAt ?? 0, email: st.email });
 
-      const webConnect = async (code: string, confirmEvict: boolean): Promise<void> => {
+      const webConnect = async (code: string, confirmEvict: boolean, evict?: string): Promise<void> => {
         connectBtn.disabled = true;
         message.textContent = 'Connecting…';
         try {
           const got = await account.webAccountConnect(relay.relayBaseUrl(), code, {
             confirmEvict,
+            ...(evict ? { evict } : {}),
           });
           message.textContent = '';
           input.value = '';
@@ -2692,22 +2752,21 @@ function buildPairingAccountEditor(row: HTMLElement): HTMLElement {
           const d = e.detailObj ?? {};
           if (e.status === 409 && d['error'] === 'seatLimit' && typeof d['retryCode'] === 'string') {
             const wouldEvict = d['wouldEvict'] as { boundAt?: string } | undefined;
-            const when = wouldEvict?.boundAt
-              ? new Date(wouldEvict.boundAt).toLocaleDateString()
-              : 'earlier';
-            const go = await confirmDialog(
-              `Your membership covers ${String(d['limit'] ?? 2)} machines and both seats are taken. ` +
-                `Link this browser anyway and unlink the machine added ${when}?`,
-              { okLabel: 'Link This Browser' },
+            const pick = await pickSeatToUnlink(
+              Array.isArray(d['candidates']) ? (d['candidates'] as SeatCandidateUi[]) : [],
+              Number(d['limit'] ?? 2) || 2,
+              wouldEvict?.boundAt,
+              'browser',
             );
-            if (go) {
-              // confirmEvict MUST ride the retry — retrying with false
-              // just consumes the fresh retryCode, 409s again, and
-              // re-shows this dialog forever (field report 2026-08-27).
-              await webConnect(d['retryCode'], true);
-            } else {
+            if (pick === 'cancel') {
               message.textContent = 'Not linked — your existing machines keep their seats.';
+              return;
             }
+            // confirmEvict MUST ride the retry — retrying with false
+            // just consumes the fresh retryCode, 409s again, and
+            // re-shows this dialog forever (field report 2026-08-27).
+            // The picked machine rides as `evict` (relay ≥ 2026-09-02).
+            await webConnect(d['retryCode'], true, pick);
             return;
           }
           if (e.status === 409 && d['error'] === 'youWereEvicted') {

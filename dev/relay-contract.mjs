@@ -391,5 +391,62 @@ if (process.env.ROOMS !== '0') {
   await fetch(`${BASE}/rooms/${roomId}`, { method: 'DELETE', headers: AUTH });
 }
 
+// 16. seats: pick-a-machine eviction (2026-09-02). Needs the relay booted
+// with RELAY_DEV_FAKE_SESSION=1 (the local recipe) so /connect-code mints
+// codes for a fake member; against a dormant relay the section is skipped.
+{
+  const member = `seat-test-${Date.now()}`;
+  const mint = async () => {
+    const r = await fetch(`${BASE}/connect-code`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionJwt: member }),
+    });
+    return r.status === 200 ? (await r.json()).code : null;
+  };
+  const connect = async (body, bearer) => {
+    const r = await fetch(`${BASE}/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  };
+  const code0 = await mint();
+  if (!code0) {
+    console.log('  --  seats: /connect-code unavailable (relay not in dev fake-session mode) — section skipped');
+  } else {
+    const t = Date.now();
+    const A = `seatA-${t}`, B = `seatB-${t}`, C = `seatC-${t}`, D = `seatD-${t}`;
+    const a = await connect({ connectCode: code0, routingCode: A, deviceLabel: 'Laptop A' });
+    check('seats: A links (200)', a.status === 200, String(a.status));
+    const b = await connect({ connectCode: await mint(), routingCode: B, deviceLabel: 'Desktop B' });
+    check('seats: B links (200)', b.status === 200, String(b.status));
+    const c1 = await connect({ connectCode: await mint(), routingCode: C, deviceLabel: 'Phone C' });
+    check('seats: a third machine → 409 seatLimit', c1.status === 409 && c1.body?.detail?.error === 'seatLimit', String(c1.status));
+    const cands = c1.body?.detail?.candidates ?? [];
+    check('seats: 409 lists both seats, oldest first, with labels',
+      cands.length === 2 && cands[0]?.routingCode === A && cands[0]?.label === 'Laptop A' && cands[1]?.routingCode === B && cands[1]?.label === 'Desktop B',
+      JSON.stringify(cands).slice(0, 200));
+    check('seats: 409 keeps the legacy wouldEvict (oldest)', c1.body?.detail?.wouldEvict?.routingCode === A.slice(0, 8));
+    const bogus = await connect({ connectCode: c1.body?.detail?.retryCode, routingCode: C, confirmEvict: true, evict: 'no-such-machine' });
+    check('seats: unknown evict target → 409 again (evictUnknown) with a fresh retryCode',
+      bogus.status === 409 && bogus.body?.detail?.reason === 'evictUnknown' && typeof bogus.body?.detail?.retryCode === 'string', String(bogus.status));
+    const c2 = await connect({ connectCode: bogus.body?.detail?.retryCode, routingCode: C, confirmEvict: true, evict: B });
+    check('seats: evict=B → C links (200)', c2.status === 200, String(c2.status));
+    const bRenew = await connect({ connectCode: '', routingCode: B }, b.body?.entitlement);
+    check('seats: the picked machine (B) is evicted — its renewal says youWereEvicted', bRenew.status === 409 && bRenew.body?.detail?.error === 'youWereEvicted', String(bRenew.status));
+    const aRenew = await connect({ connectCode: '', routingCode: A, deviceLabel: 'Laptop A (renamed)' }, a.body?.entitlement);
+    check('seats: the kept machine (A) still renews (200)', aRenew.status === 200, String(aRenew.status));
+    // Pre-picker client at the limit: confirmEvict alone still evicts the OLDEST (A).
+    const d1 = await connect({ connectCode: await mint(), routingCode: D });
+    const dc = d1.body?.detail?.candidates ?? [];
+    check('seats: renewal refreshed A\'s label and lastSeenAt', dc[0]?.routingCode === A && dc[0]?.label === 'Laptop A (renamed)' && dc[0]?.lastSeenAt > dc[0]?.boundAt, JSON.stringify(dc[0]).slice(0, 160));
+    const d2 = await connect({ connectCode: d1.body?.detail?.retryCode, routingCode: D, confirmEvict: true });
+    check('seats: legacy confirmEvict evicts the oldest (A) and links D (200)', d2.status === 200, String(d2.status));
+    const aRenew2 = await connect({ connectCode: '', routingCode: A }, aRenew.body?.entitlement);
+    check('seats: A is now the evicted one', aRenew2.status === 409 && aRenew2.body?.detail?.error === 'youWereEvicted', String(aRenew2.status));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

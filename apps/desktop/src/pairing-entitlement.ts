@@ -53,6 +53,17 @@ export function renewalDue(state: EntitlementState, now: number): boolean {
 }
 
 /** Structured result of a connect / renewal call against /relay/connect. */
+/** One of the member's active seats, as the relay lists them in a
+ *  seatLimit 409 (relay ≥ 2026-09-02): the user picks which to unlink.
+ *  `routingCode` is the full code (it rides back as `evict`); `label`
+ *  is the machine name that build reported ('' for older seats). */
+export interface SeatCandidate {
+  routingCode: string;
+  boundAt: string;
+  lastSeenAt?: string;
+  label?: string;
+}
+
 export interface ConnectOutcome {
   ok: boolean;
   error?: string;
@@ -60,6 +71,9 @@ export interface ConnectOutcome {
   email?: string;
   limit?: number;
   wouldEvict?: { routingCode: string; boundAt: string };
+  /** Present when the relay supports the seat picker; absent = legacy
+   *  oldest-machine confirm. */
+  candidates?: SeatCandidate[];
   retryCode?: string;
 }
 
@@ -71,8 +85,32 @@ export interface ConnectResponseBody {
     error?: string;
     limit?: number;
     wouldEvict?: { routingCode: string; boundAt: string };
+    candidates?: SeatCandidate[];
+    reason?: string;
     retryCode?: string;
   };
+}
+
+/** How long to leave code-less renewal alone after an outcome (ms).
+ *  A refused renewal used to be retried on EVERY poll cycle — about 300
+ *  relay hits a day per lapsed machine, forever (relay logs 2026-09-02:
+ *  1,800 refusals in three days from six machines). Refusals only a
+ *  person can fix (lapsed membership, no binding, relay without
+ *  accounts) wait 6h; transient failures 15min; success and eviction
+ *  0 — nothing is left to retry. A user-pasted connect code always
+ *  bypasses the wait. */
+export function renewalRetryDelayMs(outcome: ConnectOutcome): number {
+  if (outcome.ok) return 0;
+  switch (outcome.error) {
+    case 'subscription':
+    case 'badCode':
+    case 'unsupported':
+      return 6 * 3600 * 1000;
+    case 'evicted':
+      return 0;
+    default:
+      return 15 * 60 * 1000;
+  }
 }
 
 /** What the caller should do with a /relay/connect response. `next` is
@@ -138,6 +176,7 @@ export function interpretConnectResponse(
         error: 'seatLimit',
         limit: detail.limit,
         wouldEvict: detail.wouldEvict,
+        ...(Array.isArray(detail.candidates) ? { candidates: detail.candidates } : {}),
         retryCode: detail.retryCode,
       },
       next: undefined,
