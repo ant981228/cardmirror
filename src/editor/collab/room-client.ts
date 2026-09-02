@@ -115,6 +115,24 @@ export interface RoomsClientOptions {
    *  back. Absent/false for tokens and entitlements, which CAN renew. */
   guestAuth?: boolean;
   fetchImpl?: RoomsFetch;
+  /** Per-request deadline for reads/small posts (default 15s) and for
+   *  the multi-MB update/snapshot posts (default 120s — school uplinks).
+   *  A request that never settles (half-open TCP after a lid-close or
+   *  NAT rebind) used to wedge the send queue and the catch-up path
+   *  permanently: their mutexes clear only in `finally`. An aborted
+   *  request surfaces as RoomsError(0) — the same retryable shape as a
+   *  dropped connection. */
+  requestTimeoutMs?: number;
+  postTimeoutMs?: number;
+}
+
+/** Compose the caller's signal (if any) with a deadline. */
+function withDeadline(signal: AbortSignal | null | undefined, ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal === 'undefined' || typeof AbortSignal.timeout !== 'function') return signal ?? undefined;
+  const deadline = AbortSignal.timeout(ms);
+  if (!signal) return deadline;
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([signal, deadline]);
+  return deadline;
 }
 
 export class RoomsClient {
@@ -158,13 +176,22 @@ export class RoomsClient {
     st.lastErrorAt = Date.now();
   }
 
-  private async request(path: string, init?: RequestInit): Promise<Response> {
+  private async request(path: string, init?: RequestInit, timeoutMs?: number): Promise<Response> {
     let res: Response;
     this.stats.requests++;
+    const ms = timeoutMs ?? this.opts.requestTimeoutMs ?? 15_000;
     try {
-      res = await this.fetchImpl(`${this.opts.baseUrl()}${path}`, init);
+      res = await this.fetchImpl(`${this.opts.baseUrl()}${path}`, {
+        ...init,
+        signal: withDeadline(init?.signal, ms),
+      });
     } catch (err) {
-      const e = new RoomsError(0, (err as Error).message ?? 'network error');
+      const name = (err as Error)?.name;
+      const timedOut = name === 'TimeoutError' || name === 'AbortError';
+      const e = new RoomsError(
+        0,
+        timedOut ? `rooms request timed out after ${ms}ms` : ((err as Error).message ?? 'network error'),
+      );
       this.noteFailure(e);
       throw e;
     }
@@ -241,7 +268,7 @@ export class RoomsClient {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/octet-stream' }),
       body: blob as unknown as BodyInit,
-    });
+    }, this.opts.postTimeoutMs ?? 120_000);
     const body = await this.readJson<{ seq?: number }>(res, path);
     if (typeof body.seq !== 'number') throw new RoomsError(0, 'malformed postUpdate response');
     return body.seq;
@@ -289,7 +316,7 @@ export class RoomsClient {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ blob: blobB64, coversThroughSeq }),
-    });
+    }, this.opts.postTimeoutMs ?? 120_000);
   }
 
   /** `from` = the sender's own stream sid (see RoomStreamOptions.sid):
@@ -362,6 +389,17 @@ export interface RoomStreamOptions {
    *  draining relay accepts, hellos, and closes — resetting on hello
    *  made every client reconnect at the 1s floor forever. */
   resetAfterMs?: number;
+  /** Silence bound: no bytes (heartbeats included) for this long on a
+   *  helloed stream → the socket is presumed dead and reconnected
+   *  (default 70s ≈ 2.8× the relay's 25s heartbeat). Armed only after
+   *  the first byte following hello, so a relay that sends no
+   *  heartbeats degrades to the old behavior instead of restart-looping. */
+  stallMs?: number;
+  /** restart() debounce window (default 2s): a wake fires powerResumed,
+   *  'online' and 'visible' a beat apart; only the first aborts an
+   *  in-flight handshake. Tests that use restart() as a raw "drop the
+   *  connection now" primitive set 0. */
+  restartDebounceMs?: number;
 }
 
 export class RoomStream {
@@ -377,6 +415,9 @@ export class RoomStream {
   /** Consecutive reconnect-409s (see onCrowdedOut). */
   private reconnect409s = 0;
   private survivalTimer: ReturnType<typeof setTimeout> | null = null;
+  private stallTimer: ReturnType<typeof setInterval> | null = null;
+  private lastByteAt = 0;
+  private lastRestartAt = 0;
   readonly stats: StreamStats = { attempts: 0, hellos: 0, consecutiveFailures: 0, lastHelloAt: 0 };
 
   constructor(private readonly opts: RoomStreamOptions) {
@@ -404,6 +445,7 @@ export class RoomStream {
   stop(): void {
     this.stopped = true;
     this.clearSurvival();
+    this.clearStall();
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -429,7 +471,37 @@ export class RoomStream {
       void this.connectLoop();
       return;
     }
+    // Debounce the abort: a laptop wake fires powerResumed AND 'online'
+    // a beat apart, and the second call found no retry timer and aborted
+    // the handshake the first had just started — a full extra round trip
+    // at exactly the moment the stream was wanted back (2026-09-01
+    // review). Within the window, the in-flight reconnect IS the restart.
+    const now = Date.now();
+    if (now - this.lastRestartAt < (this.opts.restartDebounceMs ?? 2000)) return;
+    this.lastRestartAt = now;
     this.controller?.abort();
+  }
+
+  private clearStall(): void {
+    if (this.stallTimer !== null) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
+  }
+
+  /** First byte after hello: arm the silence watchdog. */
+  private armStall(): void {
+    if (this.stallTimer !== null) return;
+    const stallMs = this.opts.stallMs ?? 70_000;
+    this.stallTimer = setInterval(() => {
+      if (this.stopped || !this.helloed) return;
+      if (Date.now() - this.lastByteAt > stallMs) {
+        console.warn(`[room-stream] no bytes for ${stallMs}ms — presuming a dead socket, reconnecting`);
+        this.clearStall();
+        this.lastRestartAt = 0; // a stall restart must never be debounced away
+        this.restart();
+      }
+    }, Math.max(50, Math.floor(stallMs / 2)));
   }
 
   /** Gentle hurry-up: if a backoff wait is pending, connect now; if an
@@ -454,6 +526,7 @@ export class RoomStream {
   private scheduleRetry(): void {
     this.stats.consecutiveFailures++;
     this.clearSurvival();
+    this.clearStall();
     if (this.stopped) return;
     if (this.helloed) {
       this.helloed = false;
@@ -602,6 +675,8 @@ export class RoomStream {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        this.lastByteAt = Date.now();
+        if (this.helloed) this.armStall();
         buf += decoder.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf('\n')) >= 0) {

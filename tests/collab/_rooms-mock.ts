@@ -51,6 +51,16 @@ export interface RoomsMock {
    *  (`{detail}`) — the relay's real 413 texts differ ('update too
    *  large' vs 'room storage cap reached') and must reach the caller. */
   setUpdateFailure(f: { status: number; detail: string } | null): void;
+  /** Half-open socket simulation: the next `n` update POSTs are read
+   *  and then NEVER answered — the sockets stay open until the mock
+   *  closes (a real half-open connection never errors out). 0 = off. */
+  hangNextUpdates(n: number): void;
+  /** SSE heartbeat comments (`: hb`) every `ms` on every open stream;
+   *  0 disables (the default — the real relay sends them every 25s). */
+  setHeartbeat(ms: number): void;
+  /** Silent-dead-socket simulation: streams stay open but stop
+   *  receiving heartbeats and frames. */
+  freezeStreams(on: boolean): void;
 }
 
 const MAX_STREAMS_PER_ROOM = 10;
@@ -70,6 +80,21 @@ export function startRoomsMock(): Promise<RoomsMock> {
   let stuckPaging = false;
   let updateFetches = 0;
   let updateFailure: { status: number; detail: string } | null = null;
+  let hangRemaining = 0;
+  const hung = new Set<http.ServerResponse>();
+  let heartbeatMs = 0;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let frozen = false;
+  const restartHeartbeat = (): void => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    if (heartbeatMs > 0) {
+      heartbeatTimer = setInterval(() => {
+        if (frozen) return;
+        for (const room of rooms.values()) for (const st of room.streams) st.write(': hb\n\n');
+      }, heartbeatMs);
+    }
+  };
 
   const json = (res: http.ServerResponse, status: number, body?: unknown) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -145,12 +170,17 @@ export function startRoomsMock(): Promise<RoomsMock> {
       const room = roomOr(res, roomId);
       if (!room) return;
       const raw = await readBody(req);
+      if (hangRemaining > 0) {
+        hangRemaining--;
+        hung.add(res); // never answered; destroyed only at close()
+        return;
+      }
       if (updateFailure) return json(res, updateFailure.status, { detail: updateFailure.detail });
       if (raw.length === 0) return json(res, 400, { error: 'empty update' });
       const seq = ++seqCounter;
       const blob = raw.toString('base64');
       room.updates.push({ seq, blob });
-      if (!pushMuted) {
+      if (!pushMuted && !frozen) {
         const frame = `data: ${JSON.stringify({ t: 'u', seq, blob })}\n\n`;
         for (const s of room.streams) s.write(frame);
       }
@@ -274,8 +304,20 @@ export function startRoomsMock(): Promise<RoomsMock> {
         setUpdateFailure: (f) => {
           updateFailure = f;
         },
+        hangNextUpdates: (n) => {
+          hangRemaining = n;
+        },
+        setHeartbeat: (ms) => {
+          heartbeatMs = ms;
+          restartHeartbeat();
+        },
+        freezeStreams: (on) => {
+          frozen = on;
+        },
         close: () =>
           new Promise<void>((r) => {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            for (const h of hung) h.destroy();
             for (const room of rooms.values()) for (const s of room.streams) s.destroy();
             server.close(() => r());
             server.closeAllConnections?.();

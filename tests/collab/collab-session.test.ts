@@ -334,6 +334,48 @@ describe('collab session end-to-end', () => {
   });
 });
 
+describe('send-path liveness (a hung POST must not wedge the queue forever)', () => {
+  it('the send queue recovers after a half-open request times out', async () => {
+    // drainQueue's `sending` mutex clears only in finally; a fetch that
+    // never settles (lid-close, NAT rebind) left every later flush()
+    // returning at the first line with the chip stuck on "queued N"
+    // (2026-09-01 review, SC3).
+    const tClient = new RoomsClient({
+      baseUrl: () => mock.url,
+      token: () => mock.token,
+      postTimeoutMs: 120,
+    });
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('liveness'),
+      client: tClient,
+      ...FAST,
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const joiner = await CollabSession.join({ ...decodeShareCode(shareCode)!, client, ...FAST });
+    const joinView = mkView(joiner.plugins());
+    await settle();
+    joiner.start();
+    await sleep(80);
+    try {
+      mock.hangNextUpdates(1); // the NEXT post is swallowed by a half-open socket
+      typeAfter(hostView, 'liveness', ' ONE');
+      await sleep(200); // that POST is now pending forever inside drainQueue
+      typeAfter(hostView, 'liveness ONE', ' TWO');
+      await sleep(900); // deadline → retry → both edits land
+      expect(docText(joinView.state.doc)).toContain('liveness ONE TWO');
+      expect(host.debugState().queued).toBe(0);
+    } finally {
+      mock.hangNextUpdates(0);
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

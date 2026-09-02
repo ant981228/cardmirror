@@ -300,6 +300,8 @@ describe('RoomStream', () => {
       roomId,
       minBackoffMs: 20,
       maxBackoffMs: 40,
+      restartDebounceMs: 0, // restart() here means "drop the connection now"
+
       callbacks: {
         onHello: () => {},
         onUpdate: () => {},
@@ -447,6 +449,85 @@ describe('RoomStream backoff policy (2026-09-01 review)', () => {
     expect(crowded, 'reported once after the ghost-reap window').toBe(1);
     expect(stream.running, 'still retrying — a seat may open').toBe(true);
     stream.stop();
+  });
+});
+
+describe('RoomStream restart hygiene (2026-09-01 review, T11)', () => {
+  it('two restart() calls in quick succession (powerResumed + online) cost ONE reconnect', async () => {
+    const { roomId } = await client.createRoom();
+    const stream = new RoomStream({
+      baseUrl: () => mock.url,
+      token: () => mock.token,
+      roomId,
+      minBackoffMs: 20,
+      maxBackoffMs: 50,
+      callbacks: { onHello: () => {}, onUpdate: () => {}, onPresence: () => {}, onEnded: () => {}, onFull: () => {} },
+    });
+    stream.start();
+    await sleep(60); // helloed
+    const before = stream.stats.attempts;
+    mock.setHelloDelay(100); // a slow handshake, so the second restart can abort the first
+    try {
+      stream.restart(); // powerResumed
+      await sleep(30); // ...and 'online' a beat later, while the reconnect handshake is in flight
+      stream.restart();
+      await sleep(350);
+      expect(stream.stats.attempts - before, 'one reconnect, not an aborted handshake + another').toBe(1);
+      expect(stream.connected).toBe(true);
+    } finally {
+      mock.setHelloDelay(0);
+      stream.stop();
+    }
+  });
+});
+
+describe('request deadlines + stream stall watchdog (2026-09-01 review, SC3/T1/T2)', () => {
+  it('a hung update POST times out as a retryable RoomsError instead of pending forever', async () => {
+    const c = new RoomsClient({
+      baseUrl: () => mock.url,
+      token: () => mock.token,
+      postTimeoutMs: 100, // update posts carry the long deadline; shorten it here
+    });
+    const { roomId } = await c.createRoom();
+    mock.hangNextUpdates(1);
+    try {
+      const outcome = await Promise.race([
+        c.postUpdate(roomId, bytes('x')).then(
+          () => 'resolved' as const,
+          (e: RoomsError) => (e.status === 0 ? 'timed-out' : `err:${e.status}`),
+        ),
+        sleep(600).then(() => 'hung' as const),
+      ]);
+      expect(outcome).toBe('timed-out');
+    } finally {
+      mock.hangNextUpdates(0);
+    }
+  });
+
+  it('a silently dead stream (heartbeats stop) is detected and restarted', async () => {
+    const { roomId } = await client.createRoom();
+    mock.setHeartbeat(40);
+    const stream = new RoomStream({
+      baseUrl: () => mock.url,
+      token: () => mock.token,
+      roomId,
+      minBackoffMs: 20,
+      maxBackoffMs: 50,
+      stallMs: 150,
+      callbacks: { onHello: () => {}, onUpdate: () => {}, onPresence: () => {}, onEnded: () => {}, onFull: () => {} },
+    });
+    stream.start();
+    try {
+      await sleep(150); // helloed + at least one heartbeat observed (arms the watchdog)
+      const before = stream.stats.attempts;
+      mock.freezeStreams(true); // socket open, nothing arrives
+      await sleep(500);
+      expect(stream.stats.attempts - before, 'the watchdog reconnected').toBeGreaterThanOrEqual(1);
+    } finally {
+      mock.freezeStreams(false);
+      mock.setHeartbeat(0);
+      stream.stop();
+    }
   });
 });
 

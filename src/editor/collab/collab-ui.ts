@@ -377,8 +377,16 @@ function installWakeHooks(session: CollabSession): () => void {
   const onOnline = (): void => session.restart();
   window.addEventListener('online', onOnline);
   const offResume = getElectronHost()?.onPowerResumed?.(() => session.restart()) ?? null;
+  // A throttled background tab is exactly where a socket goes stale
+  // unnoticed; coming back to the tab is a wake too. restart() itself
+  // debounces the powerResumed/online/visible burst into one reconnect.
+  const onVisible = (): void => {
+    if (document.visibilityState === 'visible') session.restart();
+  };
+  document.addEventListener('visibilitychange', onVisible);
   return () => {
     window.removeEventListener('online', onOnline);
+    document.removeEventListener('visibilitychange', onVisible);
     offResume?.();
   };
 }

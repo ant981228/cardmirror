@@ -138,6 +138,7 @@ export interface CollabSessionOptions {
   /** Stream backoff bounds, injectable for tests. */
   minBackoffMs?: number;
   resetAfterMs?: number;
+  stallMs?: number;
   maxBackoffMs?: number;
   /** Host compaction cadence: upload an encrypted snapshot every N
    *  posted updates. */
@@ -286,10 +287,16 @@ export class CollabSession {
       minBackoffMs: opts.minBackoffMs,
       maxBackoffMs: opts.maxBackoffMs,
       resetAfterMs: opts.resetAfterMs,
+      stallMs: opts.stallMs,
     };
   }
 
-  private streamOpts: { minBackoffMs?: number; maxBackoffMs?: number; resetAfterMs?: number };
+  private streamOpts: {
+    minBackoffMs?: number;
+    maxBackoffMs?: number;
+    resetAfterMs?: number;
+    stallMs?: number;
+  };
 
   /** Start a session on the current document. Uploads the seed state as
    *  update #1 and returns the share code alongside the session. */
@@ -303,6 +310,7 @@ export class CollabSession {
     receiveBatchMs?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
+    stallMs?: number;
     maxBackoffMs?: number;
     snapshotEvery?: number;
     updateByteLimit?: number;
@@ -359,6 +367,7 @@ export class CollabSession {
     receiveBatchMs?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
+    stallMs?: number;
     maxBackoffMs?: number;
     updateByteLimit?: number;
   }): Promise<CollabSession> {
@@ -423,6 +432,7 @@ export class CollabSession {
     receiveBatchMs?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
+    stallMs?: number;
     maxBackoffMs?: number;
     snapshotEvery?: number;
   }): Promise<CollabSession> {
@@ -501,6 +511,7 @@ export class CollabSession {
       minBackoffMs: this.streamOpts.minBackoffMs,
       maxBackoffMs: this.streamOpts.maxBackoffMs,
       resetAfterMs: this.streamOpts.resetAfterMs,
+      stallMs: this.streamOpts.stallMs,
       callbacks: {
         onHello: () => {
           this.connected = true;
