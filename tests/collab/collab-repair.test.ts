@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { addRowAfter, addColumnAfter } from 'prosemirror-tables';
 import { TextSelection } from 'prosemirror-state';
-import { collabRepairPlugin, lowestPeerIsLeader } from '../../src/editor/collab/collab-repair.js';
+import { collabRepairPlugin, lowestPeerIsLeader, repairStats } from '../../src/editor/collab/collab-repair.js';
 import { buildDocRepairTr } from '../../src/doc-repair.js';
 import { schema } from '../../src/schema/index.js';
 import { EditorState } from 'prosemirror-state';
@@ -25,6 +25,7 @@ import {
   docText,
   findText,
   type LoroPeer,
+  para,
 } from './_loro-helpers.js';
 
 function selectIn(peer: LoroPeer, text: string): void {
@@ -114,6 +115,55 @@ describe('session-wired repair pass (leader-gated)', () => {
     const full = buildDocRepairTr(newState);
     expect(full).not.toBeNull();
     expect(new Set(tableShapes(full!.doc)[0]!).size).toBe(1);
+  });
+
+  it('bounded sweeps: a violation inside the changed range is repaired; one outside is left to the backstop', () => {
+    // Mirrors the fixTables contract above for the mark/head/sentinel
+    // sweeps (2026-09-01 review, SC4): the session pass supplies the
+    // merge's changed ranges; import/open pass none and full-scan.
+    const para = (t: string) => schema.nodes['paragraph']!.createChecked(null, schema.text(t));
+    const headless = schema.nodes['card']!.create(null, [
+      schema.nodes['card_body']!.createChecked(null, schema.text('no tag here')),
+    ]);
+    const clash = schema.nodes['paragraph']!.create(null, [
+      schema.text('clash', [schema.marks['underline_mark']!.create(), schema.marks['emphasis_mark']!.create()]),
+    ]);
+    // Doc: [headless card] [para] [clash para] — the change happens in the clash para only.
+    const doc = docOf(headless, para('middle'), clash);
+    const state = EditorState.create({ doc });
+    const clashFrom = doc.content.size - clash.nodeSize;
+    const inRange = [{ from: clashFrom, to: doc.content.size }];
+
+    const bounded = buildDocRepairTr(state, undefined, inRange);
+    expect(bounded, 'the in-range mark clash is repaired').not.toBeNull();
+    const bDoc = bounded!.doc;
+    expect(bDoc.firstChild!.firstChild!.type.name, 'the out-of-range headless card is NOT touched').toBe('card_body');
+    const clashText = bDoc.lastChild!.firstChild!;
+    expect(clashText.marks.map((m) => m.type.name)).toEqual(['emphasis_mark']);
+
+    const full = buildDocRepairTr(state);
+    expect(full!.doc.firstChild!.firstChild!.type.name, 'backstop inserts the head').toBe('tag');
+  });
+
+  it('the session pass never walks the whole document (heal-sentinel scan included)', async () => {
+    // The sentinel scan's "cooldown gate" only ever closed AFTER a heal
+    // was found — in the common no-heal case every remote frame walked
+    // the entire document (2026-09-01 review, PH-A1).
+    const peers = await createLoroPeers(docOf(para('alpha'), para('beta')), 2, () => [
+      collabRepairPlugin(() => true),
+    ]);
+    const [a, b] = peers as [LoroPeer, LoroPeer];
+    const before = { ...repairStats };
+    for (let i = 0; i < 3; i++) {
+      const r = findText(a.view.state.doc, 'alpha');
+      a.view.dispatch(a.view.state.tr.insertText(`${i}`, r.to));
+      await settle();
+      b.import(a.exportAll());
+      await settle();
+    }
+    expect(repairStats.boundedPasses - before.boundedPasses).toBeGreaterThanOrEqual(3);
+    expect(repairStats.fullDocScans - before.fullDocScans, 'session passes are bounded').toBe(0);
+    for (const p of peers) p.destroy();
   });
 
   it('leader election: lowest peer id wins, numerically', () => {

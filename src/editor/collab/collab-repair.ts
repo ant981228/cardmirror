@@ -34,9 +34,43 @@
 import { Plugin } from 'prosemirror-state';
 import { postNotice } from '../status-notices.js';
 import type { Transaction } from 'prosemirror-state';
+import { AddMarkStep, RemoveMarkStep } from 'prosemirror-transform';
 import { loroSyncPluginKey, loroUndoPluginKey } from 'loro-prosemirror';
-import { buildDocRepairTr, buildMarkRepairTr } from '../../doc-repair.js';
+import { buildDocRepairTr, buildMarkRepairTr, type RepairRange } from '../../doc-repair.js';
 import { guardNormalizerTr } from '../normalizer-guard.js';
+
+/** Diagnostics for tests: session passes bounded to changed ranges vs
+ *  full-document scans (which the session pass must never do). */
+export const repairStats = { boundedPasses: 0, fullDocScans: 0 };
+
+/** Doc ranges the binding transactions touched, in `newState`
+ *  coordinates (remapped across later transactions in the batch) —
+ *  the same shape causal-mark-heal and collab-invariants use. */
+function changedRanges(trs: readonly Transaction[]): RepairRange[] {
+  const out: RepairRange[] = [];
+  for (let i = 0; i < trs.length; i++) {
+    const tr = trs[i]!;
+    if (!tr.docChanged) continue;
+    tr.steps.forEach((step, si) => {
+      const rest = tr.mapping.slice(si + 1);
+      const push = (from: number, to: number): void => {
+        for (let j = i + 1; j < trs.length; j++) {
+          from = trs[j]!.mapping.map(from, -1);
+          to = trs[j]!.mapping.map(to, 1);
+        }
+        if (from < to) out.push({ from, to });
+      };
+      if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+        push(rest.map(step.from, -1), rest.map(step.to, 1));
+        return;
+      }
+      step.getMap().forEach((_os, _oe, newStart, newEnd) => {
+        push(rest.map(newStart, -1), rest.map(newEnd, 1));
+      });
+    });
+  }
+  return out;
+}
 
 function isBindingTransaction(tr: Transaction): boolean {
   return tr.getMeta(loroSyncPluginKey) !== undefined || tr.getMeta(loroUndoPluginKey) !== undefined;
@@ -53,8 +87,11 @@ function isBindingTransaction(tr: Transaction): boolean {
  *  otherwise), so the rate limit still earns its keep as a scan
  *  gate rather than a toast gate. */
 let lastHealToastAt = 0;
+let lastNoticeAt = 0;
 function noteHealedMerge(): void {
   lastHealToastAt = Date.now();
+  if (Date.now() - lastNoticeAt < 60_000) return; // coalesce the notice
+  lastNoticeAt = Date.now();
   // Chip entry (coalescing) instead of a rate-limited toast: this is
   // a your-document-changed notice the user must be able to re-read.
   postNotice({
@@ -71,15 +108,24 @@ export function collabRepairPlugin(isLeader: () => boolean): Plugin {
   return new Plugin({
     appendTransaction(trs, oldState, newState) {
       if (!trs.some((tr) => tr.docChanged && isBindingTransaction(tr))) return null;
-      // Surface display-layer merge heals (every peer sees its own).
-      // Gated by the toast's own 60s cooldown: a sentinel found during
-      // the cooldown would be dropped by noteHealedMerge AND
-      // canonicalized away in this same pass — it could never toast
-      // later — so skipping the walk during cooldown is
-      // behavior-identical, minus one full-doc traversal per remote
-      // frame (perf study 2026-08-06).
-      if (Date.now() - lastHealToastAt >= 60_000) {
-        newState.doc.descendants((node) => {
+      // The merge's changed regions bound every sweep below (a violation
+      // a merge creates lies inside that merge's changed region — the
+      // argument fixTables' bounded path already rests on). Before this,
+      // three to five FULL-document walks ran per remote batch, at up to
+      // ~8 batches/s on a tournament master (2026-09-01 review, SC4).
+      const ranges = changedRanges(trs.filter(isBindingTransaction));
+      repairStats.boundedPasses++;
+      // Surface display-layer merge heals (every peer sees its own). A
+      // sentinel is synthesized while materializing the merged region,
+      // so scanning the changed ranges finds it — the old full-document
+      // walk was gated on the notice cooldown, whose timestamp was only
+      // ever stamped AFTER a heal was found: in the no-heal common case
+      // the gate never closed and the whole doc was walked every frame.
+      for (const { from, to } of ranges) {
+        const size = newState.doc.content.size;
+        const cf = Math.max(0, Math.min(from, size));
+        const ct = Math.max(cf, Math.min(to, size));
+        newState.doc.nodesBetween(cf, ct, (node) => {
           if (node.type.name === 'tag' || node.type.name === 'analytic') {
             if (String(node.attrs['id'] ?? '').startsWith('crdt-heal-')) noteHealedMerge();
             return false;
@@ -99,7 +145,9 @@ export function collabRepairPlugin(isLeader: () => boolean): Plugin {
       // oldState → prosemirror-tables' bounded fast path (see
       // buildDocRepairTr); the mark/sentinel sweeps inside are
       // unchanged.
-      const tr = isLeader() ? buildDocRepairTr(newState, oldState) : buildMarkRepairTr(newState);
+      const tr = isLeader()
+        ? buildDocRepairTr(newState, oldState, ranges)
+        : buildMarkRepairTr(newState, ranges);
       if (!tr) return null;
       return guardNormalizerTr(trs, tr);
     },

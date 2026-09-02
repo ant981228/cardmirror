@@ -38,6 +38,37 @@ import { schema } from './schema/index.js';
  *  Order (2026-07-05, user): citation styling is the most structural,
  *  then emphasis, then underline; an explicit bold beats an explicit
  *  bold-off; superscript beats subscript. */
+/** A changed region (post-apply coordinates of the state being
+ *  repaired). When a caller supplies ranges, every sweep below walks
+ *  only nodes intersecting them instead of the whole document. */
+export interface RepairRange {
+  from: number;
+  to: number;
+}
+
+/** Walk `tr.doc` either whole or bounded to `ranges` (mapped through
+ *  the transaction's steps so far, since earlier sweeps may have
+ *  shifted positions). Overlapping ranges can visit a node twice —
+ *  callers dedupe by position where a double application would not be
+ *  idempotent. */
+function walk(
+  tr: Transaction,
+  ranges: readonly RepairRange[] | undefined,
+  cb: (node: PMNode, pos: number, parent: PMNode | null) => boolean | void,
+): void {
+  if (!ranges) {
+    tr.doc.descendants(cb);
+    return;
+  }
+  const size = tr.doc.content.size;
+  for (const r of ranges) {
+    const from = Math.max(0, Math.min(tr.mapping.map(r.from, -1), size));
+    const to = Math.max(from, Math.min(tr.mapping.map(r.to, 1), size));
+    if (from >= to) continue;
+    tr.doc.nodesBetween(from, to, cb);
+  }
+}
+
 const MARK_PRIORITY: Readonly<Record<string, number>> = {
   cite_mark: 30,
   emphasis_mark: 20,
@@ -52,8 +83,8 @@ const MARK_PRIORITY: Readonly<Record<string, number>> = {
  *  pair from `tr`. Mark-level and deterministic: every peer resolves to
  *  the same winner, so this is safe to run on ALL peers (unlike the
  *  structural repairs) — double-application converges under LWW. */
-function sweepExclusiveMarks(tr: Transaction): void {
-  tr.doc.descendants((node, pos) => {
+function sweepExclusiveMarks(tr: Transaction, ranges?: readonly RepairRange[]): void {
+  walk(tr, ranges, (node, pos) => {
     if (!node.isText) return true;
     const ranked = node.marks.filter((m) => m.type.name in MARK_PRIORITY);
     for (const m of ranked) {
@@ -86,8 +117,8 @@ function sweepExclusiveMarks(tr: Transaction): void {
  *  write-backs merge into duplicate heads that the materializer's
  *  multi-head normalization converges deterministically (and the id
  *  rewrite itself is same-value, so it merges harmlessly). */
-function canonicalizeHealSentinels(tr: Transaction): void {
-  tr.doc.descendants((node, pos) => {
+function canonicalizeHealSentinels(tr: Transaction, ranges?: readonly RepairRange[]): void {
+  walk(tr, ranges, (node, pos) => {
     if (node.type.name !== 'tag' && node.type.name !== 'analytic') return true;
     const id = String(node.attrs['id'] ?? '');
     if (id.startsWith('crdt-heal-')) {
@@ -112,13 +143,16 @@ function canonicalizeHealSentinels(tr: Transaction): void {
  *  user's intended row is its container; any other illegal child of a
  *  row or table is dropped; a table left with no rows is removed
  *  (its content expression requires one). */
-function normalizeTableStructure(tr: Transaction): void {
+function normalizeTableStructure(tr: Transaction, ranges?: readonly RepairRange[]): void {
   const rowType = schema.nodes['table_row']!;
   const isCell = (n: PMNode): boolean =>
     n.type.name === 'table_cell' || n.type.name === 'table_header';
   const targets: Array<{ pos: number; node: PMNode }> = [];
-  tr.doc.descendants((node, pos) => {
+  const seen = new Set<number>();
+  walk(tr, ranges, (node, pos) => {
     if (node.type.name !== 'table') return true;
+    if (seen.has(pos)) return false;
+    seen.add(pos);
     let dirty = false;
     node.forEach((row) => {
       if (row.type !== rowType) dirty = true;
@@ -188,14 +222,25 @@ function safeFixTables(state: EditorState, oldState?: EditorState): Transaction 
  *  rows — visible, user-fixable, and requires two simultaneous
  *  detonations of one table; accepted, same as the multi-head merge
  *  corner above.) */
-export function buildMarkRepairTr(state: EditorState): Transaction | null {
+export function buildMarkRepairTr(
+  state: EditorState,
+  ranges?: readonly RepairRange[],
+): Transaction | null {
   const tr = state.tr;
   // Order matters: normalization uses replaceWith (position-shifting),
   // and the two sweeps below walk the CURRENT tr.doc, so they must
-  // come after it.
-  normalizeTableStructure(tr);
-  sweepExclusiveMarks(tr);
-  canonicalizeHealSentinels(tr);
+  // come after it (walk() maps the ranges through those steps).
+  //
+  // `ranges` (the session pass supplies the merge's changed regions)
+  // bounds every sweep: a violation a merge creates lies inside the
+  // merge's changed region — the same argument fixTables' bounded path
+  // already rests on — so the pass that imported it still repairs it,
+  // at a cost proportional to the edit rather than the document
+  // (2026-09-01 review, SC4). Import/open callers pass nothing and keep
+  // the full scan as the backstop.
+  normalizeTableStructure(tr, ranges);
+  sweepExclusiveMarks(tr, ranges);
+  canonicalizeHealSentinels(tr, ranges);
   return tr.steps.length ? tr : null;
 }
 
@@ -212,13 +257,17 @@ export function buildMarkRepairTr(state: EditorState): Transaction | null {
  *  caught in the very pass that imported it; import/open callers pass
  *  no oldState and keep the full scan, which also remains the backstop
  *  for anything a bounded session pass could ever leave behind. */
-export function buildDocRepairTr(state: EditorState, oldState?: EditorState): Transaction | null {
+export function buildDocRepairTr(
+  state: EditorState,
+  oldState?: EditorState,
+  ranges?: readonly RepairRange[],
+): Transaction | null {
   // Structural normalization first — fixTables THROWS on the states it
   // heals (see normalizeTableStructure). When it made changes,
   // fixTables must see the normalized doc, so its steps are folded on
   // top; the oldState fast path is skipped in that (rare) case.
   const structural = state.tr;
-  normalizeTableStructure(structural);
+  normalizeTableStructure(structural, ranges);
   let tr: Transaction;
   if (structural.steps.length) {
     const fixed = safeFixTables(state.apply(structural));
@@ -230,16 +279,25 @@ export function buildDocRepairTr(state: EditorState, oldState?: EditorState): Tr
 
   // Mark sweep scans tr.doc so positions reflect any table fixes above;
   // removeMark never shifts positions, so one scan can batch all fixes.
-  sweepExclusiveMarks(tr);
+  sweepExclusiveMarks(tr, ranges);
 
   // Insertions shift positions, so collect first and apply bottom-up.
+  // Dedupe by position: overlapping ranges may visit a container twice,
+  // and a double insert would duplicate the head.
   const inserts: Array<{ pos: number; type: 'tag' | 'analytic' }> = [];
-  tr.doc.descendants((node, pos) => {
+  const insertAt = new Set<number>();
+  walk(tr, ranges, (node, pos) => {
     if (node.type.name === 'card' && node.firstChild?.type.name !== 'tag') {
-      inserts.push({ pos: pos + 1, type: 'tag' });
+      if (!insertAt.has(pos + 1)) {
+        insertAt.add(pos + 1);
+        inserts.push({ pos: pos + 1, type: 'tag' });
+      }
     }
     if (node.type.name === 'analytic_unit' && node.firstChild?.type.name !== 'analytic') {
-      inserts.push({ pos: pos + 1, type: 'analytic' });
+      if (!insertAt.has(pos + 1)) {
+        insertAt.add(pos + 1);
+        inserts.push({ pos: pos + 1, type: 'analytic' });
+      }
     }
     return true;
   });
@@ -251,7 +309,7 @@ export function buildDocRepairTr(state: EditorState, oldState?: EditorState): Tr
   // Heal-sentinel canonicalization (shared with the all-peer repair
   // half — see canonicalizeHealSentinels above). setNodeMarkup shifts
   // no positions, so running it after the insertions above is safe.
-  canonicalizeHealSentinels(tr);
+  canonicalizeHealSentinels(tr, ranges);
 
   return tr.steps.length ? tr : null;
 }
