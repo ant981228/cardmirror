@@ -454,6 +454,40 @@ describe('RoomStream backoff policy (2026-09-01 review)', () => {
   });
 });
 
+describe('empty credential short-circuit (2026-09-01 review, T5)', () => {
+  it('an empty bearer never reaches the network: requests fail locally, the stream reports auth-dead at once', async () => {
+    // On web, an expired entitlement resolves to '' by design — and every
+    // request then went out as literal `Authorization: Bearer ` and 401'd,
+    // all night, with auth-dead only detected two backoff intervals later.
+    const { roomId } = await client.createRoom();
+    const before = mock.streamAttempts();
+    const c = new RoomsClient({ baseUrl: () => mock.url, token: () => '' });
+    await expect(c.postUpdate(roomId, bytes('x'))).rejects.toMatchObject({ status: 0 });
+    expect(c.stats.requests, 'no network request was made').toBe(0);
+    let authDead = 0;
+    const stream = new RoomStream({
+      baseUrl: () => mock.url,
+      token: () => '',
+      roomId,
+      minBackoffMs: 20,
+      maxBackoffMs: 40,
+      callbacks: {
+        onHello: () => {},
+        onUpdate: () => {},
+        onPresence: () => {},
+        onEnded: () => {},
+        onFull: () => {},
+        onAuthDead: () => authDead++,
+      },
+    });
+    stream.start();
+    await sleep(120);
+    stream.stop();
+    expect(mock.streamAttempts() - before, 'no stream connect attempts').toBe(0);
+    expect(authDead, 'auth-dead signaled immediately (the credential is unambiguously absent)').toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe('RoomStream restart hygiene (2026-09-01 review, T11)', () => {
   it('two restart() calls in quick succession (powerResumed + online) cost ONE reconnect', async () => {
     const { roomId } = await client.createRoom();

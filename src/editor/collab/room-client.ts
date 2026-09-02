@@ -177,6 +177,15 @@ export class RoomsClient {
   }
 
   private async request(path: string, init?: RequestInit, timeoutMs?: number): Promise<Response> {
+    // No credential at all (web: an expired entitlement resolves to ''
+    // by design) — fail locally instead of sending `Bearer ` to be
+    // 401'd all night (2026-09-01 review, T5). The retry backoff still
+    // applies, so a renewal heals it.
+    if (!this.opts.token()) {
+      const e = new RoomsError(0, 'no relay credential');
+      this.noteFailure(e);
+      throw e;
+    }
     let res: Response;
     this.stats.requests++;
     const ms = timeoutMs ?? this.opts.requestTimeoutMs ?? 15_000;
@@ -591,6 +600,15 @@ export class RoomStream {
 
   private async connectLoop(): Promise<void> {
     if (this.stopped) return;
+    if (!this.opts.token()) {
+      // An absent credential is unambiguously local — no need to burn
+      // two round trips proving it. Signal auth-dead now; keep the
+      // backoff so a renewal (or re-link) reconnects.
+      this.opts.callbacks.onAuthDead?.();
+      if (this.stopped) return;
+      this.scheduleRetry();
+      return;
+    }
     this.stats.attempts++;
     this.controller = new AbortController();
     const fetchImpl = this.opts.fetchImpl ?? boundFetch;
