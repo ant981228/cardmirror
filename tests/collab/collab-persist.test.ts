@@ -155,6 +155,66 @@ describe('M3 session persistence', () => {
     resumedView.destroy();
   }, 20_000);
 
+  it('verifiedFlush: true when the stored record covers the session, false when the write could not land', async () => {
+    // The keep-resumable close path drops the crash journal ONLY when this
+    // returns true — the record is about to become the doc's only copy. It
+    // had no test at all (2026-09-01 review).
+    const { session, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('verify me'),
+      client,
+      flushMs: 40,
+    });
+    const view = mkView(session.plugins());
+    await settle();
+    session.start();
+    const handle = attachSessionPersistence(session, shareCode, () => 'Verify Doc');
+    expect(await handle.verifiedFlush()).toBe(true);
+
+    // Advance the doc, then make the write impossible to land (dispose stops
+    // writing but leaves the stale record in place — the same observable
+    // state as a storage failure that writeInner swallowed).
+    typeAfter(view, 'verify', ' AGAIN');
+    await sleep(80);
+    handle.dispose();
+    expect(await handle.verifiedFlush()).toBe(false);
+
+    await deleteSessionRecord(session.roomId);
+    await session.stop();
+    view.destroy();
+  }, 20_000);
+
+  it('clear() serializes behind an in-flight write so the record cannot be resurrected', async () => {
+    // The race the promise tail guards: a write already past its `disposed`
+    // check when clear() runs would otherwise re-save the record right
+    // after the delete. Never reproduced by a test before — the existing
+    // tests await a flush first, so the overlap never happened.
+    const { session, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('race me'),
+      client,
+      flushMs: 40,
+    });
+    const view = mkView(session.plugins());
+    await settle();
+    session.start();
+    const handle = attachSessionPersistence(session, shareCode, () => 'Race Doc');
+    await handle.flush();
+    expect(await loadSessionRecord(session.roomId)).not.toBeNull();
+
+    // Kick a write (NOT awaited) and clear immediately behind it.
+    typeAfter(view, 'race', ' MORE');
+    await sleep(60);
+    const inflight = handle.flush();
+    await handle.clear();
+    await inflight;
+    // Let any stray microtask/IDB callback settle, then the record must be gone.
+    await sleep(50);
+    expect(await loadSessionRecord(session.roomId)).toBeNull();
+    expect((await listSessionRecords()).some((r) => r.roomId === session.roomId)).toBe(false);
+
+    await session.stop();
+    view.destroy();
+  }, 20_000);
+
   it('stamps the doc\u2019s persistent id into the record once known, and keeps it sticky', async () => {
     // The open-from-disk rejoin gate matches a file to its session by
     // this docId; it appears on the record after the doc's first save
