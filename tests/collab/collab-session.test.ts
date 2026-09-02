@@ -334,6 +334,41 @@ describe('collab session end-to-end', () => {
   });
 });
 
+describe('join resilience', () => {
+  it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
+    // The steady-state stream backs off and retries; the JOIN's strict
+    // initial catch-up did not — a deploy's 502/503 either failed the join
+    // outright or silently chose a stale prefetched seed (2026-09-01
+    // review, PH-A13).
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('join through a blip'),
+      client,
+      ...FAST,
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const decoded = decodeShareCode(shareCode)!;
+    mock.pause();
+    // The blip clears while the join is still retrying (FAST base 20ms →
+    // retries at ~20/40/80ms, jittered; the pause lifts inside that window).
+    setTimeout(() => mock.resume(), 60);
+    let joiner: CollabSession | null = null;
+    try {
+      joiner = await CollabSession.join({ ...decoded, client, ...FAST });
+      const joinView = mkView(joiner.plugins());
+      await settle();
+      expect(docText(joinView.state.doc)).toContain('join through a blip');
+      joinView.destroy();
+    } finally {
+      mock.resume();
+      await joiner?.stop();
+      await host.stop();
+      hostView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('paging loops never trust the server to make progress', () => {
   it('a page that says `more` but does not advance the cursor terminates the loop', async () => {
     // A proxy-mangled body or half-deployed relay answering {more:true,

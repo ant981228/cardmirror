@@ -368,7 +368,26 @@ export class CollabSession {
     // errors by design (resilience), but a join that can't reach the
     // relay must FAIL — otherwise the caller mounts an empty doc and
     // the invite-prefetch offline fallback never gets a chance.
-    await session.catchUp(false, true);
+    //
+    // ...after a few jittered retries for the TRANSIENT shapes (a relay
+    // deploy's 502/503, one refused connection): the steady-state stream
+    // backs off and retries, but the join had no equivalent, so a
+    // short blip either failed the join outright or silently chose a
+    // stale prefetched seed (2026-09-01 review). Three retries at
+    // base×(1,2,4) — ~7s at the production base, long enough to ride
+    // out a deploy switchover. 4xx stays terminal.
+    const base = opts.minBackoffMs ?? 1000;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await session.catchUp(false, true);
+        break;
+      } catch (err) {
+        const transient = err instanceof RoomsError && (err.status === 0 || err.status >= 500);
+        if (!transient || attempt >= 3) throw err;
+        const delay = base * 2 ** attempt * (0.7 + Math.random() * 0.6);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
     return session;
   }
 
