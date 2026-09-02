@@ -323,6 +323,11 @@ export interface RoomStreamCallbacks {
   onEnded: () => void;
   /** Room at participant capacity (409). Terminal. */
   onFull: () => void;
+  /** An ESTABLISHED session's reconnect has hit 409 repeatedly — past the
+   *  relay's ghost-stream reap window, so the seat really is taken. Fired
+   *  once per run of 409s; the stream keeps retrying (a seat may open).
+   *  Lets the UI explain instead of showing a bare offline chip. */
+  onCrowdedOut?: () => void;
   /** A previously-connected stream dropped; reconnection with backoff
    *  is already underway. Lets the session mark itself offline instead
    *  of discovering the outage on the next failed send. */
@@ -352,6 +357,11 @@ export interface RoomStreamOptions {
   /** Backoff bounds, injectable for tests. */
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  /** How long a connection must stay up before the backoff resets to
+   *  its minimum (default 15s). A hello alone is not "success": a
+   *  draining relay accepts, hellos, and closes — resetting on hello
+   *  made every client reconnect at the 1s floor forever. */
+  resetAfterMs?: number;
 }
 
 export class RoomStream {
@@ -364,6 +374,9 @@ export class RoomStream {
   /** Consecutive relay-confirmed 401/403 handshakes. Portal/HTML 401s
    *  never count; a hello resets it. At 2, onAuthDead fires. */
   private authFails = 0;
+  /** Consecutive reconnect-409s (see onCrowdedOut). */
+  private reconnect409s = 0;
+  private survivalTimer: ReturnType<typeof setTimeout> | null = null;
   readonly stats: StreamStats = { attempts: 0, hellos: 0, consecutiveFailures: 0, lastHelloAt: 0 };
 
   constructor(private readonly opts: RoomStreamOptions) {
@@ -390,6 +403,7 @@ export class RoomStream {
 
   stop(): void {
     this.stopped = true;
+    this.clearSurvival();
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -430,17 +444,27 @@ export class RoomStream {
     }
   }
 
+  private clearSurvival(): void {
+    if (this.survivalTimer !== null) {
+      clearTimeout(this.survivalTimer);
+      this.survivalTimer = null;
+    }
+  }
+
   private scheduleRetry(): void {
     this.stats.consecutiveFailures++;
+    this.clearSurvival();
     if (this.stopped) return;
     if (this.helloed) {
       this.helloed = false;
       this.opts.callbacks.onDown?.();
     }
     const max = this.opts.maxBackoffMs ?? 60_000;
-    // ±30% jitter so a fleet doesn't reconnect in lockstep.
-    const jitter = 0.7 + Math.random() * 0.6;
-    const delay = Math.min(this.backoffMs, max) * jitter;
+    // Jitter INSIDE the cap (30-100% of it): the old ±30% applied after
+    // the clamp, so a 60s cap really meant 78s — and its narrow band put
+    // a whole fleet's first retry inside ~600ms after a relay restart.
+    const cap = Math.min(this.backoffMs, max);
+    const delay = cap * (0.3 + Math.random() * 0.7);
     this.backoffMs = Math.min(this.backoffMs * 2, max);
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
@@ -450,7 +474,16 @@ export class RoomStream {
 
   private dispatchFrame(eventName: string, dataText: string): void {
     if (eventName === 'hello') {
-      this.backoffMs = this.opts.minBackoffMs ?? 1000;
+      // NOT a backoff reset — that waits for the connection to survive
+      // resetAfterMs (a draining relay hellos and closes; resetting here
+      // turned a deploy into a 1Hz reconnect + catch-up storm per client,
+      // whose ghost streams then 409'd the room).
+      this.clearSurvival();
+      this.survivalTimer = setTimeout(() => {
+        this.survivalTimer = null;
+        this.backoffMs = this.opts.minBackoffMs ?? 1000;
+      }, this.opts.resetAfterMs ?? 15_000);
+      this.reconnect409s = 0;
       this.helloed = true;
       this.everHelloed = true;
       this.authFails = 0;
@@ -523,6 +556,10 @@ export class RoomStream {
           this.opts.callbacks.onFull();
           return;
         }
+        // Past the reap window (the relay notices a departed stream within
+        // one heartbeat, 25s; four backoff steps is comfortably longer), the
+        // slot is genuinely taken: say so once, keep retrying.
+        if (++this.reconnect409s === 4) this.opts.callbacks.onCrowdedOut?.();
         this.scheduleRetry();
         return;
       }

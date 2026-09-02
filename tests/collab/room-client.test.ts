@@ -231,8 +231,11 @@ describe('RoomStream', () => {
       baseUrl: () => mock.url,
       token: () => 'expired-guest-pass',
       roomId,
-      minBackoffMs: 20,
-      maxBackoffMs: 40,
+      // Jitter is 30-100% of the backoff, so the first retry lands no
+      // sooner than 30ms here — the 15ms probe below sees exactly one
+      // attempt.
+      minBackoffMs: 100,
+      maxBackoffMs: 200,
       callbacks: {
         onHello: () => {},
         onUpdate: () => {},
@@ -248,7 +251,7 @@ describe('RoomStream', () => {
     stream.start();
     await sleep(15); // one attempt so far
     expect(authDead).toBe(0);
-    await sleep(120); // past the first backoff → second confirmed 401
+    await sleep(250); // past the first backoff → second confirmed 401
     expect(authDead).toBe(1);
     expect(stream.running).toBe(false);
   });
@@ -353,6 +356,97 @@ describe('RoomStream', () => {
     expect(full).toBe(true);
     expect(eleventh.running).toBe(false);
     for (const s of holders) s.stop();
+  });
+});
+
+describe('RoomStream backoff policy (2026-09-01 review)', () => {
+  /** A fetch that answers every stream connect with `hello` and then
+   *  closes — the shape of a draining/flapping relay. */
+  const helloThenClose = (): Response =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('event: hello\ndata: {"lastSeq":0}\n\n'));
+          c.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    );
+  const noop = { onHello: () => {}, onUpdate: () => {}, onPresence: () => {}, onEnded: () => {}, onFull: () => {} };
+
+  it('retry delays never exceed maxBackoffMs (jitter is applied inside the cap)', async () => {
+    // The clamp ran BEFORE the ±30% jitter, so a 60s cap really meant 78s.
+    const stamps: number[] = [];
+    const stream = new RoomStream({
+      baseUrl: () => 'http://127.0.0.1:1', // refused
+      token: () => 'x',
+      roomId: 'r',
+      minBackoffMs: 20,
+      maxBackoffMs: 50,
+      fetchImpl: () => {
+        stamps.push(Date.now());
+        return Promise.reject(new Error('ECONNREFUSED'));
+      },
+      callbacks: noop,
+    });
+    stream.start();
+    await sleep(400);
+    stream.stop();
+    const gaps = stamps.slice(1).map((t, i) => t - stamps[i]!);
+    expect(gaps.length).toBeGreaterThan(4);
+    // Timer slop only (a few ms) — never the old cap×1.3 = 65.
+    for (const g of gaps) expect(g).toBeLessThanOrEqual(50 + 8);
+  });
+
+  it('backoff resets only after a connection SURVIVES, so a hello-then-close relay is not hammered', async () => {
+    let attempts = 0;
+    const stream = new RoomStream({
+      baseUrl: () => 'http://x',
+      token: () => 'x',
+      roomId: 'r',
+      minBackoffMs: 20,
+      maxBackoffMs: 160,
+      resetAfterMs: 5_000, // "survived" = stayed up this long; never happens here
+      fetchImpl: () => {
+        attempts++;
+        return Promise.resolve(helloThenClose());
+      },
+      callbacks: noop,
+    });
+    stream.start();
+    await sleep(450);
+    stream.stop();
+    // Naive reset-on-hello: ~1 attempt per 20ms ≈ 20+. Escalating: 20, 40,
+    // 80, 160, 160… ≈ 5-6 attempts in 450ms.
+    expect(attempts).toBeLessThanOrEqual(8);
+  });
+
+  it('a reconnect that keeps hitting 409 eventually reports crowded-out (and keeps retrying)', async () => {
+    let calls = 0;
+    let crowded = 0;
+    const stream = new RoomStream({
+      baseUrl: () => 'http://x',
+      token: () => 'x',
+      roomId: 'r',
+      minBackoffMs: 20,
+      maxBackoffMs: 40,
+      fetchImpl: () => {
+        calls++;
+        if (calls === 1) return Promise.resolve(helloThenClose()); // established once
+        return Promise.resolve(
+          new Response('{"detail":"room is full"}', {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      },
+      callbacks: { ...noop, onCrowdedOut: () => crowded++ },
+    });
+    stream.start();
+    await sleep(400);
+    expect(crowded, 'reported once after the ghost-reap window').toBe(1);
+    expect(stream.running, 'still retrying — a seat may open').toBe(true);
+    stream.stop();
   });
 });
 

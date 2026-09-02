@@ -627,6 +627,19 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
         key: 'collab-401',
       });
     },
+    onCrowdedOut: () => {
+      // An established session's reconnects keep 409ing past the relay's
+      // ghost-reap window: the seat is really taken. Explain once; the
+      // stream keeps retrying and reconnects when a seat opens.
+      postNotice({
+        severity: 'warning',
+        title: 'Session is full',
+        body:
+          'Every seat in this session is taken right now. Your edits are saved ' +
+          'locally and you will reconnect automatically when someone leaves.',
+        key: 'collab-crowded',
+      });
+    },
     onBacklogMerged: (_count: number) => {
       // Merge-visibility (M3): a real offline backlog just landed — say
       // so, instead of the doc silently reshaping under the user. The

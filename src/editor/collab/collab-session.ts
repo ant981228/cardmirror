@@ -104,6 +104,9 @@ export interface CollabSessionCallbacks {
   onEnded?: () => void;
   /** The room is at participant capacity. Terminal for this attempt. */
   onFull?: () => void;
+  /** An established session's reconnects keep 409ing (seat taken past
+   *  the relay's reap window). Retrying continues; the UI should explain. */
+  onCrowdedOut?: () => void;
   /** Encrypted presence blob from a peer (cursor layer decodes). */
   onPresence?: (blob: Uint8Array) => void;
   /** A catch-up just imported a LARGE offline backlog (`count` update
@@ -134,6 +137,7 @@ export interface CollabSessionOptions {
   receiveBatchMs?: number;
   /** Stream backoff bounds, injectable for tests. */
   minBackoffMs?: number;
+  resetAfterMs?: number;
   maxBackoffMs?: number;
   /** Host compaction cadence: upload an encrypted snapshot every N
    *  posted updates. */
@@ -281,10 +285,11 @@ export class CollabSession {
     this.streamOpts = {
       minBackoffMs: opts.minBackoffMs,
       maxBackoffMs: opts.maxBackoffMs,
+      resetAfterMs: opts.resetAfterMs,
     };
   }
 
-  private streamOpts: { minBackoffMs?: number; maxBackoffMs?: number };
+  private streamOpts: { minBackoffMs?: number; maxBackoffMs?: number; resetAfterMs?: number };
 
   /** Start a session on the current document. Uploads the seed state as
    *  update #1 and returns the share code alongside the session. */
@@ -297,6 +302,7 @@ export class CollabSession {
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
     minBackoffMs?: number;
+    resetAfterMs?: number;
     maxBackoffMs?: number;
     snapshotEvery?: number;
     updateByteLimit?: number;
@@ -352,6 +358,7 @@ export class CollabSession {
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
     minBackoffMs?: number;
+    resetAfterMs?: number;
     maxBackoffMs?: number;
     updateByteLimit?: number;
   }): Promise<CollabSession> {
@@ -415,6 +422,7 @@ export class CollabSession {
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
     minBackoffMs?: number;
+    resetAfterMs?: number;
     maxBackoffMs?: number;
     snapshotEvery?: number;
   }): Promise<CollabSession> {
@@ -492,6 +500,7 @@ export class CollabSession {
       sid: this.streamSid,
       minBackoffMs: this.streamOpts.minBackoffMs,
       maxBackoffMs: this.streamOpts.maxBackoffMs,
+      resetAfterMs: this.streamOpts.resetAfterMs,
       callbacks: {
         onHello: () => {
           this.connected = true;
@@ -523,6 +532,9 @@ export class CollabSession {
         onAuthDead: () => this.handleAuthDead(),
         onFull: () => {
           this.callbacks.onFull?.();
+        },
+        onCrowdedOut: () => {
+          this.callbacks.onCrowdedOut?.();
         },
         onDown: () => {
           this.connected = false;
