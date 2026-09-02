@@ -766,6 +766,36 @@ describe('holdings ledger buckets rows (2026-09-01 review, SC9)', () => {
   }, 10_000);
 });
 
+describe('outbound flush on tab-hide (2026-09-01 review, SC15)', () => {
+  it('hiding the tab flushes queued local edits at once instead of waiting for the tick', async () => {
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('hide me'),
+      client,
+      ...FAST,
+      flushMs: 5000, // a slow tick makes the hide-flush observable
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const roomId = decodeShareCode(shareCode)!.roomId;
+    await sleep(60);
+    try {
+      const before = mock.updateCount(roomId);
+      typeAfter(hostView, 'hide me', ' now');
+      await sleep(100);
+      expect(mock.updateCount(roomId), 'nothing posted before the tick').toBe(before);
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await sleep(250);
+      expect(mock.updateCount(roomId), 'tab-hide flushed the edit').toBe(before + 1);
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      await host.stop();
+      hostView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

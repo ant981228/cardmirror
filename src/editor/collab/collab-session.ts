@@ -578,6 +578,16 @@ export class CollabSession {
 
   start(): void {
     this.stopping = false;
+    // Flush on tab-hide: persist and history both hook it, the outbound
+    // path did not — the unsent window on a lid-close was the whole
+    // flush tick (2026-09-01 review, SC15).
+    if (this.offVisibility === null && typeof document !== 'undefined') {
+      const onVis = (): void => {
+        if (document.visibilityState === 'hidden') this.flush();
+      };
+      document.addEventListener('visibilitychange', onVis);
+      this.offVisibility = () => document.removeEventListener('visibilitychange', onVis);
+    }
     if (this.ended || this.stream) return;
     this.stream = new RoomStream({
       baseUrl: this.client.opts.baseUrl,
@@ -682,6 +692,8 @@ export class CollabSession {
     this.stream?.stop();
     this.stream = null;
     this.connected = false;
+    this.offVisibility?.();
+    this.offVisibility = null;
   }
 
   /** End the session for everyone (host action): tombstones the room. */
@@ -781,6 +793,7 @@ export class CollabSession {
    *  minute at the escalating retry cadence). */
   private readonly sendStuckAfter: number;
   private sendStuckSignaled = false;
+  private offVisibility: (() => void) | null = null;
   private consecutiveSendFailures = 0;
   private consecutiveSnapshotFailures = 0;
   private lastCatchUpError: string | null = null;
@@ -1094,6 +1107,9 @@ export class CollabSession {
     // binding transaction → one plugin-pipeline pass, instead of a
     // full cycle per frame (perf study 2026-08-06).
     this.foldTailMeta(u.seq, plain);
+    // NOTE: the decrypt above is awaited, so buffer order is arrival-of-
+    // plaintext order, not seq order. Harmless for a CRDT import batch —
+    // never assume seq ordering here.
     this.inboundBuf.push(plain);
     if (this.importedSeqs.size >= CollabSession.IMPORTED_SEQS_CAP) this.importedSeqs.clear();
     this.importedSeqs.add(u.seq);
@@ -1549,9 +1565,14 @@ export class CollabSession {
    *  log truncation, no data-loss surface. */
   private exportChunks(
     from: ReturnType<LoroDoc['version']>,
+    toVersion?: ReturnType<LoroDoc['version']>,
   ): Uint8Array[] {
     this.loroDoc.commit();
-    const to = this.loroDoc.version();
+    // `to` defaults to the live version (the audit's full-history
+    // repost); chunkQueueHead passes the entry's own end version so
+    // remote ops imported since the entry was queued are not re-posted
+    // on exactly the largest payloads (2026-09-01 review, SC15).
+    const to = toVersion ?? this.loroDoc.version();
     const spans: { id: { peer: `${number}`; counter: number }; len: number }[] = [];
     for (const [peer, end] of to.toJSON()) {
       const start = from.get(peer) ?? 0;
@@ -1588,7 +1609,7 @@ export class CollabSession {
    *  version. */
   private chunkQueueHead(): void {
     const entry = this.outQueue[0]!;
-    const chunks = this.exportChunks(entry.from);
+    const chunks = this.exportChunks(entry.from, entry.version);
     const replacements = chunks.map((blob, i) => ({
       blob,
       version: i === chunks.length - 1 ? entry.version : entry.from,
