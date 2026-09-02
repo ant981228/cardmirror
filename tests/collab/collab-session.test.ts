@@ -376,6 +376,31 @@ describe('send-path liveness (a hung POST must not wedge the queue forever)', ()
   }, 10_000);
 });
 
+describe('catch-up re-entry (a concurrent request must not be dropped)', () => {
+  it('catchUp(expectMissingDeps) arriving while a catch-up runs is re-run, escalation intact', async () => {
+    // The `catchUpRunning` guard discarded a concurrent call outright —
+    // including the expectMissingDeps=true signal that forces the full
+    // resync when nothing new arrives. Recovery then waited for the
+    // 5-minute timer (2026-09-01 review, SC8).
+    const { host, hostView, joiner, joinView } = await hostAndJoin(simpleDoc('reentry'));
+    try {
+      const before = mock.updateFetches();
+      const first = joiner.catchUp(); // in flight at its first await
+      void joiner.catchUp(true); // shed-frame healer asks for a resync
+      await first;
+      await sleep(300);
+      // First pass = 1 tail fetch. The re-run must do its own tail fetch
+      // AND the from-zero resync (expectMissingDeps with nothing new).
+      expect(mock.updateFetches() - before, 'tail + re-run tail + resync').toBeGreaterThanOrEqual(3);
+    } finally {
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

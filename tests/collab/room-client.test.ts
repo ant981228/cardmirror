@@ -298,8 +298,10 @@ describe('RoomStream', () => {
       baseUrl: () => mock.url,
       token: () => (denyToken ? 'wrong' : mock.token),
       roomId,
-      minBackoffMs: 20,
-      maxBackoffMs: 40,
+      // Retries land at 30-100% of the backoff: 200ms keeps every
+      // scripted 30ms window below to exactly one attempt.
+      minBackoffMs: 200,
+      maxBackoffMs: 400,
       restartDebounceMs: 0, // restart() here means "drop the connection now"
 
       callbacks: {

@@ -653,6 +653,8 @@ export class CollabSession {
     };
   }
 
+  /** A catch-up requested while one was running (see catchUp). */
+  private catchUpRerun: { expectMissingDeps: boolean } | null = null;
   private consecutiveSendFailures = 0;
   private consecutiveSnapshotFailures = 0;
   private lastCatchUpError: string | null = null;
@@ -937,7 +939,16 @@ export class CollabSession {
    *  those deps live BELOW the cursor, so if the tail fetch yields
    *  nothing the full resync must still run. */
   async catchUp(expectMissingDeps = false, rethrow = false): Promise<void> {
-    if (this.ended || this.catchUpRunning) return;
+    if (this.ended) return;
+    if (this.catchUpRunning) {
+      // Don't DROP a concurrent request — latch it for one re-run after
+      // the current pass, ORing the expectMissingDeps escalation. The
+      // old early return discarded drainInbound's shed-frame healer when
+      // it raced onHello's catch-up, leaving recovery to the 5-minute
+      // timer (2026-09-01 review, SC8).
+      this.catchUpRerun = { expectMissingDeps: (this.catchUpRerun?.expectMissingDeps ?? false) || expectMissingDeps };
+      return;
+    }
     this.catchUpRunning = true;
     try {
       let pendingLeft = false;
@@ -1094,6 +1105,9 @@ export class CollabSession {
       if (rethrow) throw err;
     } finally {
       this.catchUpRunning = false;
+      const rerun = this.catchUpRerun;
+      this.catchUpRerun = null;
+      if (rerun && !this.ended) void this.catchUp(rerun.expectMissingDeps);
     }
   }
 
