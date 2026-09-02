@@ -22,7 +22,7 @@ import { showToast } from '../toast.js';
 import { surfaceError } from '../error-surface.js';
 import { warmCausalMarkIndex } from './causal-mark-heal.js';
 import { RELAY_FIX_PATH } from '../relay-decline.js';
-import { postNotice } from '../status-notices.js';
+import { clearNotice, postNotice } from '../status-notices.js';
 import { promptForText, promptForRouteChoice, confirmDialog } from '../text-prompt.js';
 import { markSyncOrigin } from '../sync-origin.js';
 import { readModePlugin } from '../read-mode-plugin.js';
@@ -125,6 +125,8 @@ interface ActiveSession {
    *  ever reflects the focused doc's session; storing status per session lets
    *  each multi-pane slot footer render its own visible doc's state. */
   lastStatus: { connected: boolean; queuedUpdates: number } | null;
+  offlineSince: number | null;
+  offlineTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const sessions = new Map<string, ActiveSession>();
@@ -454,6 +456,7 @@ function installSeams(
     shareCode,
     () => sessionDocTitle(ownerUid) || sharedDocTitle(session),
     () => docIdResolver?.(ownerUid) ?? null,
+    { onFailure: (n) => noteWriterFailure('collab-persist-failing', 'crash-resume record', n) },
   );
   // Recover Previous Version's durable record: full-history snapshots
   // that survive session end (deliberately including a remote
@@ -471,6 +474,8 @@ function installSeams(
   const history = attachSessionHistory(
     session,
     () => sessionDocTitle(ownerUid) || sharedDocTitle(session),
+    undefined,
+    { onFailure: (n) => noteWriterFailure('collab-history-failing', 'session history', n) },
   );
   const cursors = installCursorPresence(session, ownerView);
   // One shared timer refreshes the focused session's chip dots AND every slot
@@ -503,6 +508,8 @@ function installSeams(
     wakeCleanup,
     metaUnsub,
     lastStatus: null,
+    offlineSince: null,
+    offlineTimer: null,
   };
   sessions.set(ownerUid, sess);
   // Cross-window live-session claim: while this session is live, other
@@ -566,6 +573,8 @@ function teardownSession(sess: ActiveSession, keepRecord = false): Promise<void>
   // window was no longer in (2026-09-01 review). stop() is idempotent, so
   // the End/Leave/close paths that already stopped are unaffected.
   sess.cursors.farewell(); // departure frame needs the stream — before stop()
+  if (sess.offlineTimer !== null) clearTimeout(sess.offlineTimer);
+  clearNotice('collab-offline');
   void sess.session.stop().catch(() => {});
   unregisterCollabPluginSource(sess.ownerUid);
   sessions.delete(sess.ownerUid);
@@ -628,6 +637,35 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       // Reconnected → re-announce presence (partners saw us absent until
       // the 15s keepalive otherwise).
       if (s.connected && !sess.lastStatus?.connected) sess.cursors.rebroadcast();
+      // Prolonged-disconnect notice (see offlineNoticeMs).
+      if (!s.connected && sess.lastStatus?.connected !== false) {
+        sess.offlineSince = Date.now();
+        if (sess.offlineTimer === null) {
+          sess.offlineTimer = setTimeout(() => {
+            sess.offlineTimer = null;
+            const cur = sess.lastStatus;
+            if (cur && !cur.connected && sessions.has(sess.ownerUid)) {
+              const mins = Math.max(1, Math.round((Date.now() - (sess.offlineSince ?? Date.now())) / 60_000));
+              postNotice({
+                severity: 'warning',
+                title: 'Session offline',
+                body:
+                  `This session has been disconnected for about ${mins} minute${mins === 1 ? '' : 's'}` +
+                  (cur.queuedUpdates > 0 ? ` with ${cur.queuedUpdates} edit${cur.queuedUpdates === 1 ? '' : 's'} waiting to send` : '') +
+                  '. Edits are saved locally and keep retrying.',
+                key: 'collab-offline',
+              });
+            }
+          }, offlineNoticeMs);
+        }
+      } else if (s.connected && sess.lastStatus?.connected === false) {
+        if (sess.offlineTimer !== null) {
+          clearTimeout(sess.offlineTimer);
+          sess.offlineTimer = null;
+        }
+        sess.offlineSince = null;
+        clearNotice('collab-offline');
+      }
       // emitStatus fires from flush() and from every successful post —
       // several times a second while typing. An unchanged status must
       // not repaint every slot footer (each calls into the wasm presence
@@ -912,6 +950,35 @@ export async function joinSessionFlow(deps: CollabUiDeps): Promise<void> {
  *  doesn't burn the share code. No view is required up front: the flow
  *  creates its own doc via deps.newSessionDoc (multi-pane may be an empty
  *  workspace at this point). */
+/** Silent-degradation surfacing (2026-09-01 review, PH-A9): a full disk
+ *  or a denied IndexedDB quota used to disable crash recovery AND
+ *  Recover Previous Version for the whole session with zero signal —
+ *  both writers swallow storage errors by design. Three consecutive
+ *  failures post a keyed notice; a later success clears it. */
+function noteWriterFailure(key: string, what: string, consecutive: number): void {
+  if (consecutive === 0) {
+    clearNotice(key);
+    return;
+  }
+  if (consecutive < 3) return;
+  postNotice({
+    severity: 'warning',
+    title: `Session ${what} isn\u2019t being saved`,
+    body:
+      `CardMirror could not write the ${what} ${consecutive} times in a row (disk full or ` +
+      'storage denied?). Your live session still works; save the document to be safe.',
+    key,
+  });
+}
+
+/** Prolonged-disconnect notice: offline showed only as chip text, and 5
+ *  seconds read exactly like 40 minutes. After this long disconnected, a
+ *  keyed notice names the queued count; reconnecting clears it. */
+let offlineNoticeMs = 3 * 60_000;
+export function __setOfflineNoticeMsForTests(ms: number | null): void {
+  offlineNoticeMs = ms ?? 3 * 60_000;
+}
+
 /** In-flight join/resume guards, keyed by room. startSessionFlow had one
  *  (startsInFlight); join and resume did not, so a double-click (or an
  *  invite pill + a Sessions row) raced past the "already installed?"

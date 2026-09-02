@@ -34,6 +34,10 @@ export interface PersistCadence {
   persistMs?: number;
   slowPersistMs?: number;
   bigSnapshotBytes?: number;
+  /** Consecutive write failures (storage denied/full) — writeInner
+   *  swallows them by design; this is how the UI learns crash-resume
+   *  has silently stopped working. Reset to 0 on the next success. */
+  onFailure?: (consecutive: number) => void;
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -68,6 +72,7 @@ export function attachSessionPersistence(
   const slowPersistMs = cadence.slowPersistMs ?? PERSIST_SLOW_MS;
   const bigSnapshotBytes = cadence.bigSnapshotBytes ?? BIG_SNAPSHOT_BYTES;
   let lastSnapshotBytes = 0;
+  let failures = 0;
   // Writes are serialized through a promise tail so an explicit
   // flush() AWAITS any in-flight write instead of silently no-oping
   // past it (the attach-time initial write races an immediate flush).
@@ -163,8 +168,13 @@ export function attachSessionPersistence(
       }
       lastSnapshotBytes = record.snapshot.byteLength;
       await saveSessionRecord(record);
+      if (failures > 0) {
+        failures = 0;
+        cadence.onFailure?.(0);
+      }
     } catch {
       /* storage denied/full — persistence degrades, the session still works */
+      cadence.onFailure?.(++failures);
     }
   };
 

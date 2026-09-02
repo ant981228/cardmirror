@@ -403,6 +403,47 @@ describe('collab UI flows through the editor seams', () => {
     viewB.destroy();
   }, 20_000);
 
+  it('a prolonged disconnect posts a keyed notice; reconnecting clears it (2026-09-01 review, PH-A9)', async () => {
+    // Offline showed only as chip text — 5 seconds and 40 minutes read
+    // identically, and the chip is easy to miss.
+    const { noticeCount, __resetNoticesForTests } = await import('../../src/editor/status-notices.js');
+    __resetNoticesForTests();
+    collabUi.__setOfflineNoticeMsForTests(250);
+    const view = mkIndexStyleView('doc-OFF');
+    const deps = {
+      getView: () => view,
+      getOwnerUid: () => 'doc-OFF',
+      refreshPlugins: () =>
+        view.updateState(view.state.reconfigure({ plugins: buildMiniPlugins('doc-OFF') })),
+      newSessionDoc: () => true,
+    };
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() },
+    });
+    await startSession(deps);
+    await sleep(150);
+    try {
+      const base = noticeCount();
+      mock.pause();
+      collabUi.activeSession()!.restart(); // drop the stream so the session reads disconnected
+      typeAfter(view, 'shared prep doc', ' offline edit'); // a failing post confirms it
+      await sleep(900); // well past the 250ms test threshold
+      expect(noticeCount(), 'offline notice posted').toBeGreaterThan(base);
+      mock.resume();
+      await sleep(900); // reconnect → notice cleared
+      expect(noticeCount(), 'reconnect clears it').toBe(base);
+    } finally {
+      mock.resume();
+      collabUi.__setOfflineNoticeMsForTests(null);
+      const endP = collabUi.endSessionFlow(deps);
+      await settle();
+      clickPromptButton('End Session');
+      await endP;
+      view.destroy();
+    }
+  }, 20_000);
+
   it('typing does not storm copresence repaints when the status is unchanged', async () => {
     // emitStatus fires from flush() and from every successful post —
     // several times a second while typing — and onStatus notified every

@@ -78,6 +78,14 @@ export function postNotice(input: NoticeInput): void {
   render();
 }
 
+/** Remove a keyed notice (a condition that resolved itself — e.g. a
+ *  session reconnected). No-op when absent. */
+export function clearNotice(key: string): void {
+  const before = notices.length;
+  notices = notices.filter((n) => n.key !== key);
+  if (notices.length !== before) render();
+}
+
 function dismiss(id: number): void {
   notices = notices.filter((n) => n.id !== id);
   render();

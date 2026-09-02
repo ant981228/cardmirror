@@ -80,6 +80,7 @@ export function attachSessionHistory(
   session: CollabSession,
   getDocTitle: () => string,
   hostForTests?: HistoryHostLike,
+  opts: { onFailure?: (consecutive: number) => void } = {},
 ): HistoryHandle {
   const host: HistoryHostLike | null = hostForTests ?? getElectronHost();
   let disposed = false;
@@ -92,6 +93,7 @@ export function attachSessionHistory(
   let writtenVersion: Uint8Array | null = null;
   let seeded = false;
   let lastSnapshotBytes = 0;
+  let failures = 0;
 
   const writeInner = async (): Promise<void> => {
     if (disposed || !host) return;
@@ -134,8 +136,13 @@ export function attachSessionHistory(
       await host.writeHistory(envelope);
       writtenVersion = version;
       lastSnapshotBytes = snapshot.byteLength;
+      if (failures > 0) {
+        failures = 0;
+        opts.onFailure?.(0);
+      }
     } catch {
       /* disk full/denied — history degrades, the session still works */
+      opts.onFailure?.(++failures);
     }
   };
 
