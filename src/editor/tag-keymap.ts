@@ -701,12 +701,16 @@ export const enterMidTag: Command = (state, dispatch) => {
   const postContent = ctx.head.content.cut(ctx.cursorOffset);
 
   // New card: container with just a head holding pre-cursor content
-  // and a fresh heading id.
+  // and a fresh heading id. It takes the ORIGINAL container's attrs
+  // (numbering role/restart, indent…): the pre-cursor half is the card
+  // the author was numbering, and the post-cursor half is the new one —
+  // built with defaults, the number followed the second card instead
+  // (field report 2026-09-02).
   const newHead = headType.createChecked(
     { id: newHeadingId() },
     preContent,
   );
-  const newContainer = containerType.createChecked(null, [newHead]);
+  const newContainer = containerType.createChecked({ ...ctx.container.attrs }, [newHead]);
 
   let tr = state.tr;
   // Replace original head's inline content with post-cursor content.
@@ -715,6 +719,15 @@ export const enterMidTag: Command = (state, dispatch) => {
     ctx.headTo - 1,   // end of original head content
     postContent,
   );
+  // The original container becomes the second, NEW card: numbering
+  // resets to the defaults (unnumbered, flow-through).
+  if ('numRole' in ctx.container.attrs) {
+    tr = tr.setNodeMarkup(ctx.containerFrom, undefined, {
+      ...ctx.container.attrs,
+      numRole: 'none',
+      numRestart: false,
+    });
+  }
   // Insert the new container before the current container (positions
   // remain stable because the replaceWith above didn't grow the doc
   // before containerFrom).
@@ -800,14 +813,21 @@ export const enterInHeading: Command = (state, dispatch) => {
   if (!dispatch) return true;
   const preContent = heading.content.cut(0, cursorOffset);
   const postContent = heading.content.cut(cursorOffset);
+  // The pre-cursor half inherits the original's attrs (a block's
+  // numRestart, indent…) under a fresh id; the post-cursor half is the
+  // new heading and takes the type defaults — same rule as enterMidTag.
   const newHeading = heading.type.createChecked(
-    { id: newHeadingId() },
+    { ...heading.attrs, id: newHeadingId() },
     preContent,
   );
 
   let tr = state.tr;
   // 1. Replace original heading's content with post-cursor.
   tr = tr.replaceWith($from.start(headingDepth), $from.end(headingDepth), postContent);
+  if ('numRestart' in heading.attrs) {
+    const resetAttrs = { ...heading.attrs, numRestart: heading.type.spec.attrs?.['numRestart']?.default };
+    tr = tr.setNodeMarkup($from.before(headingDepth), undefined, resetAttrs);
+  }
   // 2. Insert new heading before the original.
   const insertPos = tr.mapping.map($from.before(headingDepth));
   tr = tr.insert(insertPos, newHeading);
