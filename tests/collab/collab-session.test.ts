@@ -533,6 +533,48 @@ describe('pendingImports must clear once the parked ops integrate', () => {
   }, 10_000);
 });
 
+describe('audit runs behind a fresh catch-up', () => {
+  it('the audit probe sees a CURRENT cursor (no stale-window re-download)', async () => {
+    // The 30-minute audit had its own timer, unaligned with the catch-up
+    // timer, so its "~100B probe" fetched (and decrypted) every row since
+    // a cursor that was ~2.5 minutes stale on average (2026-09-01
+    // review, T7). Now every audit is preceded by a catch-up.
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('audit me'),
+      client,
+      ...FAST,
+      catchUpMs: 600_000, // no periodic catch-up: only the audit can advance the cursor
+      auditDelayMs: 600, // after the scripted edits below, before the final check
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const decoded = decodeShareCode(shareCode)!;
+    const joiner = await CollabSession.join({ ...decoded, client, ...FAST });
+    const joinView = mkView(joiner.plugins());
+    await settle();
+    joiner.start();
+    await sleep(60);
+    try {
+      mock.mutePush(true); // the host's stream delivers nothing → its cursor goes stale
+      for (let i = 0; i < 3; i++) {
+        typeAfter(joinView, 'audit me', ` j${i}`);
+        await sleep(FAST.flushMs * 3);
+      }
+      const roomMax = (await client.fetchUpdates(host.roomId, 0)).lastSeq;
+      expect(host.debugState().lastSeq, 'sanity: stale before the audit').toBeLessThan(roomMax);
+      await sleep(800); // the audit kickoff (600ms after start) fires inside this window
+      expect(host.debugState().lastSeq, 'audit ran behind a catch-up').toBeGreaterThanOrEqual(roomMax);
+    } finally {
+      mock.mutePush(false);
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict

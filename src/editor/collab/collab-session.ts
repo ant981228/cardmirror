@@ -336,6 +336,7 @@ export class CollabSession {
     callbacks?: CollabSessionCallbacks;
     flushMs?: number;
     catchUpMs?: number;
+    auditDelayMs?: number;
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
     minBackoffMs?: number;
@@ -393,6 +394,7 @@ export class CollabSession {
     callbacks?: CollabSessionCallbacks;
     flushMs?: number;
     catchUpMs?: number;
+    auditDelayMs?: number;
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
     minBackoffMs?: number;
@@ -458,6 +460,7 @@ export class CollabSession {
     callbacks?: CollabSessionCallbacks;
     flushMs?: number;
     catchUpMs?: number;
+    auditDelayMs?: number;
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
     minBackoffMs?: number;
@@ -592,8 +595,15 @@ export class CollabSession {
       this.checkEcho();
     }, this.flushMs);
     this.catchUpTimer = setInterval(() => void this.catchUp(), this.catchUpMs);
-    this.auditKickoff = setTimeout(() => void this.auditRoomHistory(), this.auditDelayMs);
-    this.auditTimer = setInterval(() => void this.auditRoomHistory(), 30 * 60_000);
+    // Every audit runs BEHIND a catch-up so its probe starts from a
+    // current cursor: with its own unaligned timer the "~100B probe"
+    // fetched and decrypted every row since a cursor that was ~2.5
+    // minutes stale on average (2026-09-01 review, T7). The extra tail
+    // fetch is the cheap half; the decrypts it avoids are the expensive
+    // half.
+    const audit = (): void => void this.catchUp().then(() => this.auditRoomHistory());
+    this.auditKickoff = setTimeout(audit, this.auditDelayMs);
+    this.auditTimer = setInterval(audit, 30 * 60_000);
   }
 
   /** Leave the session (participant) or just stop syncing: final flush
