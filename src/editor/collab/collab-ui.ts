@@ -19,6 +19,7 @@ import type { EditorView } from 'prosemirror-view';
 import { LoroUndoPlugin, loroSyncPluginKey, loroUndoPluginKey, undo as loroUndo, redo as loroRedo } from 'loro-prosemirror';
 import { settings } from '../settings.js';
 import { showToast } from '../toast.js';
+import { surfaceError } from '../error-surface.js';
 import { RELAY_FIX_PATH } from '../relay-decline.js';
 import { postNotice } from '../status-notices.js';
 import { promptForText, promptForRouteChoice, confirmDialog } from '../text-prompt.js';
@@ -642,7 +643,7 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       if (!sess || !sessions.has(sess.ownerUid)) return;
       const wasHost = sess.session.role === 'host';
       const wasChip = isChipSession(sess.ownerUid);
-      void teardownSession(sess);
+      void teardownSession(sess).catch((e) => surfaceError('collab teardown', e));
       void wasChip;
       refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
       // Rebuild the OWNER doc's plugin stack — refreshing the focused view
@@ -668,7 +669,7 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       // the record so the user can rejoin from the Sessions list when
       // someone leaves.
       const wasChip = isChipSession(sess.ownerUid);
-      void teardownSession(sess, /* keepRecord */ true);
+      void teardownSession(sess, /* keepRecord */ true).catch((e) => surfaceError('collab teardown', e));
       void wasChip;
       refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
       if (deps.refreshPluginsForUid) deps.refreshPluginsForUid(sess.ownerUid);
@@ -986,7 +987,7 @@ export async function joinSessionWithCode(
     updateChip({ connected: !joinedOffline, queuedUpdates: 0 });
     // Only NOW is the seed spent — the join is committed (for the offline
     // path the seed's content lives on in the session + its persist record).
-    void deletePrefetch(decoded.roomId);
+    void deletePrefetch(decoded.roomId).catch((e) => surfaceError('collab seed cleanup', e));
     showToast(
       joinedOffline
         ? 'Joined from the prefetched copy — will sync when you reconnect'
@@ -995,12 +996,12 @@ export async function joinSessionWithCode(
     deps.getView()?.focus();
     return true;
   } catch (err) {
-    if (sessRef) void teardownSession(sessRef);
+    if (sessRef) void teardownSession(sessRef).catch((e) => surfaceError('collab teardown', e));
     // A dead room's invite and seed are useless — purge the seed and report
     // consumed so the Receive pill clears the row. Every other failure keeps
     // both, so the user can retry once the network/slot situation changes.
     const ended = err instanceof RoomsError && (err.status === 410 || err.status === 404);
-    if (ended) void deletePrefetch(decoded.roomId);
+    if (ended) void deletePrefetch(decoded.roomId).catch((e) => surfaceError('collab seed cleanup', e));
     showToast(relayFailureMessage(err, { initiating: false, verb: 'join' }));
     return ended;
   }
@@ -1112,7 +1113,7 @@ export async function resumeSessionFlow(
     // KEEP the record on a failed resume: it existed before this attempt and
     // may hold unsynced edits — the default teardown would delete it (audit
     // find, 2026-07-10). Still resumable from the Sessions list.
-    if (sessRef) void teardownSession(sessRef, /* keepRecord */ true);
+    if (sessRef) void teardownSession(sessRef, /* keepRecord */ true).catch((e) => surfaceError('collab teardown', e));
     showToast(relayFailureMessage(err, { initiating: false, verb: 'resume' }));
     return false;
   }
@@ -1331,7 +1332,7 @@ async function closeKeepResumableSession(uid: string): Promise<boolean> {
     sess.session.start(); // reconnect; the session stays live, caller aborts
     return false;
   }
-  void teardownSession(sess, /* keepRecord */ true);
+  void teardownSession(sess, /* keepRecord */ true).catch((e) => surfaceError('collab teardown', e));
   void wasChip;
       refreshChipForFocus(); // repaint from live truth — a stale wasChip snapshot left ghost chips (field find, 2026-08-12)
   return true;
