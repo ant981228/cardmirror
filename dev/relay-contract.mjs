@@ -340,6 +340,31 @@ if (process.env.ROOMS !== '0') {
   check('rooms: tombstoned stream 410', s410.status === 410, String(s410.status));
 }
 
+// 14b. pages are byte-bounded, not just row-bounded (2026-09-01 review, R4)
+{
+  const mk = await fetch(`${BASE}/rooms`, { method: 'POST', headers: AUTH });
+  const { roomId } = await mk.json();
+  const big = Buffer.alloc(2_200_000, 7); // ~2.9 MB of base64 each; three exceed a 4 MB page budget
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(`${BASE}/rooms/${roomId}/updates`, { method: 'POST', headers: { ...AUTH, 'Content-Type': 'application/octet-stream' }, body: big });
+    check(`rooms: big update ${i} 202`, r.status === 202, String(r.status));
+  }
+  const p1 = await (await fetch(`${BASE}/rooms/${roomId}/updates?after=0`, { headers: AUTH })).json();
+  check('rooms: byte budget splits a 3-row page (more:true, <3 rows)', p1.more === true && p1.updates.length >= 1 && p1.updates.length < 3, JSON.stringify({ n: p1.updates?.length, more: p1.more }));
+  let total = p1.updates.length, pages = 1, after = p1.lastSeq, more = p1.more;
+  while (more && pages < 6) {
+    const pg = await (await fetch(`${BASE}/rooms/${roomId}/updates?after=${after}`, { headers: AUTH })).json();
+    total += pg.updates.length; pages++; after = pg.lastSeq; more = pg.more;
+  }
+  check('rooms: paging to more:false delivers all 3 rows', total === 3 && more === false && pages >= 2, JSON.stringify({ total, pages, more }));
+  await fetch(`${BASE}/rooms/${roomId}`, { method: 'DELETE', headers: AUTH });
+}
+// 14c. admin metrics exists but is admin-gated (404 without the admin token) (R13)
+{
+  const r = await fetch(`${BASE}/admin/metrics`, { headers: AUTH });
+  check('admin metrics gated (404 without admin token)', r.status === 404, String(r.status));
+}
+
 // 15. participant cap: a reconnect with the SAME sid replaces its own ghost
 // instead of counting against the cap (2026-09-01 review, R7)
 {
