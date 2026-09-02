@@ -1473,7 +1473,6 @@ async function endOrLeaveSession(sess: ActiveSession): Promise<boolean> {
   // and only tear down once the room is actually gone. endRoomOnRelay treats
   // an already-ended/expired room (410/404) as success.
   sess.cursors.farewell(); // announce departure while the stream is still up
-  sess.cursors.farewell(); // announce departure while the stream is still up
   await sess.session.stop();
   if (isHost) {
     try {

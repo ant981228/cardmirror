@@ -224,6 +224,13 @@ export function installCursorPresence(
    *  store produces identical bytes, and resending them buys nothing.
    *  Cleared by the keepalive so idle-expiry refresh still goes out. */
   let lastSentBytes: Uint8Array | null = null;
+  /** Local state at the moment of farewell(). The departure frame is a
+   *  store DELETE, and the store's local state is our own entry — so an
+   *  aborted departure (host End that failed to tombstone, keep-resumable
+   *  close whose flush failed → session.start()) had nothing to
+   *  re-announce until the next editor transaction. rebroadcast() restores
+   *  it (knock-on audit 2026-09-02). */
+  let partingLocal: ReturnType<typeof store.getLocal> = undefined;
   const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -426,6 +433,7 @@ export function installCursorPresence(
       // An ephemeral delete is a payload shape old clients already apply.
       if (disposed || !cursorsEnabled()) return;
       try {
+        partingLocal = store.getLocal() ?? partingLocal;
         let bytes: Uint8Array | null = null;
         const off = store.subscribeLocalUpdates((b: Uint8Array) => {
           bytes = b;
@@ -444,7 +452,8 @@ export function installCursorPresence(
       // After a stream reconnect nothing re-announced presence until the
       // 15s keepalive; partners saw us absent for up to that long.
       if (disposed || !cursorsEnabled()) return;
-      const local = store.getLocal();
+      const local = store.getLocal() ?? partingLocal;
+      partingLocal = undefined;
       if (local) {
         lastSentBytes = null;
         store.setLocal(local);

@@ -214,6 +214,16 @@ describe('presence departure + reconnect re-broadcast (2026-09-01 review, PH-A10
     await pump();
     expect(bCursors.visiblePeers(), 'gone at once, not in 45s').not.toContain(a.loroDoc.peerIdStr);
 
+    // ABORTED departure (host End failed to tombstone / keep-resumable
+    // flush failed → session.start() → reconnect → rebroadcast): the
+    // farewell was a store delete of our own entry, so with nothing
+    // stashed there was nothing to re-announce until the next editor
+    // transaction (knock-on audit 2026-09-02).
+    aCursors.rebroadcast();
+    await sleep(400);
+    await pump();
+    expect(bCursors.visiblePeers(), 'the parting state is re-announced').toContain(a.loroDoc.peerIdStr);
+
     aCursors.dispose();
     bCursors.dispose();
     await a.stop();
