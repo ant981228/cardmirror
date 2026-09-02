@@ -100,10 +100,36 @@ class CoalescingCursorStore extends CursorEphemeralStore {
   private readonly originals = new Set<(by: 'local' | 'import' | 'timeout') => void>();
   private suppress = false;
   private pending: 'import' | 'timeout' | null = null;
+  /** getAll() memo: the vendored plugin calls getAll() once per rebuild
+   *  PLUS once per peer from the default createCursor, and each call
+   *  Cursor.decode()s every peer's anchor and focus (wasm) — (1+P)×2P
+   *  decodes per rebuild, on every remote doc transaction (2026-09-01
+   *  review, PH-A3). One decode pass per store mutation instead. */
+  private allMemo: ReturnType<CursorEphemeralStore['getAll']> | null = null;
+
+  private invalidate(): void {
+    this.allMemo = null;
+  }
+
+  override getAll(): ReturnType<CursorEphemeralStore['getAll']> {
+    if (this.allMemo === null) this.allMemo = super.getAll();
+    return this.allMemo;
+  }
+
+  override setLocal(...args: Parameters<CursorEphemeralStore['setLocal']>): ReturnType<CursorEphemeralStore['setLocal']> {
+    this.invalidate();
+    return super.setLocal(...args);
+  }
+
+  override apply(...args: Parameters<CursorEphemeralStore['apply']>): ReturnType<CursorEphemeralStore['apply']> {
+    this.invalidate();
+    return super.apply(...args);
+  }
 
   override subscribeBy(listener: (by: 'local' | 'import' | 'timeout') => void): () => void {
     this.originals.add(listener);
     const unsub = super.subscribeBy((by: 'local' | 'import' | 'timeout') => {
+      this.invalidate(); // covers 'timeout' expiry (a removal we never see as apply/setLocal)
       if (this.suppress && by !== 'local') {
         // 'timeout' beats 'import' for the replay: expiry removes
         // peers, and a rebuild must not resurrect them under a
@@ -290,6 +316,31 @@ export function installCursorPresence(
     },
   });
 
+  const cursorEls = new Map<string, { sig: string; el: HTMLElement }>();
+  const cursorElementFor = (peer: string): HTMLElement => {
+    let name = 'Partner';
+    let color = peerColor(peer);
+    try {
+      const st = (store.getAllStates() as Record<string, { user?: { name?: string; color?: string } }>)[peer];
+      if (typeof st?.user?.name === 'string' && st.user.name.trim()) name = st.user.name;
+      if (typeof st?.user?.color === 'string' && st.user.color) color = st.user.color;
+    } catch {
+      /* store shape/timing — defaults are fine */
+    }
+    const sig = `${name}\u0000${color}`;
+    const hit = cursorEls.get(peer);
+    if (hit && hit.sig === sig) return hit.el;
+    const el = document.createElement('span');
+    el.classList.add('ProseMirror-loro-cursor');
+    el.setAttribute('style', `border-color: ${color}`);
+    const label = document.createElement('div');
+    label.setAttribute('style', `background-color: ${color}`);
+    label.textContent = name;
+    el.append(document.createTextNode('\u2060'), label, document.createTextNode('\u2060'));
+    cursorEls.set(peer, { sig, el });
+    return el;
+  };
+
   return {
     plugins(): Plugin[] {
       if (!cursorsEnabled()) return [leaseAdsPlugin];
@@ -302,6 +353,13 @@ export function installCursorPresence(
             class: 'loro-selection',
             style: `background-color: ${peerColor(peer).replace(')', ', 0.22)').replace('hsl', 'hsla')}`,
           }),
+          // Memoized caret widgets: the stock createCursor built a fresh
+          // <span>+<div> per peer per rebuild, so WidgetType.eq failed
+          // and ProseMirror re-inserted every remote caret on every
+          // remote transaction — layout churn at up to ~8Hz on a big
+          // doc (2026-09-01 review, PH-A3). Same element while the
+          // peer's name/color are unchanged → PM leaves it alone.
+          createCursor: (peer) => cursorElementFor(peer),
         }),
         leaseAdsPlugin,
       ];
