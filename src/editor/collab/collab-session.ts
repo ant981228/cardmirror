@@ -135,6 +135,8 @@ export interface CollabSessionOptions {
    *  study 2026-08-06: ~10 cycles/sec with five typists). Remote-edit
    *  display latency grows by at most this much. Injectable for tests. */
   receiveBatchMs?: number;
+  inboundBatchBytes?: number;
+  resyncSliceBytes?: number;
   /** Stream backoff bounds, injectable for tests. */
   minBackoffMs?: number;
   resetAfterMs?: number;
@@ -310,6 +312,8 @@ export class CollabSession {
     this.snapshotEvery = opts.snapshotEvery ?? 50;
     this.echoTimeoutMs = opts.echoTimeoutMs ?? 8000;
     this.auditDelayMs = opts.auditDelayMs ?? 15_000;
+    this.inboundBatchBytes = opts.inboundBatchBytes ?? 8 * 1024 * 1024;
+    this.resyncSliceBytes = opts.resyncSliceBytes ?? 8 * 1024 * 1024;
     this.updateByteLimitBase = opts.updateByteLimit ?? 4_500_000;
     this.lastSentVersion = this.loroDoc.version();
     this.ackedVersion = this.lastSentVersion;
@@ -339,6 +343,8 @@ export class CollabSession {
     auditDelayMs?: number;
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
+    inboundBatchBytes?: number;
+    resyncSliceBytes?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -397,6 +403,8 @@ export class CollabSession {
     auditDelayMs?: number;
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
+    inboundBatchBytes?: number;
+    resyncSliceBytes?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -463,6 +471,8 @@ export class CollabSession {
     auditDelayMs?: number;
     backlogNoticeMinBlindMs?: number;
     receiveBatchMs?: number;
+    inboundBatchBytes?: number;
+    resyncSliceBytes?: number;
     minBackoffMs?: number;
     resetAfterMs?: number;
     stallMs?: number;
@@ -693,6 +703,8 @@ export class CollabSession {
     consecutiveSnapshotFailures: number;
     lastCatchUpError: string | null;
     catchUpRowsSkipped: number;
+    inboundDrains: number;
+    resyncSlices: number;
     transport: TransportStats;
     stream: StreamStats | null;
   } {
@@ -711,6 +723,8 @@ export class CollabSession {
       consecutiveSnapshotFailures: this.consecutiveSnapshotFailures,
       lastCatchUpError: this.lastCatchUpError,
       catchUpRowsSkipped: this.catchUpRowsSkipped,
+      inboundDrains: this.inboundDrains,
+      resyncSlices: this.resyncSlices,
       transport: this.client.stats,
       stream: this.stream?.stats ?? null,
     };
@@ -727,6 +741,19 @@ export class CollabSession {
   private importedSeqs = new Set<number>();
   private static readonly IMPORTED_SEQS_CAP = 5000;
   private catchUpRowsSkipped = 0;
+  /** Byte bound on one inbound importBatch: a push burst (a reconnect
+   *  repost, the audit's full-history chunks) used to land as ONE
+   *  synchronous import of everything the 120ms window collected
+   *  (2026-09-01 review, SC13). The buffer is drop-safe by design
+   *  (the cursor never advanced past it), so slicing it is too. */
+  private readonly inboundBatchBytes: number;
+  private inboundDrains = 0;
+  /** Byte bound on one full-resync importBatch: the escalation path
+   *  buffered every decrypted blob of the whole room, then blocked the
+   *  main thread on one giant import (SC12). pendingLeft semantics are
+   *  preserved by folding every slice's status into the span ledger. */
+  private readonly resyncSliceBytes: number;
+  private resyncSlices = 0;
   private consecutiveSendFailures = 0;
   private consecutiveSnapshotFailures = 0;
   private lastCatchUpError: string | null = null;
@@ -1015,8 +1042,23 @@ export class CollabSession {
   /** Import everything the micro-batch window collected, as one batch. */
   private drainInbound(): void {
     if (this.ended || this.inboundBuf.length === 0) return;
-    const batch = this.inboundBuf;
-    this.inboundBuf = [];
+    // Take at most inboundBatchBytes (always ≥1 frame); the remainder
+    // drains on the next tick.
+    let bytes = 0;
+    let n = 0;
+    while (n < this.inboundBuf.length && (n === 0 || bytes + this.inboundBuf[n]!.length <= this.inboundBatchBytes)) {
+      bytes += this.inboundBuf[n]!.length;
+      n++;
+    }
+    const batch = this.inboundBuf.slice(0, n);
+    this.inboundBuf = this.inboundBuf.slice(n);
+    if (this.inboundBuf.length > 0 && this.inboundTimer === null) {
+      this.inboundTimer = setTimeout(() => {
+        this.inboundTimer = null;
+        this.drainInbound();
+      }, 0);
+    }
+    this.inboundDrains++;
     this.flush(); // capture local diff before import (see module doc)
     const status = this.loroDoc.importBatch(batch);
     this.notePending(status);
@@ -1149,7 +1191,20 @@ export class CollabSession {
         // desync recurred because the healer read 200 rows of a bigger
         // log and parked forever).
         let after = 0;
-        const blobs: Uint8Array[] = [];
+        let blobs: Uint8Array[] = [];
+        let sliceBytes = 0;
+        let importedAnySlice = false;
+        const importSlice = (): void => {
+          if (blobs.length === 0) return;
+          this.flush();
+          const status = this.loroDoc.importBatch(blobs);
+          this.markImportedSent();
+          this.notePending(status);
+          this.resyncSlices++;
+          importedAnySlice = true;
+          blobs = [];
+          sliceBytes = 0;
+        };
         for (;;) {
           const page = await this.client.fetchUpdates(this.roomId, after);
           this.noteSnapCovers(page.snapCovers);
@@ -1158,6 +1213,8 @@ export class CollabSession {
               const plainSnap = await decryptBlob(this.key, page.snapshot.blob);
               this.foldSnapshotMeta(plainSnap, page.snapshot.coversThroughSeq);
               blobs.push(plainSnap);
+              sliceBytes += plainSnap.length;
+              if (sliceBytes >= this.resyncSliceBytes) importSlice();
             } catch {
               console.warn('[collab] undecryptable room snapshot in resync — skipped');
             }
@@ -1170,6 +1227,9 @@ export class CollabSession {
             if (!plain) continue; // undecryptable frame
             this.foldTailMeta(page.updates[i]!.seq, plain);
             blobs.push(plain);
+            sliceBytes += plain.length;
+            // Within a page too — a page can hold 200 multi-MB rows.
+            if (sliceBytes >= this.resyncSliceBytes) importSlice();
           }
           const next = page.lastSeq;
           if (page.more && next <= after) {
@@ -1179,14 +1239,11 @@ export class CollabSession {
           after = next;
           if (!page.more) break;
         }
-        if (blobs.length > 0) {
-          this.flush();
-          const status = this.loroDoc.importBatch(blobs);
-          this.markImportedSent();
-          // A clean full-resync proves every known op integrated; spans
-          // still parked after it are genuinely absent from the room.
-          this.notePending(status);
-        }
+        // Final slice. A clean full-resync proves every known op
+        // integrated; spans still parked after it are genuinely absent
+        // from the room (the ledger folded every slice).
+        importSlice();
+        void importedAnySlice;
         if (after > this.lastSeq) this.lastSeq = after;
       }
       // Backlog notice (M3), gated three ways: enough frames to matter,

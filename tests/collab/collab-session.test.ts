@@ -629,6 +629,74 @@ describe('snapshot export memo', () => {
   });
 });
 
+describe('import batches are byte-bounded (2026-09-01 review, SC13/SC12)', () => {
+  it('a push burst over the inbound byte cap drains in more than one batch', async () => {
+    const { session: host, shareCode } = await CollabSession.host({ pmDoc: simpleDoc('burst'), client, ...FAST });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const joiner = await CollabSession.join({
+      ...decodeShareCode(shareCode)!,
+      client,
+      ...FAST,
+      receiveBatchMs: 400, // one wide window collects the whole burst
+      inboundBatchBytes: 1500, // ~1KB frames → several batches
+    });
+    const joinView = mkView(joiner.plugins());
+    await settle();
+    joiner.start();
+    await sleep(80);
+    try {
+      const big = 'x'.repeat(1000);
+      for (let i = 0; i < 6; i++) {
+        typeAfter(hostView, 'burst', ` ${big}${i}`);
+        await sleep(FAST.flushMs * 2);
+      }
+      await sleep(900);
+      expect(docText(joinView.state.doc)).toContain(`${big}5`);
+      expect(joiner.debugState().inboundDrains, 'sliced, not one giant import').toBeGreaterThanOrEqual(2);
+    } finally {
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+
+  it('a full resync over the slice cap imports in slices, not one buffered batch', async () => {
+    const { session: host, shareCode } = await CollabSession.host({ pmDoc: simpleDoc('resync'), client, ...FAST });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const big = 'y'.repeat(1000);
+    for (let i = 0; i < 6; i++) {
+      typeAfter(hostView, 'resync', ` ${big}${i}`);
+      await sleep(FAST.flushMs * 2);
+    }
+    await sleep(100);
+    const joiner = await CollabSession.join({
+      ...decodeShareCode(shareCode)!,
+      client,
+      ...FAST,
+      resyncSliceBytes: 1500,
+    });
+    const joinView = mkView(joiner.plugins());
+    await settle();
+    joiner.start();
+    await sleep(80);
+    try {
+      await joiner.catchUp(true); // "deps missing" with nothing new → full resync from zero
+      expect(joiner.debugState().resyncSlices, 'several slices').toBeGreaterThanOrEqual(2);
+      expect(docText(joinView.state.doc)).toContain(`${big}5`);
+    } finally {
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict
