@@ -265,6 +265,36 @@ export class CollabSession {
    *  restarts, because a host compaction ate their causal ancestors).
    *  Cleared only when a full-resync import integrates cleanly. */
   private pendingImports = false;
+  /** Ops parked for missing causal deps, per peer (counter spans). The
+   *  boolean above is DERIVED from this map after every import: a span
+   *  is dropped once the doc's version vector covers its end. The old
+   *  bare boolean was only ever cleared inside the full-resync block,
+   *  so the common heal (an ordinary catch-up fetching the deps) left
+   *  it latched and the host never compacted again (2026-09-01
+   *  review, SC1). */
+  private pendingSpans = new Map<string, { start: number; end: number }>();
+
+  /** Fold one import's status into the parked-span ledger and re-derive
+   *  pendingImports. Call after EVERY importBatch. */
+  private notePending(status: { pending: Map<string, { start: number; end: number }> | null }): void {
+    if (status.pending) {
+      for (const [peer, span] of status.pending) {
+        const cur = this.pendingSpans.get(peer);
+        this.pendingSpans.set(
+          peer,
+          cur ? { start: Math.min(cur.start, span.start), end: Math.max(cur.end, span.end) } : { ...span },
+        );
+      }
+    }
+    if (this.pendingSpans.size > 0) {
+      const vv = this.loroDoc.version();
+      for (const [peer, span] of this.pendingSpans) {
+        const have = vv.get(peer as `${number}`) ?? 0;
+        if (have >= span.end) this.pendingSpans.delete(peer);
+      }
+    }
+    this.pendingImports = this.pendingSpans.size > 0;
+  }
 
   private constructor(opts: CollabSessionOptions & { loroDoc: LoroDoc }) {
     this.loroDoc = opts.loroDoc;
@@ -952,7 +982,7 @@ export class CollabSession {
     this.inboundBuf = [];
     this.flush(); // capture local diff before import (see module doc)
     const status = this.loroDoc.importBatch(batch);
-    if (status.pending && status.pending.size > 0) this.pendingImports = true;
+    this.notePending(status);
     this.markImportedSent();
     // The cursor does NOT advance from stream frames — ONLY from
     // catch-up pages. A pushed frame proves nothing about the rows
@@ -1046,7 +1076,7 @@ export class CollabSession {
           // the full resync a dirty earlier page requested (audit find,
           // 2026-07-10).
           pendingLeft = pendingLeft || (!!status.pending && status.pending.size > 0);
-          if (pendingLeft) this.pendingImports = true;
+          this.notePending(status);
         }
         const advanced = page.lastSeq > this.lastSeq;
         if (advanced) this.lastSeq = page.lastSeq;
@@ -1102,8 +1132,9 @@ export class CollabSession {
           this.flush();
           const status = this.loroDoc.importBatch(blobs);
           this.markImportedSent();
-          // A clean full-resync proves every known op integrated.
-          this.pendingImports = !!status.pending && status.pending.size > 0;
+          // A clean full-resync proves every known op integrated; spans
+          // still parked after it are genuinely absent from the room.
+          this.notePending(status);
         }
         if (after > this.lastSeq) this.lastSeq = after;
       }

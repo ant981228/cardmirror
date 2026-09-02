@@ -481,6 +481,58 @@ describe('offline queue coalescing', () => {
   }, 10_000);
 });
 
+describe('pendingImports must clear once the parked ops integrate', () => {
+  it('a shed frame healed by the ordinary catch-up does not disable host compaction forever', async () => {
+    // pendingImports was set true on any batch with parked ops but only
+    // ever set false inside the full-resync escalation block — the common
+    // heal (ordinary catch-up fetches the missing deps) left it latched,
+    // and uploadSnapshot early-returned for the rest of the session: the
+    // room log grew without bound (2026-09-01 review, SC1).
+    const { session: host, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('compact me'),
+      client,
+      ...FAST,
+      snapshotEvery: 2, // compaction after every 2nd host post
+    });
+    const hostView = mkView(host.plugins());
+    await settle();
+    host.start();
+    const decoded = decodeShareCode(shareCode)!;
+    const joiner = await CollabSession.join({ ...decoded, client, ...FAST });
+    const joinView = mkView(joiner.plugins());
+    await settle();
+    joiner.start();
+    await sleep(80);
+    try {
+      // Frame A is shed from the host's stream; frame B (depending on A)
+      // arrives → parked → catch-up fetches A → both integrate.
+      mock.mutePush(true);
+      typeAfter(joinView, 'compact me', ' A');
+      await sleep(FAST.flushMs * 3);
+      mock.mutePush(false);
+      typeAfter(joinView, 'compact me A', ' B');
+      await sleep(500);
+      expect(docText(hostView.state.doc)).toContain('compact me A B');
+      expect(host.debugState().pendingImports, 'healed → nothing pending').toBe(false);
+      // The host now posts twice → a snapshot must reach the room.
+      typeAfter(hostView, 'compact me A B', ' h1');
+      await sleep(FAST.flushMs * 3);
+      typeAfter(hostView, 'compact me A B h1', ' h2');
+      await sleep(FAST.flushMs * 3);
+      typeAfter(hostView, 'compact me A B h1 h2', ' h3');
+      await sleep(400);
+      const page = await client.fetchUpdates(host.roomId, 0);
+      expect(page.snapshot, 'host compaction resumed').not.toBeNull();
+    } finally {
+      mock.mutePush(false);
+      await host.stop();
+      await joiner.stop();
+      hostView.destroy();
+      joinView.destroy();
+    }
+  }, 10_000);
+});
+
 describe('join resilience', () => {
   it('a relay blip (5xx / connection refused) during join is retried, not treated as offline', async () => {
     // The steady-state stream backs off and retries; the JOIN's strict
