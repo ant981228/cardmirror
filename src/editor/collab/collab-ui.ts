@@ -196,7 +196,13 @@ setCollabCloseActions({
 // can auto-resume each into the doc that reopens under its uid.
 setCollabHandoffProvider(async () => {
   const list = [...sessions.values()].map((s) => ({ uid: s.ownerUid, roomId: s.session.roomId }));
-  await Promise.all([...sessions.values()].map((s) => s.persist.flush()));
+  // The record AND the history file: history's only other reload hook is
+  // the fire-and-forget pagehide write, which a fast teardown cuts off
+  // mid-write — the same reason persist is flushed here (2026-09-01
+  // review, PH-A5).
+  await Promise.all(
+    [...sessions.values()].flatMap((s) => [s.persist.flush(), s.history.flush()]),
+  );
   return list;
 });
 setCollabSessionCountProvider(() => sessions.size);

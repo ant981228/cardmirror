@@ -403,6 +403,43 @@ describe('collab UI flows through the editor seams', () => {
     viewB.destroy();
   }, 20_000);
 
+  it('the mode-switch/quit handoff flushes session HISTORY, not just the record', async () => {
+    // The handoff provider flushed persist (with the reason written down:
+    // pagehide can be cut off mid-write) but not history, whose only
+    // reload hook was that same pagehide — a mode switch or quit dropped
+    // up to 20-60s of Recover-Previous-Version history on exactly the
+    // events that precede "let me recover" (2026-09-01 review, PH-A5).
+    const view = mkIndexStyleView('doc-HO');
+    const deps = {
+      getView: () => view,
+      getOwnerUid: () => 'doc-HO',
+      refreshPlugins: () =>
+        view.updateState(view.state.reconfigure({ plugins: buildMiniPlugins('doc-HO') })),
+      newSessionDoc: () => true,
+    };
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() },
+    });
+    await startSession(deps);
+    const roomId = collabUi.activeSession()!.roomId;
+    const { historyHandleFor } = await import('../../src/editor/collab/collab-history.js');
+    const handle = historyHandleFor(roomId)!;
+    expect(handle).toBeTruthy();
+    const flushSpy = vi.spyOn(handle, 'flush');
+    try {
+      await collabCaptureSessionHandoff();
+      expect(flushSpy, 'history flushed by the handoff').toHaveBeenCalled();
+    } finally {
+      flushSpy.mockRestore();
+      const endP = collabUi.endSessionFlow(deps);
+      await settle();
+      clickPromptButton('End Session');
+      await endP;
+      view.destroy();
+    }
+  }, 20_000);
+
   it('room-full on join tears the session down COMPLETELY (stops the session, not just the UI)', async () => {
     // onFull disposed cursors/comments/persist/history but never called
     // session.stop(): the orphaned CollabSession kept its flush /
