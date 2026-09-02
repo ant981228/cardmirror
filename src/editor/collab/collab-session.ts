@@ -46,7 +46,14 @@ import {
   generateRoomKeyBytes,
   importRoomKey,
 } from './collab-crypto.js';
-import { RoomsClient, RoomsError, RoomStream, type RoomUpdate } from './room-client.js';
+import {
+  RoomsClient,
+  RoomsError,
+  RoomStream,
+  type RoomUpdate,
+  type StreamStats,
+  type TransportStats,
+} from './room-client.js';
 
 type SyncDoc = Parameters<typeof LoroSyncPlugin>[0]['doc'];
 
@@ -563,28 +570,50 @@ export class CollabSession {
     return this.outQueue.length;
   }
 
-  /** Introspection for diagnostics and the sync-status UI. */
+  /** Introspection for diagnostics and the sync-status UI. The
+   *  transport/stream counters and failure tallies exist so a field
+   *  report of "it says synced but nothing moves" leaves evidence —
+   *  every failure path here used to be a silent catch (2026-09-01
+   *  review). */
   debugState(): {
     connected: boolean;
     streamRunning: boolean;
     streamConnected: boolean;
     queued: number;
+    sending: boolean;
     lastSeq: number;
     awaitingEchoSeq: number | null;
     pendingImports: boolean;
+    tailOverflow: boolean;
     ended: boolean;
+    consecutiveSendFailures: number;
+    consecutiveSnapshotFailures: number;
+    lastCatchUpError: string | null;
+    transport: TransportStats;
+    stream: StreamStats | null;
   } {
     return {
       connected: this.connected,
       streamRunning: this.stream?.running ?? false,
       streamConnected: this.stream?.connected ?? false,
       queued: this.outQueue.length,
+      sending: this.sending,
       lastSeq: this.lastSeq,
       awaitingEchoSeq: this.awaitingEcho?.seq ?? null,
       pendingImports: this.pendingImports,
+      tailOverflow: this.tailOverflow,
       ended: this.ended,
+      consecutiveSendFailures: this.consecutiveSendFailures,
+      consecutiveSnapshotFailures: this.consecutiveSnapshotFailures,
+      lastCatchUpError: this.lastCatchUpError,
+      transport: this.client.stats,
+      stream: this.stream?.stats ?? null,
     };
   }
+
+  private consecutiveSendFailures = 0;
+  private consecutiveSnapshotFailures = 0;
+  private lastCatchUpError: string | null = null;
 
   /** Self-echo watchdog (see field docs on `awaitingEcho`). */
   private checkEcho(): void {
@@ -661,6 +690,7 @@ export class CollabSession {
             this.outQueue.length === 0 ? this.lastSentVersion : entry.version;
           this.postedCount++;
           this.sendRetryMs = 1000;
+          this.consecutiveSendFailures = 0;
           if (this.stream?.connected) this.awaitingEcho = { seq, at: Date.now() };
           // Deliberately NOT advancing lastSeq to our own posted seq:
           // the cursor means "I have imported everything ≤ this", and a
@@ -705,6 +735,15 @@ export class CollabSession {
             this.chunkQueueHead();
             this.updateByteLimitOverride = null;
             continue;
+          }
+          this.consecutiveSendFailures++;
+          // Log the first failure and then every 5th, so a stuck queue
+          // leaves evidence without flooding the console.
+          if (this.consecutiveSendFailures === 1 || this.consecutiveSendFailures % 5 === 0) {
+            console.warn(
+              `[collab] update post failed (${this.consecutiveSendFailures} in a row):`,
+              (err as Error)?.message ?? err,
+            );
           }
           this.connected = false;
           this.emitStatus();
@@ -1006,6 +1045,8 @@ export class CollabSession {
       if (err instanceof RoomsError && (err.status === 401 || err.status === 403)) {
         this.notifyAuthRejected();
       }
+      this.lastCatchUpError = (err as Error)?.message ?? String(err);
+      console.warn('[collab] catch-up failed:', this.lastCatchUpError);
       this.connected = false;
       this.emitStatus();
       if (rethrow) throw err;
@@ -1101,8 +1142,9 @@ export class CollabSession {
         this.foldTailMeta(seq, chunk);
         if (this.stream?.connected) this.awaitingEcho = { seq, at: Date.now() };
       }
-    } catch {
-      /* advisory — the next scheduled audit retries */
+    } catch (err) {
+      // Advisory — the next scheduled audit retries — but never silent.
+      console.warn('[collab] history audit failed:', (err as Error)?.message ?? err);
     }
   }
 
@@ -1186,8 +1228,18 @@ export class CollabSession {
       await this.client.postSnapshot(this.roomId, bytesToBase64(sealed), covers);
       // We exported it — its content is known without a download.
       this.foldSnapshotMeta(snapshot, covers);
-    } catch {
-      /* compaction is best-effort; the log just stays longer */
+      this.consecutiveSnapshotFailures = 0;
+    } catch (err) {
+      // Compaction is best-effort (the log just stays longer) — but a host
+      // whose snapshot POST always fails must leave evidence: that room
+      // never compacts again.
+      this.consecutiveSnapshotFailures++;
+      if (this.consecutiveSnapshotFailures === 1 || this.consecutiveSnapshotFailures % 5 === 0) {
+        console.warn(
+          `[collab] snapshot upload failed (${this.consecutiveSnapshotFailures} in a row):`,
+          (err as Error)?.message ?? err,
+        );
+      }
     }
   }
 

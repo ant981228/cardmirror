@@ -72,6 +72,31 @@ describe('RoomsClient', () => {
     }
   });
 
+  it('keeps live transport counters (requests, failures by class, last error)', async () => {
+    const c = new RoomsClient({ baseUrl: () => mock.url, token: () => mock.token });
+    const { roomId } = await c.createRoom();
+    await c.postUpdate(roomId, bytes('ok'));
+    expect(c.stats.requests).toBe(2);
+    expect(c.stats.failures).toBe(0);
+    expect(c.stats.lastOkAt).toBeGreaterThan(0);
+    mock.setUpdateFailure({ status: 413, detail: 'update too large' });
+    try {
+      await c.postUpdate(roomId, bytes('big')).catch(() => {});
+    } finally {
+      mock.setUpdateFailure(null);
+    }
+    expect(c.stats.failures).toBe(1);
+    expect(c.stats.clientErrors).toBe(1);
+    expect(c.stats.lastError).toContain('update too large');
+    mock.pause();
+    try {
+      await c.postUpdate(roomId, bytes('x')).catch(() => {});
+    } finally {
+      mock.resume();
+    }
+    expect(c.stats.serverErrors).toBe(1);
+  });
+
   it('surfaces a clear RoomsError when an interceptor answers HTML instead of JSON', async () => {
     // A school content filter (Securly — field bug 2026-07-10), captive
     // portal, or misconfigured relay URL answers 200 + an HTML page; the

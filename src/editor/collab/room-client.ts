@@ -49,6 +49,26 @@ async function errorDetail(res: Response): Promise<string> {
   }
 }
 
+export interface TransportStats {
+  requests: number;
+  failures: number;
+  networkErrors: number;
+  clientErrors: number;
+  serverErrors: number;
+  lastError: string | null;
+  lastErrorAt: number;
+  lastOkAt: number;
+}
+
+export interface StreamStats {
+  /** Connection attempts (incl. ones that never helloed). */
+  attempts: number;
+  hellos: number;
+  /** Failed attempts since the last hello. */
+  consecutiveFailures: number;
+  lastHelloAt: number;
+}
+
 export class RoomsError extends Error {
   constructor(
     readonly status: number,
@@ -115,12 +135,38 @@ export class RoomsClient {
     };
   }
 
+  /** Live transport counters for diagnostics (folded into
+   *  CollabSession.debugState). Nothing here is read by sync logic. */
+  readonly stats: TransportStats = {
+    requests: 0,
+    failures: 0,
+    networkErrors: 0,
+    clientErrors: 0,
+    serverErrors: 0,
+    lastError: null,
+    lastErrorAt: 0,
+    lastOkAt: 0,
+  };
+
+  private noteFailure(err: RoomsError): void {
+    const st = this.stats;
+    st.failures++;
+    if (err.status === 0) st.networkErrors++;
+    else if (err.status >= 500) st.serverErrors++;
+    else st.clientErrors++;
+    st.lastError = err.message;
+    st.lastErrorAt = Date.now();
+  }
+
   private async request(path: string, init?: RequestInit): Promise<Response> {
     let res: Response;
+    this.stats.requests++;
     try {
       res = await this.fetchImpl(`${this.opts.baseUrl()}${path}`, init);
     } catch (err) {
-      throw new RoomsError(0, (err as Error).message ?? 'network error');
+      const e = new RoomsError(0, (err as Error).message ?? 'network error');
+      this.noteFailure(e);
+      throw e;
     }
     if (!res.ok) {
       // Fold the relay's own detail into the error: its 413 alone covers
@@ -129,8 +175,11 @@ export class RoomsClient {
       // the field (2026-09-01 review). Bounded read: an interceptor's
       // HTML page must not be inhaled whole. Reading also releases the
       // connection back to the pool (an abandoned body holds it).
-      throw new RoomsError(res.status, `rooms request failed: ${res.status}${await errorDetail(res)}`);
+      const e = new RoomsError(res.status, `rooms request failed: ${res.status}${await errorDetail(res)}`);
+      this.noteFailure(e);
+      throw e;
     }
+    this.stats.lastOkAt = Date.now();
     return res;
   }
 
@@ -315,6 +364,7 @@ export class RoomStream {
   /** Consecutive relay-confirmed 401/403 handshakes. Portal/HTML 401s
    *  never count; a hello resets it. At 2, onAuthDead fires. */
   private authFails = 0;
+  readonly stats: StreamStats = { attempts: 0, hellos: 0, consecutiveFailures: 0, lastHelloAt: 0 };
 
   constructor(private readonly opts: RoomStreamOptions) {
     this.backoffMs = opts.minBackoffMs ?? 1000;
@@ -381,6 +431,7 @@ export class RoomStream {
   }
 
   private scheduleRetry(): void {
+    this.stats.consecutiveFailures++;
     if (this.stopped) return;
     if (this.helloed) {
       this.helloed = false;
@@ -403,6 +454,9 @@ export class RoomStream {
       this.helloed = true;
       this.everHelloed = true;
       this.authFails = 0;
+      this.stats.hellos++;
+      this.stats.consecutiveFailures = 0;
+      this.stats.lastHelloAt = Date.now();
       let lastSeq = 0;
       try {
         const parsed = JSON.parse(dataText || '{}') as { lastSeq?: number };
@@ -431,6 +485,7 @@ export class RoomStream {
 
   private async connectLoop(): Promise<void> {
     if (this.stopped) return;
+    this.stats.attempts++;
     this.controller = new AbortController();
     const fetchImpl = this.opts.fetchImpl ?? boundFetch;
     try {
