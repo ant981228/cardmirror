@@ -171,6 +171,58 @@ describe('M4 presence cursors', () => {
   });
 });
 
+describe('presence departure + reconnect re-broadcast (2026-09-01 review, PH-A10)', () => {
+  it('farewell() removes this peer from partners immediately instead of after the 45s expiry', async () => {
+    const { session: a, shareCode } = await CollabSession.host({
+      pmDoc: simpleDoc('farewell doc'),
+      client,
+      flushMs: 40,
+      minBackoffMs: 30,
+      maxBackoffMs: 60,
+    });
+    const bPresence: Uint8Array[] = [];
+    const b = await CollabSession.join({
+      ...decodeShareCode(shareCode)!,
+      client,
+      flushMs: 40,
+      minBackoffMs: 30,
+      maxBackoffMs: 60,
+      callbacks: { onPresence: (bytes) => bPresence.push(bytes) },
+    });
+    const aCursors = installCursorPresence(a, () => aView);
+    const bCursors = installCursorPresence(b, () => bView);
+    const aView = mkView([...a.plugins(), ...aCursors.plugins()]);
+    const bView = mkView([...b.plugins(), ...bCursors.plugins()]);
+    await settle();
+    a.start();
+    b.start();
+    await sleep(300);
+    (aView as unknown as { hasFocus: () => boolean }).hasFocus = () => true;
+    const pump = async (): Promise<void> => {
+      for (const f of bPresence.splice(0)) bCursors.applyRemote(f);
+      await sleep(250);
+    };
+    aView.dispatch(aView.state.tr.setSelection(TextSelection.create(aView.state.doc, 2, 6)));
+    await sleep(400);
+    await pump();
+    expect(bCursors.visiblePeers()).toContain(a.loroDoc.peerIdStr);
+
+    // A leaves: a departure frame goes out synchronously, before the
+    // stream is stopped and the handle disposed.
+    aCursors.farewell();
+    await sleep(400);
+    await pump();
+    expect(bCursors.visiblePeers(), 'gone at once, not in 45s').not.toContain(a.loroDoc.peerIdStr);
+
+    aCursors.dispose();
+    bCursors.dispose();
+    await a.stop();
+    await b.stop();
+    aView.destroy();
+    bView.destroy();
+  }, 20_000);
+});
+
 describe('remote caret widgets are stable across rebuilds (2026-09-01 review, PH-A3)', () => {
   it('a presence rebuild reuses the same caret element when the peer is unchanged', async () => {
     // The stock createCursor built a fresh <span>+<div> per peer per

@@ -560,6 +560,7 @@ function teardownSession(sess: ActiveSession, keepRecord = false): Promise<void>
   // full-history repost) alive for the window's life against a room this
   // window was no longer in (2026-09-01 review). stop() is idempotent, so
   // the End/Leave/close paths that already stopped are unaffected.
+  sess.cursors.farewell(); // departure frame needs the stream — before stop()
   void sess.session.stop().catch(() => {});
   unregisterCollabPluginSource(sess.ownerUid);
   sessions.delete(sess.ownerUid);
@@ -619,6 +620,9 @@ function sessionCallbacks(deps: CollabUiDeps, getSess: () => ActiveSession | nul
       if (!sess) return;
       // Every session records its own status (each slot footer renders its
       // own); the shared chip still reflects only the focused doc's.
+      // Reconnected → re-announce presence (partners saw us absent until
+      // the 15s keepalive otherwise).
+      if (s.connected && !sess.lastStatus?.connected) sess.cursors.rebroadcast();
       sess.lastStatus = s;
       if (isChipSession(sess.ownerUid)) updateChip(s);
       notifyCollabCopresenceChange();
@@ -1328,6 +1332,8 @@ async function endOrLeaveSession(sess: ActiveSession): Promise<boolean> {
   // Disconnect first (final drain attempt), THEN tombstone for a host end —
   // and only tear down once the room is actually gone. endRoomOnRelay treats
   // an already-ended/expired room (410/404) as success.
+  sess.cursors.farewell(); // announce departure while the stream is still up
+  sess.cursors.farewell(); // announce departure while the stream is still up
   await sess.session.stop();
   if (isHost) {
     try {

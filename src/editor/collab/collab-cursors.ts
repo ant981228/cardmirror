@@ -187,6 +187,10 @@ interface LeaseAd {
 const leaseAdsKey = new PluginKey<DecorationSet>('collab-lease-ads');
 
 export interface CursorsHandle {
+  /** Announce departure to partners now (call before dispose/stop). */
+  farewell(): void;
+  /** Re-announce presence (after a stream reconnect). */
+  rebroadcast(): void;
   /** Session plugins: the stock cursor plugin + the lease-ad renderer. */
   plugins(): Plugin[];
   /** Feed an incoming (decrypted) presence frame. */
@@ -411,6 +415,39 @@ export function installCursorPresence(
         } catch {
           /* malformed — drop */
         }
+      }
+    },
+    farewell(): void {
+      // Departure frame, sent SYNCHRONOUSLY and before dispose/stop: the
+      // ephemeral store's only expiry is its 45s timeout, and dispose()
+      // set `disposed` before unhooking, so a leaving peer's caret and
+      // presence dot lingered on every partner for up to 45s — during
+      // exactly the "did they leave?" moment (2026-09-01 review, PH-A10).
+      // An ephemeral delete is a payload shape old clients already apply.
+      if (disposed || !cursorsEnabled()) return;
+      try {
+        let bytes: Uint8Array | null = null;
+        const off = store.subscribeLocalUpdates((b: Uint8Array) => {
+          bytes = b;
+        });
+        try {
+          store.delete(peerId as never);
+        } finally {
+          off();
+        }
+        if (bytes) void session.sendPresence(frame(FRAME_CURSOR, bytes));
+      } catch {
+        /* best-effort — the 45s expiry remains the backstop */
+      }
+    },
+    rebroadcast(): void {
+      // After a stream reconnect nothing re-announced presence until the
+      // 15s keepalive; partners saw us absent for up to that long.
+      if (disposed || !cursorsEnabled()) return;
+      const local = store.getLocal();
+      if (local) {
+        lastSentBytes = null;
+        store.setLocal(local);
       }
     },
     dispose(): void {
