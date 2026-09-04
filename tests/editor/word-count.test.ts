@@ -13,6 +13,7 @@ import { schema } from '../../src/schema/index.js';
 import {
   countReadAloudSplit,
   countReadAloudWords,
+  countCards,
   totalWords,
   readTimeSeconds,
   formatReadTimeFor,
@@ -67,6 +68,48 @@ describe('countReadAloudSplit', () => {
 
   it('empty range counts nothing', () => {
     expect(countReadAloudSplit(fixtureDoc(), 3, 3)).toEqual({ body: 0, other: 0 });
+  });
+});
+
+describe('countCards', () => {
+  function cardDoc(): PMNode {
+    const card = (id: string, text: string) =>
+      n['card']!.create(null, [
+        n['tag']!.create({ id }, schema.text(`Tag ${id}`)),
+        n['card_body']!.create(null, schema.text(text)),
+      ]);
+    return n['doc']!.create(null, [
+      card('one', 'First body'),
+      n['paragraph']!.create(null, schema.text('Loose text')),
+      card('two', 'Second body'),
+    ]);
+  }
+
+  it('counts every structural card in the full document', () => {
+    expect(countCards(cardDoc())).toBe(2);
+  });
+
+  it('counts each card intersecting a selected range once', () => {
+    const doc = cardDoc();
+    const positions: number[] = [];
+    doc.descendants((node, pos) => {
+      if (node.type.name === 'card') positions.push(pos);
+      return true;
+    });
+
+    expect(countCards(doc, positions[0]! + 2, positions[0]! + 5)).toBe(1);
+    expect(countCards(doc, positions[0]! + 2, positions[1]! + 3)).toBe(2);
+  });
+
+  it('returns zero when the selected range intersects no card', () => {
+    const doc = cardDoc();
+    let looseParagraphPos = -1;
+    doc.descendants((node, pos) => {
+      if (node.type.name === 'paragraph') looseParagraphPos = pos;
+      return true;
+    });
+
+    expect(countCards(doc, looseParagraphPos + 1, looseParagraphPos + 5)).toBe(0);
   });
 });
 

@@ -9,6 +9,9 @@ see `DETAILED_CHANGELOG.md`.
 
 ### Added
 
+- **Card count in Word Count.** The Word Count window now shows how
+  many cards are in the full document, or how many cards intersect the
+  current selection.
 - **Reading view (Word-style paginated columns).** The new book
   button on the ribbon (in the navigation pane toggle's old spot)
   flips the current document into full-screen column pages for

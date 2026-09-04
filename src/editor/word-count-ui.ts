@@ -8,7 +8,7 @@
 
 import type { EditorView } from 'prosemirror-view';
 import { settings } from './settings.js';
-import { countReadAloudSplit, totalWords, formatReadTimeFor, formatNumber } from './word-count.js';
+import { countCards, countReadAloudSplit, totalWords, formatReadTimeFor, formatNumber } from './word-count.js';
 import { setIcon } from './icons';
 import { pushOverlay, popOverlay } from './overlay-stack.js';
 import {
@@ -100,12 +100,16 @@ class WordCountModal {
       ? countReadAloudSplit(view.state.doc, sel.from, sel.to)
       : countReadAloudSplit(view.state.doc);
     const words = totalWords(counts);
+    const cards = hasSelection
+      ? countCards(view.state.doc, sel.from, sel.to)
+      : countCards(view.state.doc);
+    const cardLabel = `${formatNumber(cards)} ${cards === 1 ? 'card' : 'cards'}`;
 
     const scope = document.createElement('p');
     scope.className = 'pmd-wc-scope';
     scope.textContent = hasSelection
-      ? `Selection: ${formatNumber(words)} read-aloud words`
-      : `Full document: ${formatNumber(words)} read-aloud words`;
+      ? `Selection: ${formatNumber(words)} read-aloud words · ${cardLabel}`
+      : `Full document: ${formatNumber(words)} read-aloud words · ${cardLabel}`;
     body.appendChild(scope);
 
     const readers = settings.get('readers');
