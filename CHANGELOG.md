@@ -37,6 +37,72 @@ see `DETAILED_CHANGELOG.md`.
   neighbour at the same moment then took a piece of your word with it
   ("«tk16» «tk3»" came out as "16» «tk"). Local edits now sync as
   exactly the characters you typed or deleted.
+- **Splitting a numbered tag keeps the number on the first half.** Enter
+  in the middle of a numbered tag or heading built the new unit with
+  default numbering and put it first, so the number followed the text
+  after the cursor. The half before the cursor keeps the original
+  numbering; the half after it starts fresh.
+- **Co-editing: sessions no longer wedge on a dead connection.** A
+  request that never answered (a laptop lid closed mid-send, a network
+  that changed underneath) could leave a session stuck on "queued N"
+  with no retry, and a silently dead live stream was never noticed by a
+  peer who was only reading. Every request now has a deadline, the
+  stream restarts after 70 seconds of silence, and a wake-up no longer
+  cancels the reconnect it just started. Large catch-up pages get the
+  long deadline, not the short one, so big rooms on slow links still
+  join.
+- **Co-editing: relay restarts and outages recover cleanly.** Reconnect
+  backoff only resets once a connection has survived a while, retries
+  spread out instead of stampeding, joining retries a relay that is
+  briefly unavailable instead of failing or opening a stale copy, and a
+  page loop that stops advancing ends instead of hammering the relay.
+  A machine whose web login has expired stops sending empty
+  credentials all night.
+- **Co-editing: offline edits no longer land as hundreds of updates.**
+  Ten minutes offline used to arrive as one relay row per half-second
+  tick, for everyone to fetch and decrypt. Queued edits now coalesce
+  into one update before sending; catch-up skips rows the live stream
+  already delivered and decrypts the rest in parallel; the half-hourly
+  history audit runs behind a fresh catch-up instead of re-fetching a
+  stale window.
+- **Co-editing: the room log stops growing without bound.** A flag that
+  blocks snapshot compaction while updates are missing could latch on
+  and never clear, so the room's history grew for the life of the
+  session: slower joins for every peer. It is now derived from what is
+  actually still missing. Corrupt frames no longer cause a permanent
+  gap in catch-up either.
+- **Co-editing: big documents stay responsive.** Repair passes after
+  each remote update walk only the changed region instead of the whole
+  document; the causal heal no longer decodes the full history during
+  the join freeze; remote carets are reused instead of rebuilt on every
+  keystroke; presence dots and footers repaint once per burst; crash
+  recovery writes slow down for very large documents and share one
+  snapshot with version history; switching back to a big co-edited tab
+  no longer freezes the window.
+- **Co-editing: problems are told, not swallowed.** A send that keeps
+  failing, three minutes disconnected (with the count of edits waiting),
+  a session that cannot save its recovery copy, and being crowded out of
+  a full room each show a notice now. Relay errors carry the relay's
+  own explanation ("update too large" vs "room storage cap reached").
+- **Co-editing: leaving a session removes your caret at once** instead
+  of up to 45 seconds later, and presence is re-announced after a
+  reconnect or an aborted departure.
+- **Co-editing: join, resume and teardown races closed.** Double-clicking
+  Join or Resume could run two sessions on one room; a room-full or
+  failed join left a ghost session polling for the life of the window;
+  ending a session could leave a retry timer and a late send behind;
+  the "working…" veil could stick forever; a failed cleanup showed a
+  generic error over "Session ended". Switching to three-pane or
+  quitting now flushes version history as well as the recovery copy,
+  and hiding the tab flushes unsent edits immediately.
+- **Co-editing: comments and Recover Previous Version do less work.** A
+  partner resolving a comment no longer re-renders every thread on
+  every peer; a comment edit the room silently dropped is now counted;
+  the session-history dialog imports its source once per open instead
+  of once per preview click.
+- **Web account renewals are single-flight** with a deadline, run on
+  wake and tab focus, and no longer unlink the account when a captive
+  portal answers with an HTML error.
 - **The Send pill scrolls while you drag.** Long recipient lists were
   unreachable past the first screenful during a drag; holding the
   dragged card near the top or bottom of the list now scrolls it.

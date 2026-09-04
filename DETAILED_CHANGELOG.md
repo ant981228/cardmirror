@@ -124,6 +124,236 @@ copy its tail into their own new paragraph (a split is delete-plus-copy
 in the CRDT, not a text move), so the overlap shows twice — visible,
 and a one-keystroke fix for the user, unlike a loss.
 
+### Fixed: Enter mid-tag keeps the number on the first half
+
+Splitting a numbered tag or heading with Enter built the NEW container
+with default attributes and inserted it before the original, so the
+number rode the post-cursor half (field report 2026-09-02). The
+pre-cursor half now inherits the original's attributes (numRole,
+numRestart, and a block's numRestart) and the original — now the
+second, new unit — resets to the type defaults. Same rule in
+enterMidTag (cards, analytics) and enterInHeading (blocks, pockets,
+hats).
+
+### Fixed: co-editing liveness — deadlines, stall watchdog, restart debounce
+
+Three wedge classes from the 2026-09-01 collaboration review, each
+pinned by a reproduction that failed before the fix. No rooms request
+had a deadline, and the send mutex and the correctness catch-up's
+running flag clear only in `finally`, so a fetch that never settled
+(half-open TCP after a lid close or a NAT rebind) wedged sending or
+catch-up permanently: chip stuck on "queued N", no retry. Every request
+now composes an abort timeout — 15 s for reads and small posts, 120 s
+for the multi-megabyte update and snapshot posts, and (a knock-on found
+in the audit that followed) the same long deadline for update PAGES,
+which run to 4 MB and carry the room snapshot on the first one; under
+the short deadline a big room on a slow link re-fetched the same page
+into the same timeout forever. A deadline surfaces as the same
+retryable error shape as a dropped connection. Second, the live stream
+had no stall detection: heartbeats were dropped unnoted and the
+self-echo watchdog arms only after WE post, so a reader-only peer never
+noticed a dead socket. A silence watchdog (70 s, about 2.8 relay
+heartbeats) restarts the stream, arming only after the first byte
+following hello so a heartbeat-less relay degrades to the old behavior
+rather than restart-looping. Third, restart() was undebounced: a wake
+fires the power-resume and online events a beat apart and the second
+aborted the handshake the first had just started; a 2 s window makes
+the in-flight reconnect the restart, and tab-visible joined the wake
+sources (a throttled background tab is where sockets go stale).
+
+### Fixed: co-editing reconnect policy — backoff on survival, jitter inside the cap, crowded-out signal
+
+Backoff reset on every hello meant a draining relay (accept, hello,
+close — a Railway deploy) turned every client into a 1 Hz reconnect
+plus catch-up loop, and the ghost streams that rate leaves behind
+(reaped only per heartbeat) filled the room. The reset now waits for
+the connection to survive 15 s; connections that die sooner keep
+escalating. Jitter was applied after the clamp (a 60 s cap became 78 s)
+and its ±30 % band put a whole fleet's first retry inside roughly
+600 ms after a relay restart; it is now 30–100 % of the capped delay.
+A reconnect refused as "room full" retried forever with the room-full
+callback unreachable after the first hello, so a peer shut out of an
+established session saw only a bare offline chip; after four
+consecutive refusals a crowded-out notice fires once while retrying
+continues. Joining gained the same resilience: the one strict initial
+catch-up now retries up to three times with jittered backoff on
+connection failures and 5xx only (a relay deploy's 502/503 used to fail
+the join outright or, with a prefetched seed, silently open a possibly
+stale offline copy); 401/403/404/409/410 stay terminal. All four
+update-paging loops (catch-up, full resync, audit scan, invite
+prefetch) now stop, with one warning, when a page says "more" without
+advancing the cursor — a proxy-mangled body or a half-deployed relay
+used to be an unbounded, undelayed fetch loop pinning the relay. On
+web, an expired entitlement resolves to an empty credential by design,
+but every request then went out as a literal empty bearer token and
+401'd all night; an empty credential now fails locally and the stream
+signals auth-dead immediately, keeping the backoff so a renewal or
+re-link reconnects.
+
+### Fixed: co-editing egress — coalesced sends, smarter catch-up, bucketed audit ledger
+
+The outbound path pushed one queue entry per 500 ms tick and drained
+them strictly one at a time, so ten offline minutes became ~1200
+sequential posts, 1200 relay rows, and 1200 rows for every other peer
+to fetch and decrypt. Every entry carries its starting version, so a
+run now collapses into one export from the head's version (remote ops
+imported since ride along; idempotent), with ack bookkeeping and
+oversized-result chunking unchanged. Coalescing runs once per drain,
+before the loop — per-iteration it re-merged the chunks it had just
+split, forever. Catch-up used to re-fetch, re-decrypt and re-import
+every row the stream had already pushed since its cursor, one awaited
+decrypt at a time (up to 200 per page on the join path); frames the
+stream delivered are now remembered by sequence and skipped, and the
+rest decrypt in parallel. The half-hourly history audit had its own
+timer, unaligned with catch-up, so its opening probe fetched every row
+since a cursor that was minutes stale; it now runs behind a fresh
+catch-up. The audit's tail ledger kept one entry per relay row with a
+4000-entry cap, past which a busy five-typist room (about ten rows a
+second, under ten minutes to the cap) forced the audit into a download
+of the whole room — a partial return of the egress problem the
+incremental audit was built to kill; rows now fold into buckets of 64,
+pruned only once the verified snapshot covers them. Two unbounded
+synchronous imports were bounded at 8 MB: the inbound micro-batch
+buffer (a reconnect repost or the audit's full-history chunks landed as
+one import of everything a 120 ms window collected) and the full-resync
+escalation (which buffered every decrypted blob of the whole room and
+then blocked the main thread on one giant import). Hiding the tab now
+flushes unsent edits at once instead of waiting for the next tick, and
+an oversized queue entry exports only up to its own version rather than
+the live one.
+
+### Fixed: the room log grew without bound (pending-imports latch)
+
+The flag that blocks snapshot compaction while updates are still
+missing was set on any import with parked ops but cleared in exactly
+one place, inside the full-resync escalation. The common heal — a shed
+frame's dependencies fetched by the ordinary catch-up — never reached
+that block, so the flag stayed latched for the session and snapshot
+upload returned early forever: the room log grew without bound, giving
+slower joins, more egress and longer catch-ups for every peer, and a
+likely contributor to the August volume incident. The session now keeps
+the parked spans per peer, folds every import's status into that
+ledger, prunes a span once the document's version vector covers its
+end, and derives the flag from the ledger; the compaction guard itself
+is unchanged. Two related holes: a catch-up requested while one was
+running was discarded outright, including the "expect missing
+dependencies" signal that forces a full resync, so recovery waited for
+the five-minute timer — a concurrent request is now latched and re-run
+once; and the catch-up skip list was populated BEFORE the import ran,
+so a batch that failed on one corrupt frame had every row in it skipped
+by every later catch-up, a permanent gap — sequences are recorded only
+after the import succeeds.
+
+### Fixed: co-editing performance on big documents
+
+The repair plugin runs on every remote binding batch (up to ~8 per
+second at the default receive window) and each pass walked the ENTIRE
+document three to five times on a tournament master: exclusive-mark
+sweep, table normalization, heal-sentinel canonicalization, the
+leader's first-child sweep, and the sentinel notice scan — whose
+"cooldown gate" was not a gate, because its timestamp was stamped only
+after a heal was found. Every sweep is now bounded to the batch's
+changed ranges (the soundness argument fixTables' bounded path already
+rests on: a violation a merge creates lies inside that merge's changed
+region), with import and open keeping the full scan as the backstop.
+The causal heal's first pass decoded the full op log inside the ~10 s
+join freeze because the binding's init transaction has the whole
+document as its changed range; that transaction is skipped (verdicts
+are a pure function of op history and the fail-safe direction is
+keep), the history index is built at idle after mount, and per-pass
+costs that grew with session length are now flat. The vendored cursor
+plugin decoded every peer's anchor and focus in wasm several times per
+rebuild and built a fresh caret element per peer per rebuild, so
+ProseMirror re-inserted every remote caret on every remote keystroke;
+the store now memoizes until the next mutation and the same caret
+element is returned while a peer's name and color are unchanged.
+Status notifications while typing rebuilt every slot footer and the
+chip's presence dots on every keystroke; copresence notifications
+coalesce leading plus trailing per 150 ms, byte-identical statuses are
+skipped, and the dot roster is signature-compared before touching the
+DOM. Crash-recovery persistence wrote on a flat 2.5 s interval
+regardless of size, structured-cloning a multi-megabyte record and
+rebasing onto a full snapshot export every 40th write (0.3–0.8 s of
+synchronous wasm on a 20 MB master); it now slows to 10 s past 4 MB and
+shares one memoized snapshot export with version history. Both durable
+writers treated tab-in as "flush now" as well as tab-out, so
+alt-tabbing back to a big co-edited document froze the renderer; they
+fire on hide only. Base64 decoding of compaction snapshots uses the
+platform's native codec when present. Credentials are resolved once per
+request instead of three times (at cursor-presence rates on the typing
+thread), with no memo, so a settings write still reaches the very next
+request. Comments no longer dispatch a transaction on every peer when a
+remote event derives an identical thread set, and the session-history
+dialog imports its source snapshot once per open instead of once per
+preview click.
+
+### Fixed: co-editing problems are reported, not swallowed
+
+A send that kept failing retried the same queue head forever while the
+queue grew behind it and nothing told the user; the session now counts
+consecutive failures and, past a threshold of about a minute, the UI
+posts a keyed "Edits aren't reaching the session" notice that clears
+when a later send succeeds. Offline showed only as chip text (five
+seconds and forty minutes read identically), so after three minutes
+disconnected a notice names the duration and the queued edit count.
+Both durable writers swallowed storage errors by design, so a full disk
+or a denied IndexedDB quota silently disabled crash recovery and
+Recover Previous Version for the whole session; three consecutive
+failures now post an "isn't being saved" notice. Relay errors carry the
+relay's own detail (a 413 alone covers "update too large" and "room
+storage cap reached"; pool exhaustion is a distinct 503), and the
+stream's early-return branches cancel the response body instead of
+holding a pool connection until garbage collection, one per retry, for
+hours during an outage. The transport and stream keep live counters
+(requests, failures by class, last error, last success) folded into the
+debug state, and the failure paths that used to be bare catches warn on
+first occurrence and every fifth after. A comment edit the room silently
+dropped (its thread container gone) now warns and is counted.
+
+### Fixed: co-editing presence and lifecycle races
+
+Leaving a session sent no departure: the ephemeral store's 45 s expiry
+was the only thing that removed a departed peer's caret and "who's
+here" dot, during exactly the "did they leave?" moment. A farewell
+frame is pushed synchronously before the stream comes down, on every
+terminal path, and presence is re-announced on the disconnected-to-
+connected edge (nothing re-announced until the 15 s keepalive before).
+A farewell that aborted — a host End that failed to tombstone, a
+keep-resumable close whose flush failed — used to leave nothing to
+re-announce; the parting state is now stashed and restored. Join and
+resume had no in-flight guard, so a double-click (or an invite pill
+plus a Sessions row) ran two sessions on one room, with two persist
+writers on one key and a history writer silently overwritten but still
+writing; both flows are now per-room single-flight and an existing live
+history writer is kept. The room-full and join-failure paths tore down
+the UI without stopping the session, leaving an orphan polling a room
+this window was no longer in, every five minutes, for the life of the
+window. stop() called a drain that returned at once whenever a post
+was in flight and never set a stopping flag, so that request's failure
+re-armed a retry timer after stop() had cleared it; it now awaits the
+live drain under a stopping flag. The mode-switch and quit handoff
+flushed the recovery record but not version history, dropping up to a
+minute of history on exactly the events that precede "let me recover".
+A start already in flight now toasts instead of returning silently; the
+session-preparation veil has a 120 s failsafe; a history writer's
+dispose no longer leaves one stray timer; and the seven call sites that
+discarded a teardown rejection now route it through the error surface
+with a subsystem name, instead of a generic "Something went wrong" chip
+on top of "Session ended".
+
+### Fixed: web account renewals — single-flight, deadline, wake triggers, portal-safe unlink
+
+Four gaps in the web entitlement renewal path, each with a shipped
+counter-example elsewhere in the repo: no in-flight guard (a forced
+renewal racing the 30-minute tick posted twice and the loser could
+overwrite the newer entitlement, and a 401/403/409 on either arm
+dropped a live credential); no timeout on the renewal fetch; only the
+timer drove it, so a laptop asleep past the 12-hour margin woke to up
+to 30 minutes of 401s; and a captive portal's HTML 401 unlinked the
+account. Renewals are single-flight, carry a 10 s deadline, run on
+online and tab-visible (margin-gated), and unlink only when the body is
+relay-shaped JSON.
+
 ## 1.6.0 — 2026-09-01
 
 ### Added: Reading view (Word-style paginated columns)
