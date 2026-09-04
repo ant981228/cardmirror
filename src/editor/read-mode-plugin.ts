@@ -245,6 +245,15 @@ function readKeptKind(nodeName: string): readonly string[] | 'heading' | null {
   return null;
 }
 
+/** Whether read mode keeps this inline text node visible in `parentType`.
+ *  Shared with destructive conversions so their audible-text rule cannot
+ *  drift from the display-only mode. */
+export function isReadModeKeptText(child: PMNode, parentType: string): boolean {
+  if (!child.isText) return false;
+  const kind = readKeptKind(parentType);
+  return kind === 'heading' || (kind !== null && isReadKept(child, kind));
+}
+
 /**
  * The position of the text read mode keeps VISIBLE that is nearest to
  * `pos` — a highlighted run, a cite, or heading/label text. Read-mode
