@@ -1,5 +1,5 @@
 diff --git a/node_modules/loro-prosemirror/dist/index.cjs b/node_modules/loro-prosemirror/dist/index.cjs
-index 74c4b30..0893cc0 100644
+index 74c4b30..c03dba4 100644
 --- a/node_modules/loro-prosemirror/dist/index.cjs
 +++ b/node_modules/loro-prosemirror/dist/index.cjs
 @@ -28,6 +28,82 @@ function updateLoroToPmState(doc, mapping, editorState, containerId) {
@@ -96,7 +96,7 @@ index 74c4b30..0893cc0 100644
  		}
  	} else if (obj instanceof loro_crdt.LoroText) {
  		retval = [];
-@@ -83,23 +161,82 @@ function createLoroText(parentList, pos, nodes, mapping) {
+@@ -83,23 +161,87 @@ function createLoroText(parentList, pos, nodes, mapping) {
  function updateLoroText(obj, nodes, mapping) {
  	mapping.set(obj.id, nodes);
  	let str = obj.toString();
@@ -122,6 +122,11 @@ index 74c4b30..0893cc0 100644
 +	// other peers (observed: two users highlighting disjoint ranges of
 +	// one paragraph while offline -> one side's highlights vanish on
 +	// merge). Normalization must not generate ops where nothing changed.
++	cardmirrorReconcileTextAttrs(obj, content);
++}
++/** Per-run attribute diff against the post-edit layout (split out of
++ *  updateLoroText so the exact-edit path can reuse it). */
++function cardmirrorReconcileTextAttrs(obj, content) {
 +	const layout = [];
 +	{
 +		let off = 0;
@@ -188,7 +193,7 @@ index 74c4b30..0893cc0 100644
  	return pattrs;
  }
  function valueToAttrs(value) {
-@@ -107,11 +244,52 @@ function valueToAttrs(value) {
+@@ -107,11 +249,52 @@ function valueToAttrs(value) {
  	return null;
  }
  function eqLoroTextNodes(obj, nodes) {
@@ -245,7 +250,7 @@ index 74c4b30..0893cc0 100644
  }
  /**
  * Whether the loro object is equal to the node.
-@@ -125,16 +303,57 @@ function eqLoroObjNode(obj, node) {
+@@ -125,16 +308,57 @@ function eqLoroObjNode(obj, node) {
  	}
  	return obj instanceof loro_crdt.LoroText && Array.isArray(node) && eqLoroTextNodes(obj, node);
  }
@@ -289,12 +294,12 @@ index 74c4b30..0893cc0 100644
 +		if (av.length !== bv.length) return false;
 +		for (let i = 0; i < av.length; i++) if (!cardmirrorCanonicalAttrsEqual(av[i], bv[i])) return false;
 +		return true;
- 	}
--	return eq;
++	}
 +	const keys = new Set([...Object.keys(av), ...Object.keys(bv)]);
 +	for (const key of keys) {
 +		if (!cardmirrorCanonicalAttrsEqual(av[key] ?? null, bv[key] ?? null)) return false;
-+	}
+ 	}
+-	return eq;
 +	return true;
 +}
 +function cardmirrorCanonicalizeAttrs(attrs) {
@@ -312,7 +317,7 @@ index 74c4b30..0893cc0 100644
  }
  function eqNodeName(obj, node) {
  	return !Array.isArray(node) && obj.get("nodeName") === node.type.name;
-@@ -156,6 +375,11 @@ function eqMappedNode(mapped, node) {
+@@ -156,6 +380,11 @@ function eqMappedNode(mapped, node) {
  	return false;
  }
  function normalizeNodeContent(node) {
@@ -324,7 +329,7 @@ index 74c4b30..0893cc0 100644
  	const res = [];
  	let textNodes = null;
  	node.content.forEach((node, _offset, _i) => {
-@@ -226,13 +450,400 @@ function updateLoroMapAttributes(obj, node, _mapping) {
+@@ -226,13 +455,550 @@ function updateLoroMapAttributes(obj, node, _mapping) {
  	for (const [key, value] of Object.entries(pAttrs)) {
  		if (value !== null) {
  			if (!(0, lib0_function.equalityDeep)(attrs.get(key), value)) attrs.set(key, value);
@@ -725,10 +730,160 @@ index 74c4b30..0893cc0 100644
 +		updateLoroMap(loroChildren.get(left + j), news[j], mapping);
 +	}
 +	return true;
++}
++/**
++ * CardMirror patch: EXACT text ops for local edits.
++ *
++ * Upstream turns a local edit into CRDT ops by diffing the paragraph's
++ * before/after STRINGS (lib0 simpleDiff: common prefix, common suffix,
++ * replace the middle). When inserted text shares characters with its
++ * neighbour, the diff reuses the neighbour's existing characters as part
++ * of the new text and inserts a different slice as "new": visually
++ * right, but the character identities are shuffled. A partner's
++ * concurrent split or delete addressed to the ORIGINAL characters then
++ * removes the wrong visual content and the merge converges on the damage
++ * — "golf «tk16» «tk3»" with a concurrent split before «tk3» came out as
++ * "golf 16» «tk" / "«tk3» end" (chaos rig + deterministic repro,
++ * 2026-09-04). In prose that is any word sharing its first or last
++ * letters with its neighbour.
++ *
++ * The ProseMirror transaction already says what changed. Every inline
++ * plain replace confined to one textblock with text-only content (typing,
++ * deleting, inline paste, a command rewriting a head) and every split is
++ * recorded per FINAL textblock node (offset, delete length, inserted
++ * text) and applied as exact Loro delete/insert ops. A replace is first
++ * trimmed to its changed middle WITHIN its own range (a whole-head
++ * rewrite that keeps the tail is a prefix delete): that is the only
++ * place existing identity may be reused. Block-level steps in the same
++ * batch (container inserts, moves, attr rewrites) are the container
++ * diff's business and coexist. Any other step (marks, joins, structure
++ * around text, plugin repairs) sends the whole batch to the diff, exactly
++ * as before; and every exact result is checked against the PM text
++ * before anything is written, falling back to the diff on mismatch.
++ */
++let cardmirrorExactEdits = null;
++
++function cardmirrorStepIsPlainReplace(step) {
++	return step && typeof step.from === "number" && typeof step.to === "number" && step.slice != null && !("gapFrom" in step) && !("mark" in step) && !("attr" in step);
++}
++
++function cardmirrorExactTextEdits(transactions, finalDoc) {
++	const edits = new Map();
++	let any = false;
++	for (let t = 0; t < transactions.length; t++) {
++		const tr = transactions[t];
++		if (!tr.docChanged) continue;
++		for (let i = 0; i < tr.steps.length; i++) {
++			const step = tr.steps[i];
++			const before = tr.docs[i];
++			if (!before) return null;
++			let $from, $to;
++			try {
++				$from = before.resolve(step.from);
++				$to = before.resolve(step.to);
++			} catch (e) {
++				return null;
++			}
++			// Block-level steps (container inserts/moves, attr rewrites) never
++			// touch text inside an existing textblock: the container diff owns
++			// them and they coexist with exact text edits in the same batch.
++			if (!$from.parent.isTextblock && !$to.parent.isTextblock) continue;
++			if (!cardmirrorStepIsPlainReplace(step)) return null;
++			if (!$from.parent.isTextblock || !$from.sameParent($to)) return null;
++			const slice = step.slice;
++			let offset = step.from - $from.start();
++			let deleteLen = step.to - step.from;
++			let insert = "";
++			if (slice.openStart === 1 && slice.openEnd === 1 && slice.content.childCount === 2 && step.from === step.to) {
++				// A split: the first block keeps [0, offset), the tail moves to
++				// a NEW block the container diff creates (a copy — unavoidable
++				// without a text move). Exact for the first block: delete the
++				// tail by identity, never by diff.
++				deleteLen = $from.end() - step.from;
++			} else {
++				if (slice.openStart !== 0 || slice.openEnd !== 0) return null;
++				let textOnly = true;
++				const runs = [];
++				slice.content.forEach((n) => {
++					if (!n.isText) textOnly = false;
++					else runs.push(n.text);
++				});
++				if (!textOnly) return null;
++				insert = runs.join("");
++				if (deleteLen > 0) {
++					// Trim the replace to what actually changed, WITHIN the
++					// step's own range: a command that rewrites a whole head
++					// to drop its first word (enterMidTag) must not re-mint
++					// the words it kept — two peers doing that to the same
++					// head would each re-insert the kept text. Characters
++					// outside the range are never candidates, so this cannot
++					// borrow a neighbour's identity the way the paragraph
++					// diff did. Surrogate pairs are never cut.
++					const deleted = $from.parent.textBetween(offset, offset + deleteLen, undefined, "￼");
++					if (deleted.indexOf("￼") >= 0 || deleted.length !== deleteLen) return null;
++					let pre = 0;
++					while (pre < deleted.length && pre < insert.length && deleted.charCodeAt(pre) === insert.charCodeAt(pre)) pre++;
++					if (pre > 0 && (deleted.charCodeAt(pre - 1) & 0xfc00) === 0xd800) pre--;
++					let suf = 0;
++					while (suf < deleted.length - pre && suf < insert.length - pre && deleted.charCodeAt(deleted.length - 1 - suf) === insert.charCodeAt(insert.length - 1 - suf)) suf++;
++					if (suf > 0 && (deleted.charCodeAt(deleted.length - suf) & 0xfc00) === 0xdc00) suf--;
++					offset += pre;
++					deleteLen -= pre + suf;
++					insert = insert.slice(pre, insert.length - suf);
++					if (deleteLen === 0 && insert.length === 0) continue;
++				}
++			}
++			// The textblock in the FINAL doc: map its start through the rest
++			// of this transaction and every later one. A textblock that a
++			// later step removes or replaces (join, container delete) is not
++			// ours to edit — the whole batch takes the diff.
++			let pos = $from.before();
++			try {
++				let r = tr.mapping.slice(i).mapResult(pos, 1);
++				if (r.deletedAfter) return null;
++				pos = r.pos;
++				for (let u = t + 1; u < transactions.length; u++) {
++					r = transactions[u].mapping.mapResult(pos, 1);
++					if (r.deletedAfter) return null;
++					pos = r.pos;
++				}
++			} catch (e) {
++				return null;
++			}
++			const finalNode = finalDoc.nodeAt(pos);
++			if (!finalNode || !finalNode.isTextblock || finalNode.type !== $from.parent.type) return null;
++			const list = edits.get(finalNode) || [];
++			list.push({ offset, deleteLen, insert });
++			edits.set(finalNode, list);
++			any = true;
++		}
++	}
++	return any ? edits : null;
++}
++
++/** Apply exact edits to one paragraph's LoroText — only if replaying them
++ *  on the current Loro string reproduces the PM text; else false (caller
++ *  falls back to the diff). Attributes are reconciled afterwards by the
++ *  same per-run diff the string path uses. */
++function cardmirrorApplyExactText(obj, edits, nodes, mapping) {
++	const target = nodes.map((n) => n.text).join("");
++	let s = obj.toString();
++	for (const e of edits) {
++		if (e.offset < 0 || e.offset + e.deleteLen > s.length) return false;
++		s = s.slice(0, e.offset) + e.insert + s.slice(e.offset + e.deleteLen);
++	}
++	if (s !== target) return false;
++	mapping.set(obj.id, nodes);
++	for (const e of edits) {
++		if (e.deleteLen > 0) obj.delete(e.offset, e.deleteLen);
++		if (e.insert.length > 0) obj.insert(e.offset, e.insert);
++	}
++	cardmirrorReconcileTextAttrs(obj, nodes.map((p) => ({ insert: p.text, attributes: nodeMarksToAttributes(p.marks) })));
++	return true;
  }
  function updateLoroMapChildren(obj, node, mapping) {
  	const loroChildren = getLoroMapChildren(obj);
-@@ -258,6 +869,26 @@ function updateLoroMapChildren(obj, node, mapping) {
+@@ -258,13 +1024,35 @@ function updateLoroMapChildren(obj, node, mapping) {
  			if (!Array.isArray(rightNode)) updateLoroMap(rightLoro, rightNode, mapping);
  		} else break;
  	}
@@ -755,7 +910,17 @@ index 74c4b30..0893cc0 100644
  	while (loroChildLength - left - right > 0 && nodeChildLength - left - right > 0) {
  		const leftLoro = loroChildren.get(left);
  		const leftNode = nodeChildren[left];
-@@ -422,27 +1053,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
+ 		const rightLoro = loroChildren.get(loroChildLength - right - 1);
+ 		const rightNode = nodeChildren[nodeChildLength - right - 1];
+ 		if (leftLoro instanceof loro_crdt.LoroText && Array.isArray(leftNode)) {
+-			if (!eqLoroTextNodes(leftLoro, leftNode)) updateLoroText(leftLoro, leftNode, mapping);
++			const exact = cardmirrorExactEdits ? cardmirrorExactEdits.get(node) : undefined;
++			if (exact && cardmirrorApplyExactText(leftLoro, exact, leftNode, mapping)) { /* exact ops applied */ }
++			else if (!eqLoroTextNodes(leftLoro, leftNode)) updateLoroText(leftLoro, leftNode, mapping);
+ 			left += 1;
+ 		} else {
+ 			let updateLeft = leftLoro instanceof loro_crdt.LoroMap && eqNodeName(leftLoro, leftNode);
+@@ -422,27 +1210,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
  	for (const [peer, cursor] of Object.entries(all)) {
  		if (peer === thisPeer) continue;
  		if (!cursor.anchor || !cursor.focus) continue;
@@ -804,7 +969,7 @@ index 74c4b30..0893cc0 100644
  	}
  	return prosemirror_view.DecorationSet.create(state.doc, d);
  }
-@@ -506,7 +1139,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
+@@ -506,7 +1296,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
  	}
  	while (loroNode != null) {
  		const children = loroNode.get(CHILDREN_KEY);
@@ -813,7 +978,23 @@ index 74c4b30..0893cc0 100644
  			const childIds = children.toArray();
  			for (const iter of childIds) {
  				if (iter.id === targetChildId) break;
-@@ -587,6 +1220,23 @@ const LoroSyncPlugin = (props) => {
+@@ -573,7 +1363,14 @@ const LoroSyncPlugin = (props) => {
+ 				else state.changedBy = "local";
+ 				switch (meta?.type) {
+ 					case "doc-changed":
+-						if (!undoState?.isUndoing.current) updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
++						if (!undoState?.isUndoing.current) {
++							cardmirrorExactEdits = meta.cmExact || null;
++							try {
++								updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
++							} finally {
++								cardmirrorExactEdits = null;
++							}
++						}
+ 						break;
+ 					case "update-state":
+ 						state = {
+@@ -587,11 +1384,28 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -837,7 +1018,13 @@ index 74c4b30..0893cc0 100644
  				return state;
  			}
  		},
-@@ -650,14 +1300,63 @@ function updateNodeOnLoroEvent(view, event) {
+ 		appendTransaction: (transactions, _oldEditorState, newEditorState) => {
+-			if (transactions.some((tr) => tr.docChanged)) return newEditorState.tr.setMeta(loroSyncPluginKey, { type: "doc-changed" });
++			if (transactions.some((tr) => tr.docChanged)) return newEditorState.tr.setMeta(loroSyncPluginKey, { type: "doc-changed", cmExact: cardmirrorExactTextEdits(transactions, newEditorState.doc) });
+ 			return null;
+ 		},
+ 		view: (view) => {
+@@ -650,14 +1464,63 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -908,7 +1095,7 @@ index 74c4b30..0893cc0 100644
  /**
  * Update ProseMirror selection based on the given Loro cursors.
 diff --git a/node_modules/loro-prosemirror/dist/index.js b/node_modules/loro-prosemirror/dist/index.js
-index e41095d..1531080 100644
+index e41095d..929fdaf 100644
 --- a/node_modules/loro-prosemirror/dist/index.js
 +++ b/node_modules/loro-prosemirror/dist/index.js
 @@ -1,6 +1,185 @@
@@ -1192,7 +1379,7 @@ index e41095d..1531080 100644
  		}
  	} else if (obj instanceof LoroText) {
  		retval = [];
-@@ -82,23 +339,82 @@ function createLoroText(parentList, pos, nodes, mapping) {
+@@ -82,23 +339,87 @@ function createLoroText(parentList, pos, nodes, mapping) {
  function updateLoroText(obj, nodes, mapping) {
  	mapping.set(obj.id, nodes);
  	let str = obj.toString();
@@ -1217,6 +1404,11 @@ index e41095d..1531080 100644
 +	// other peers (observed: two users highlighting disjoint ranges of
 +	// one paragraph while offline -> one side's highlights vanish on
 +	// merge). Normalization must not generate ops where nothing changed.
++	cardmirrorReconcileTextAttrs(obj, content);
++}
++/** Per-run attribute diff against the post-edit layout (split out of
++ *  updateLoroText so the exact-edit path can reuse it). */
++function cardmirrorReconcileTextAttrs(obj, content) {
 +	const layout = [];
 +	{
 +		let off = 0;
@@ -1283,7 +1475,7 @@ index e41095d..1531080 100644
  	return pattrs;
  }
  function valueToAttrs(value) {
-@@ -106,11 +422,52 @@ function valueToAttrs(value) {
+@@ -106,11 +427,52 @@ function valueToAttrs(value) {
  	return null;
  }
  function eqLoroTextNodes(obj, nodes) {
@@ -1340,7 +1532,7 @@ index e41095d..1531080 100644
  }
  /**
  * Whether the loro object is equal to the node.
-@@ -124,16 +481,57 @@ function eqLoroObjNode(obj, node) {
+@@ -124,16 +486,57 @@ function eqLoroObjNode(obj, node) {
  	}
  	return obj instanceof LoroText && Array.isArray(node) && eqLoroTextNodes(obj, node);
  }
@@ -1388,7 +1580,8 @@ index e41095d..1531080 100644
 +	const keys = new Set([...Object.keys(av), ...Object.keys(bv)]);
 +	for (const key of keys) {
 +		if (!cardmirrorCanonicalAttrsEqual(av[key] ?? null, bv[key] ?? null)) return false;
-+	}
+ 	}
+-	return eq;
 +	return true;
 +}
 +function cardmirrorCanonicalizeAttrs(attrs) {
@@ -1396,8 +1589,7 @@ index e41095d..1531080 100644
 +	for (const key of Object.keys(attrs ?? {})) {
 +		const v = attrs[key];
 +		if (v !== null && v !== undefined) out[key] = v;
- 	}
--	return eq;
++	}
 +	return out;
 +}
 +// PATCHED (cardmirror): canonical equality — the old form counted
@@ -1407,7 +1599,7 @@ index e41095d..1531080 100644
  }
  function eqNodeName(obj, node) {
  	return !Array.isArray(node) && obj.get("nodeName") === node.type.name;
-@@ -155,6 +553,11 @@ function eqMappedNode(mapped, node) {
+@@ -155,6 +558,11 @@ function eqMappedNode(mapped, node) {
  	return false;
  }
  function normalizeNodeContent(node) {
@@ -1419,7 +1611,7 @@ index e41095d..1531080 100644
  	const res = [];
  	let textNodes = null;
  	node.content.forEach((node, _offset, _i) => {
-@@ -225,13 +628,222 @@ function updateLoroMapAttributes(obj, node, _mapping) {
+@@ -225,13 +633,372 @@ function updateLoroMapAttributes(obj, node, _mapping) {
  	for (const [key, value] of Object.entries(pAttrs)) {
  		if (value !== null) {
  			if (!equalityDeep(attrs.get(key), value)) attrs.set(key, value);
@@ -1642,10 +1834,160 @@ index e41095d..1531080 100644
 +		updateLoroMap(loroChildren.get(left + j), news[j], mapping);
 +	}
 +	return true;
++}
++/**
++ * CardMirror patch: EXACT text ops for local edits.
++ *
++ * Upstream turns a local edit into CRDT ops by diffing the paragraph's
++ * before/after STRINGS (lib0 simpleDiff: common prefix, common suffix,
++ * replace the middle). When inserted text shares characters with its
++ * neighbour, the diff reuses the neighbour's existing characters as part
++ * of the new text and inserts a different slice as "new": visually
++ * right, but the character identities are shuffled. A partner's
++ * concurrent split or delete addressed to the ORIGINAL characters then
++ * removes the wrong visual content and the merge converges on the damage
++ * — "golf «tk16» «tk3»" with a concurrent split before «tk3» came out as
++ * "golf 16» «tk" / "«tk3» end" (chaos rig + deterministic repro,
++ * 2026-09-04). In prose that is any word sharing its first or last
++ * letters with its neighbour.
++ *
++ * The ProseMirror transaction already says what changed. Every inline
++ * plain replace confined to one textblock with text-only content (typing,
++ * deleting, inline paste, a command rewriting a head) and every split is
++ * recorded per FINAL textblock node (offset, delete length, inserted
++ * text) and applied as exact Loro delete/insert ops. A replace is first
++ * trimmed to its changed middle WITHIN its own range (a whole-head
++ * rewrite that keeps the tail is a prefix delete): that is the only
++ * place existing identity may be reused. Block-level steps in the same
++ * batch (container inserts, moves, attr rewrites) are the container
++ * diff's business and coexist. Any other step (marks, joins, structure
++ * around text, plugin repairs) sends the whole batch to the diff, exactly
++ * as before; and every exact result is checked against the PM text
++ * before anything is written, falling back to the diff on mismatch.
++ */
++let cardmirrorExactEdits = null;
++
++function cardmirrorStepIsPlainReplace(step) {
++	return step && typeof step.from === "number" && typeof step.to === "number" && step.slice != null && !("gapFrom" in step) && !("mark" in step) && !("attr" in step);
++}
++
++function cardmirrorExactTextEdits(transactions, finalDoc) {
++	const edits = new Map();
++	let any = false;
++	for (let t = 0; t < transactions.length; t++) {
++		const tr = transactions[t];
++		if (!tr.docChanged) continue;
++		for (let i = 0; i < tr.steps.length; i++) {
++			const step = tr.steps[i];
++			const before = tr.docs[i];
++			if (!before) return null;
++			let $from, $to;
++			try {
++				$from = before.resolve(step.from);
++				$to = before.resolve(step.to);
++			} catch (e) {
++				return null;
++			}
++			// Block-level steps (container inserts/moves, attr rewrites) never
++			// touch text inside an existing textblock: the container diff owns
++			// them and they coexist with exact text edits in the same batch.
++			if (!$from.parent.isTextblock && !$to.parent.isTextblock) continue;
++			if (!cardmirrorStepIsPlainReplace(step)) return null;
++			if (!$from.parent.isTextblock || !$from.sameParent($to)) return null;
++			const slice = step.slice;
++			let offset = step.from - $from.start();
++			let deleteLen = step.to - step.from;
++			let insert = "";
++			if (slice.openStart === 1 && slice.openEnd === 1 && slice.content.childCount === 2 && step.from === step.to) {
++				// A split: the first block keeps [0, offset), the tail moves to
++				// a NEW block the container diff creates (a copy — unavoidable
++				// without a text move). Exact for the first block: delete the
++				// tail by identity, never by diff.
++				deleteLen = $from.end() - step.from;
++			} else {
++				if (slice.openStart !== 0 || slice.openEnd !== 0) return null;
++				let textOnly = true;
++				const runs = [];
++				slice.content.forEach((n) => {
++					if (!n.isText) textOnly = false;
++					else runs.push(n.text);
++				});
++				if (!textOnly) return null;
++				insert = runs.join("");
++				if (deleteLen > 0) {
++					// Trim the replace to what actually changed, WITHIN the
++					// step's own range: a command that rewrites a whole head
++					// to drop its first word (enterMidTag) must not re-mint
++					// the words it kept — two peers doing that to the same
++					// head would each re-insert the kept text. Characters
++					// outside the range are never candidates, so this cannot
++					// borrow a neighbour's identity the way the paragraph
++					// diff did. Surrogate pairs are never cut.
++					const deleted = $from.parent.textBetween(offset, offset + deleteLen, undefined, "￼");
++					if (deleted.indexOf("￼") >= 0 || deleted.length !== deleteLen) return null;
++					let pre = 0;
++					while (pre < deleted.length && pre < insert.length && deleted.charCodeAt(pre) === insert.charCodeAt(pre)) pre++;
++					if (pre > 0 && (deleted.charCodeAt(pre - 1) & 0xfc00) === 0xd800) pre--;
++					let suf = 0;
++					while (suf < deleted.length - pre && suf < insert.length - pre && deleted.charCodeAt(deleted.length - 1 - suf) === insert.charCodeAt(insert.length - 1 - suf)) suf++;
++					if (suf > 0 && (deleted.charCodeAt(deleted.length - suf) & 0xfc00) === 0xdc00) suf--;
++					offset += pre;
++					deleteLen -= pre + suf;
++					insert = insert.slice(pre, insert.length - suf);
++					if (deleteLen === 0 && insert.length === 0) continue;
++				}
++			}
++			// The textblock in the FINAL doc: map its start through the rest
++			// of this transaction and every later one. A textblock that a
++			// later step removes or replaces (join, container delete) is not
++			// ours to edit — the whole batch takes the diff.
++			let pos = $from.before();
++			try {
++				let r = tr.mapping.slice(i).mapResult(pos, 1);
++				if (r.deletedAfter) return null;
++				pos = r.pos;
++				for (let u = t + 1; u < transactions.length; u++) {
++					r = transactions[u].mapping.mapResult(pos, 1);
++					if (r.deletedAfter) return null;
++					pos = r.pos;
++				}
++			} catch (e) {
++				return null;
++			}
++			const finalNode = finalDoc.nodeAt(pos);
++			if (!finalNode || !finalNode.isTextblock || finalNode.type !== $from.parent.type) return null;
++			const list = edits.get(finalNode) || [];
++			list.push({ offset, deleteLen, insert });
++			edits.set(finalNode, list);
++			any = true;
++		}
++	}
++	return any ? edits : null;
++}
++
++/** Apply exact edits to one paragraph's LoroText — only if replaying them
++ *  on the current Loro string reproduces the PM text; else false (caller
++ *  falls back to the diff). Attributes are reconciled afterwards by the
++ *  same per-run diff the string path uses. */
++function cardmirrorApplyExactText(obj, edits, nodes, mapping) {
++	const target = nodes.map((n) => n.text).join("");
++	let s = obj.toString();
++	for (const e of edits) {
++		if (e.offset < 0 || e.offset + e.deleteLen > s.length) return false;
++		s = s.slice(0, e.offset) + e.insert + s.slice(e.offset + e.deleteLen);
++	}
++	if (s !== target) return false;
++	mapping.set(obj.id, nodes);
++	for (const e of edits) {
++		if (e.deleteLen > 0) obj.delete(e.offset, e.deleteLen);
++		if (e.insert.length > 0) obj.insert(e.offset, e.insert);
++	}
++	cardmirrorReconcileTextAttrs(obj, nodes.map((p) => ({ insert: p.text, attributes: nodeMarksToAttributes(p.marks) })));
++	return true;
  }
  function updateLoroMapChildren(obj, node, mapping) {
  	const loroChildren = getLoroMapChildren(obj);
-@@ -257,6 +869,26 @@ function updateLoroMapChildren(obj, node, mapping) {
+@@ -257,13 +1024,35 @@ function updateLoroMapChildren(obj, node, mapping) {
  			if (!Array.isArray(rightNode)) updateLoroMap(rightLoro, rightNode, mapping);
  		} else break;
  	}
@@ -1672,7 +2014,17 @@ index e41095d..1531080 100644
  	while (loroChildLength - left - right > 0 && nodeChildLength - left - right > 0) {
  		const leftLoro = loroChildren.get(left);
  		const leftNode = nodeChildren[left];
-@@ -421,27 +1053,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
+ 		const rightLoro = loroChildren.get(loroChildLength - right - 1);
+ 		const rightNode = nodeChildren[nodeChildLength - right - 1];
+ 		if (leftLoro instanceof LoroText && Array.isArray(leftNode)) {
+-			if (!eqLoroTextNodes(leftLoro, leftNode)) updateLoroText(leftLoro, leftNode, mapping);
++			const exact = cardmirrorExactEdits ? cardmirrorExactEdits.get(node) : undefined;
++			if (exact && cardmirrorApplyExactText(leftLoro, exact, leftNode, mapping)) { /* exact ops applied */ }
++			else if (!eqLoroTextNodes(leftLoro, leftNode)) updateLoroText(leftLoro, leftNode, mapping);
+ 			left += 1;
+ 		} else {
+ 			let updateLeft = leftLoro instanceof LoroMap && eqNodeName(leftLoro, leftNode);
+@@ -421,27 +1210,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
  	for (const [peer, cursor] of Object.entries(all)) {
  		if (peer === thisPeer) continue;
  		if (!cursor.anchor || !cursor.focus) continue;
@@ -1721,7 +2073,7 @@ index e41095d..1531080 100644
  	}
  	return DecorationSet.create(state.doc, d);
  }
-@@ -505,7 +1139,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
+@@ -505,7 +1296,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
  	}
  	while (loroNode != null) {
  		const children = loroNode.get(CHILDREN_KEY);
@@ -1730,7 +2082,23 @@ index e41095d..1531080 100644
  			const childIds = children.toArray();
  			for (const iter of childIds) {
  				if (iter.id === targetChildId) break;
-@@ -586,6 +1220,23 @@ const LoroSyncPlugin = (props) => {
+@@ -572,7 +1363,14 @@ const LoroSyncPlugin = (props) => {
+ 				else state.changedBy = "local";
+ 				switch (meta?.type) {
+ 					case "doc-changed":
+-						if (!undoState?.isUndoing.current) updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
++						if (!undoState?.isUndoing.current) {
++							cardmirrorExactEdits = meta.cmExact || null;
++							try {
++								updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
++							} finally {
++								cardmirrorExactEdits = null;
++							}
++						}
+ 						break;
+ 					case "update-state":
+ 						state = {
+@@ -586,11 +1384,28 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -1754,7 +2122,13 @@ index e41095d..1531080 100644
  				return state;
  			}
  		},
-@@ -649,14 +1300,72 @@ function updateNodeOnLoroEvent(view, event) {
+ 		appendTransaction: (transactions, _oldEditorState, newEditorState) => {
+-			if (transactions.some((tr) => tr.docChanged)) return newEditorState.tr.setMeta(loroSyncPluginKey, { type: "doc-changed" });
++			if (transactions.some((tr) => tr.docChanged)) return newEditorState.tr.setMeta(loroSyncPluginKey, { type: "doc-changed", cmExact: cardmirrorExactTextEdits(transactions, newEditorState.doc) });
+ 			return null;
+ 		},
+ 		view: (view) => {
+@@ -649,14 +1464,72 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);

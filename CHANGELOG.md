@@ -30,6 +30,13 @@ see `DETAILED_CHANGELOG.md`.
   was moved or split while a partner edited it, the sync layer could
   rebuild the card, orphaning the partner's edit (lost text) or leaving
   two copies. Cards now keep their identity through those merges.
+- **Co-editing: typed text no longer tears under a partner's concurrent
+  split or delete.** When a word you typed began or ended with the same
+  letters as its neighbour, the sync layer treated part of the
+  neighbour as your new text; a partner splitting or deleting that
+  neighbour at the same moment then took a piece of your word with it
+  ("«tk16» «tk3»" came out as "16» «tk"). Local edits now sync as
+  exactly the characters you typed or deleted.
 - **The Send pill scrolls while you drag.** Long recipient lists were
   unreachable past the first screenful during a drag; holding the
   dragged card near the top or bottom of the list now scrolls it.
@@ -38,6 +45,10 @@ see `DETAILED_CHANGELOG.md`.
   could push out a machine you still use.
 - **Refused account renewals back off** instead of retrying every few
   minutes.
+- **A lapsed membership that re-subscribes reconnects on its own.**
+  Linked machines used to need re-linking after a lapse; the relay now
+  hears about membership changes directly (live since 2026-09-04,
+  independent of this build).
 
 ## 1.6.0 — 2026-09-01
 
