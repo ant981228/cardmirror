@@ -1,5 +1,5 @@
 diff --git a/node_modules/loro-prosemirror/dist/index.cjs b/node_modules/loro-prosemirror/dist/index.cjs
-index 74c4b30..7dd9e76 100644
+index 74c4b30..0893cc0 100644
 --- a/node_modules/loro-prosemirror/dist/index.cjs
 +++ b/node_modules/loro-prosemirror/dist/index.cjs
 @@ -28,6 +28,82 @@ function updateLoroToPmState(doc, mapping, editorState, containerId) {
@@ -324,7 +324,7 @@ index 74c4b30..7dd9e76 100644
  	const res = [];
  	let textNodes = null;
  	node.content.forEach((node, _offset, _i) => {
-@@ -226,13 +450,218 @@ function updateLoroMapAttributes(obj, node, _mapping) {
+@@ -226,13 +450,400 @@ function updateLoroMapAttributes(obj, node, _mapping) {
  	for (const [key, value] of Object.entries(pAttrs)) {
  		if (value !== null) {
  			if (!(0, lib0_function.equalityDeep)(attrs.get(key), value)) attrs.set(key, value);
@@ -543,10 +543,192 @@ index 74c4b30..7dd9e76 100644
 +		/* detached/odd shape — fall through to the seed flag */
 +	}
 +	return globalThis.__CM_MOVABLE_LIST__ ? "movable" : "list";
++}
++/**
++ * CardMirror patch: identity-preserving reconcile for MOVABLE lists when
++ * the span is NOT a pure permutation — a child was inserted or removed
++ * alongside a relocation, or a relocated child's content changed
++ * concurrently so cardmirrorDetectReorder could not plan. Upstream's
++ * index-aligned loop below would delete-and-recreate every misaligned
++ * child: a partner's concurrent edit inside it is orphaned (lost
++ * content), and two peers rebuilding the same child leave twins
++ * (duplicated heads). Real-relay chaos rig + live-interleave fuzz,
++ * 2026-09-04: every lost token sat in a card another peer had moved or
++ * split in the same round.
++ *
++ * Here every PM child that can be identified with an existing container
++ * KEEPS it: unmatched containers are deleted, unmatched PM children
++ * created, matched ones moved into place (identity-preserving move())
++ * and updated in place. Identification: the weak node→container map,
++ * then the mapping table, then the residue rules inside (unique content
++ * equality → unique head id → upstream's similarity measure → positional
++ * same-type pairing, upstream's own rule; similarity ties are never
++ * guessed). Returns
++ * false (nothing touched) to fall through to upstream when the list
++ * cannot move() or the span holds non-container children.
++ */
++function cardmirrorReconcileMovable(loroChildren, nodeChildren, left, right, loroLen, nodeLen, mapping) {
++	if (typeof loroChildren.move !== "function") return false;
++	const loroSpan = loroLen - left - right;
++	const nodeSpan = nodeLen - left - right;
++	if (loroSpan <= 0 || nodeSpan <= 0) return false; // pure tail insert/delete: upstream is exact there
++	const olds = [];
++	const idToOld = new Map();
++	const objToOld = new Map();
++	for (let i = 0; i < loroSpan; i++) {
++		const child = loroChildren.get(left + i);
++		if (!loro_crdt.isContainer(child) || !(child instanceof loro_crdt.LoroMap)) return false;
++		olds.push(child);
++		idToOld.set(String(child.id), i);
++		const mapped = mapping.get(child.id);
++		if (mapped != null && !Array.isArray(mapped) && !objToOld.has(mapped)) objToOld.set(mapped, i);
++	}
++	const news = nodeChildren.slice(left, left + nodeSpan);
++	const matchOf = new Array(nodeSpan).fill(-1);
++	const used = new Set();
++	const residue = [];
++	for (let j = 0; j < nodeSpan; j++) {
++		const n = news[j];
++		if (n == null || Array.isArray(n)) return false;
++		const wid = WEAK_NODE_TO_LORO_CONTAINER_MAPPING.get(n);
++		let i = wid != null ? idToOld.get(String(wid)) : undefined;
++		if (i === undefined) i = objToOld.get(n);
++		if (i !== undefined && !used.has(i) && eqNodeName(olds[i], n)) {
++			used.add(i);
++			matchOf[j] = i;
++		} else residue.push(j);
++	}
++	// Residue, in order of confidence — never a guess between equals:
++	//   a. strict content equality, unique;
++	//   b. the head's heading id, when that id is unique on BOTH sides of
++	//      the span (a pasted copy still carrying its original's id is
++	//      ambiguous and falls through);
++	//   c. upstream's own similarity measure (equal children at the
++	//      prefix/suffix, or a mapped child object) — the best unused
++	//      candidate, ties left unmatched. This is what upstream's loop
++	//      would have used to decide an in-place update anyway; here it
++	//      keeps the container's IDENTITY as well.
++	const headId = (n) => {
++		if (!n || Array.isArray(n)) return null;
++		const first = n.firstChild;
++		const id = first && first.attrs ? first.attrs.id : null;
++		return typeof id === "string" && id ? id : null;
++	};
++	const loroHeadId = (obj) => {
++		try {
++			const kids = getLoroMapChildren(obj);
++			const head = kids.length > 0 ? kids.get(0) : null;
++			if (!head || !(head instanceof loro_crdt.LoroMap)) return null;
++			const id = getLoroMapAttributes(head).get("id");
++			return typeof id === "string" && id ? id : null;
++		} catch (e) {
++			return null;
++		}
++	};
++	const pending = [];
++	for (const j of residue) {
++		const n = news[j];
++		let found = -1;
++		for (let i = 0; i < loroSpan; i++) {
++			if (used.has(i)) continue;
++			if (eqLoroObjNode(olds[i], n)) {
++				if (found !== -1) { found = -2; break; }
++				found = i;
++			}
++		}
++		if (found >= 0) { used.add(found); matchOf[j] = found; } else pending.push(j);
++	}
++	if (pending.length) {
++		const oldIds = new Map();
++		for (let i = 0; i < loroSpan; i++) {
++			if (used.has(i)) continue;
++			const id = loroHeadId(olds[i]);
++			if (id) oldIds.set(id, oldIds.has(id) ? -1 : i);
++		}
++		const newIds = new Map();
++		for (const j of pending) {
++			const id = headId(news[j]);
++			if (id) newIds.set(id, newIds.has(id) ? -1 : j);
++		}
++		for (const j of pending.slice()) {
++			const id = headId(news[j]);
++			if (!id || newIds.get(id) !== j) continue;
++			const i = oldIds.get(id);
++			if (i === undefined || i < 0 || used.has(i) || !eqNodeName(olds[i], news[j])) continue;
++			used.add(i); matchOf[j] = i; pending.splice(pending.indexOf(j), 1);
++		}
++	}
++	if (pending.length) {
++		const scored = [];
++		for (const j of pending) {
++			for (let i = 0; i < loroSpan; i++) {
++				if (used.has(i) || !eqNodeName(olds[i], news[j])) continue;
++				const f = computeChildEqualityFactor(olds[i], news[j], mapping);
++				const score = (f.foundMappedChild ? 1000 : 0) + f.factor;
++				if (score > 0) scored.push({ j, i, score });
++			}
++		}
++		scored.sort((a, b) => b.score - a.score);
++		const takenJ = new Set();
++		for (let k = 0; k < scored.length; k++) {
++			const c = scored[k];
++			if (takenJ.has(c.j) || used.has(c.i)) continue;
++			// A tie for this PM child among unused candidates is ambiguous: skip it.
++			const tie = scored.some((o, m) => m !== k && o.j === c.j && !used.has(o.i) && o.score === c.score);
++			if (tie) { takenJ.add(c.j); continue; }
++			used.add(c.i); matchOf[c.j] = c.i; takenJ.add(c.j);
++		}
++	}
++	// d. Positional pairing by node type for whatever is still unmatched —
++	//    upstream's own rule (an index-aligned child of the same type is
++	//    updated in place). Monotone so relative order is kept; this is
++	//    what keeps a paragraph's or head's identity through ordinary
++	//    typing, which the tiers above cannot see as "the same".
++	{
++		let i = 0;
++		for (let j = 0; j < nodeSpan; j++) {
++			if (matchOf[j] >= 0) continue;
++			while (i < loroSpan && (used.has(i) || !eqNodeName(olds[i], news[j]))) i++;
++			if (i >= loroSpan) break;
++			used.add(i); matchOf[j] = i; i++;
++		}
++	}
++	// 1. Containers with no PM counterpart go (descending keeps indexes valid).
++	for (let i = loroSpan - 1; i >= 0; i--) {
++		if (used.has(i)) continue;
++		const doomed = loroChildren.get(left + i);
++		if (loro_crdt.isContainer(doomed)) mapping.delete(doomed.id);
++		loroChildren.delete(left + i, 1);
++	}
++	// 2. Survivors into PM order: settle the prefix with identity-preserving
++	//    moves (delete-then-insert index semantics, k > t always).
++	const cur = [];
++	for (let i = 0; i < loroSpan; i++) if (used.has(i)) cur.push(i);
++	const target = matchOf.filter((i) => i >= 0);
++	for (let t = 0; t < target.length; t++) {
++		if (cur[t] === target[t]) continue;
++		const k = cur.indexOf(target[t], t + 1);
++		if (k < 0) continue; // impossible (target is a permutation of cur); never corrupt
++		loroChildren.move(left + k, left + t);
++		cur.splice(k, 1);
++		cur.splice(t, 0, target[t]);
++	}
++	// 3. New PM children at their final positions (ascending: everything
++	//    before index j is already in place).
++	for (let j = 0; j < nodeSpan; j++) {
++		if (matchOf[j] >= 0) continue;
++		createLoroChild(loroChildren, left + j, news[j], mapping);
++	}
++	// 4. Matched containers updated in place — attrs, children, identity kept.
++	for (let j = 0; j < nodeSpan; j++) {
++		if (matchOf[j] < 0) continue;
++		updateLoroMap(loroChildren.get(left + j), news[j], mapping);
++	}
++	return true;
  }
  function updateLoroMapChildren(obj, node, mapping) {
  	const loroChildren = getLoroMapChildren(obj);
-@@ -258,6 +687,24 @@ function updateLoroMapChildren(obj, node, mapping) {
+@@ -258,6 +869,26 @@ function updateLoroMapChildren(obj, node, mapping) {
  			if (!Array.isArray(rightNode)) updateLoroMap(rightLoro, rightNode, mapping);
  		} else break;
  	}
@@ -567,11 +749,13 @@ index 74c4b30..7dd9e76 100644
 +			}
 +			return;
 +		}
++		// Not a pure permutation: keep every identifiable container anyway.
++		if (cardmirrorReconcileMovable(loroChildren, nodeChildren, left, right, loroChildLength, nodeChildLength, mapping)) return;
 +	}
  	while (loroChildLength - left - right > 0 && nodeChildLength - left - right > 0) {
  		const leftLoro = loroChildren.get(left);
  		const leftNode = nodeChildren[left];
-@@ -422,27 +869,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
+@@ -422,27 +1053,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
  	for (const [peer, cursor] of Object.entries(all)) {
  		if (peer === thisPeer) continue;
  		if (!cursor.anchor || !cursor.focus) continue;
@@ -620,7 +804,7 @@ index 74c4b30..7dd9e76 100644
  	}
  	return prosemirror_view.DecorationSet.create(state.doc, d);
  }
-@@ -506,7 +955,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
+@@ -506,7 +1139,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
  	}
  	while (loroNode != null) {
  		const children = loroNode.get(CHILDREN_KEY);
@@ -629,7 +813,7 @@ index 74c4b30..7dd9e76 100644
  			const childIds = children.toArray();
  			for (const iter of childIds) {
  				if (iter.id === targetChildId) break;
-@@ -587,6 +1036,23 @@ const LoroSyncPlugin = (props) => {
+@@ -587,6 +1220,23 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -653,7 +837,7 @@ index 74c4b30..7dd9e76 100644
  				return state;
  			}
  		},
-@@ -650,14 +1116,63 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -650,14 +1300,63 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -724,7 +908,7 @@ index 74c4b30..7dd9e76 100644
  /**
  * Update ProseMirror selection based on the given Loro cursors.
 diff --git a/node_modules/loro-prosemirror/dist/index.js b/node_modules/loro-prosemirror/dist/index.js
-index e41095d..87f4f89 100644
+index e41095d..1531080 100644
 --- a/node_modules/loro-prosemirror/dist/index.js
 +++ b/node_modules/loro-prosemirror/dist/index.js
 @@ -1,6 +1,185 @@
@@ -1200,8 +1384,7 @@ index e41095d..87f4f89 100644
 +		if (av.length !== bv.length) return false;
 +		for (let i = 0; i < av.length; i++) if (!cardmirrorCanonicalAttrsEqual(av[i], bv[i])) return false;
 +		return true;
- 	}
--	return eq;
++	}
 +	const keys = new Set([...Object.keys(av), ...Object.keys(bv)]);
 +	for (const key of keys) {
 +		if (!cardmirrorCanonicalAttrsEqual(av[key] ?? null, bv[key] ?? null)) return false;
@@ -1213,7 +1396,8 @@ index e41095d..87f4f89 100644
 +	for (const key of Object.keys(attrs ?? {})) {
 +		const v = attrs[key];
 +		if (v !== null && v !== undefined) out[key] = v;
-+	}
+ 	}
+-	return eq;
 +	return out;
 +}
 +// PATCHED (cardmirror): canonical equality — the old form counted
@@ -1235,7 +1419,7 @@ index e41095d..87f4f89 100644
  	const res = [];
  	let textNodes = null;
  	node.content.forEach((node, _offset, _i) => {
-@@ -225,13 +628,40 @@ function updateLoroMapAttributes(obj, node, _mapping) {
+@@ -225,13 +628,222 @@ function updateLoroMapAttributes(obj, node, _mapping) {
  	for (const [key, value] of Object.entries(pAttrs)) {
  		if (value !== null) {
  			if (!equalityDeep(attrs.get(key), value)) attrs.set(key, value);
@@ -1276,10 +1460,192 @@ index e41095d..87f4f89 100644
 +		/* detached/odd shape — fall through to the seed flag */
 +	}
 +	return globalThis.__CM_MOVABLE_LIST__ ? "movable" : "list";
++}
++/**
++ * CardMirror patch: identity-preserving reconcile for MOVABLE lists when
++ * the span is NOT a pure permutation — a child was inserted or removed
++ * alongside a relocation, or a relocated child's content changed
++ * concurrently so cardmirrorDetectReorder could not plan. Upstream's
++ * index-aligned loop below would delete-and-recreate every misaligned
++ * child: a partner's concurrent edit inside it is orphaned (lost
++ * content), and two peers rebuilding the same child leave twins
++ * (duplicated heads). Real-relay chaos rig + live-interleave fuzz,
++ * 2026-09-04: every lost token sat in a card another peer had moved or
++ * split in the same round.
++ *
++ * Here every PM child that can be identified with an existing container
++ * KEEPS it: unmatched containers are deleted, unmatched PM children
++ * created, matched ones moved into place (identity-preserving move())
++ * and updated in place. Identification: the weak node→container map,
++ * then the mapping table, then the residue rules inside (unique content
++ * equality → unique head id → upstream's similarity measure → positional
++ * same-type pairing, upstream's own rule; similarity ties are never
++ * guessed). Returns
++ * false (nothing touched) to fall through to upstream when the list
++ * cannot move() or the span holds non-container children.
++ */
++function cardmirrorReconcileMovable(loroChildren, nodeChildren, left, right, loroLen, nodeLen, mapping) {
++	if (typeof loroChildren.move !== "function") return false;
++	const loroSpan = loroLen - left - right;
++	const nodeSpan = nodeLen - left - right;
++	if (loroSpan <= 0 || nodeSpan <= 0) return false; // pure tail insert/delete: upstream is exact there
++	const olds = [];
++	const idToOld = new Map();
++	const objToOld = new Map();
++	for (let i = 0; i < loroSpan; i++) {
++		const child = loroChildren.get(left + i);
++		if (!isContainer(child) || !(child instanceof LoroMap)) return false;
++		olds.push(child);
++		idToOld.set(String(child.id), i);
++		const mapped = mapping.get(child.id);
++		if (mapped != null && !Array.isArray(mapped) && !objToOld.has(mapped)) objToOld.set(mapped, i);
++	}
++	const news = nodeChildren.slice(left, left + nodeSpan);
++	const matchOf = new Array(nodeSpan).fill(-1);
++	const used = new Set();
++	const residue = [];
++	for (let j = 0; j < nodeSpan; j++) {
++		const n = news[j];
++		if (n == null || Array.isArray(n)) return false;
++		const wid = WEAK_NODE_TO_LORO_CONTAINER_MAPPING.get(n);
++		let i = wid != null ? idToOld.get(String(wid)) : undefined;
++		if (i === undefined) i = objToOld.get(n);
++		if (i !== undefined && !used.has(i) && eqNodeName(olds[i], n)) {
++			used.add(i);
++			matchOf[j] = i;
++		} else residue.push(j);
++	}
++	// Residue, in order of confidence — never a guess between equals:
++	//   a. strict content equality, unique;
++	//   b. the head's heading id, when that id is unique on BOTH sides of
++	//      the span (a pasted copy still carrying its original's id is
++	//      ambiguous and falls through);
++	//   c. upstream's own similarity measure (equal children at the
++	//      prefix/suffix, or a mapped child object) — the best unused
++	//      candidate, ties left unmatched. This is what upstream's loop
++	//      would have used to decide an in-place update anyway; here it
++	//      keeps the container's IDENTITY as well.
++	const headId = (n) => {
++		if (!n || Array.isArray(n)) return null;
++		const first = n.firstChild;
++		const id = first && first.attrs ? first.attrs.id : null;
++		return typeof id === "string" && id ? id : null;
++	};
++	const loroHeadId = (obj) => {
++		try {
++			const kids = getLoroMapChildren(obj);
++			const head = kids.length > 0 ? kids.get(0) : null;
++			if (!head || !(head instanceof LoroMap)) return null;
++			const id = getLoroMapAttributes(head).get("id");
++			return typeof id === "string" && id ? id : null;
++		} catch (e) {
++			return null;
++		}
++	};
++	const pending = [];
++	for (const j of residue) {
++		const n = news[j];
++		let found = -1;
++		for (let i = 0; i < loroSpan; i++) {
++			if (used.has(i)) continue;
++			if (eqLoroObjNode(olds[i], n)) {
++				if (found !== -1) { found = -2; break; }
++				found = i;
++			}
++		}
++		if (found >= 0) { used.add(found); matchOf[j] = found; } else pending.push(j);
++	}
++	if (pending.length) {
++		const oldIds = new Map();
++		for (let i = 0; i < loroSpan; i++) {
++			if (used.has(i)) continue;
++			const id = loroHeadId(olds[i]);
++			if (id) oldIds.set(id, oldIds.has(id) ? -1 : i);
++		}
++		const newIds = new Map();
++		for (const j of pending) {
++			const id = headId(news[j]);
++			if (id) newIds.set(id, newIds.has(id) ? -1 : j);
++		}
++		for (const j of pending.slice()) {
++			const id = headId(news[j]);
++			if (!id || newIds.get(id) !== j) continue;
++			const i = oldIds.get(id);
++			if (i === undefined || i < 0 || used.has(i) || !eqNodeName(olds[i], news[j])) continue;
++			used.add(i); matchOf[j] = i; pending.splice(pending.indexOf(j), 1);
++		}
++	}
++	if (pending.length) {
++		const scored = [];
++		for (const j of pending) {
++			for (let i = 0; i < loroSpan; i++) {
++				if (used.has(i) || !eqNodeName(olds[i], news[j])) continue;
++				const f = computeChildEqualityFactor(olds[i], news[j], mapping);
++				const score = (f.foundMappedChild ? 1000 : 0) + f.factor;
++				if (score > 0) scored.push({ j, i, score });
++			}
++		}
++		scored.sort((a, b) => b.score - a.score);
++		const takenJ = new Set();
++		for (let k = 0; k < scored.length; k++) {
++			const c = scored[k];
++			if (takenJ.has(c.j) || used.has(c.i)) continue;
++			// A tie for this PM child among unused candidates is ambiguous: skip it.
++			const tie = scored.some((o, m) => m !== k && o.j === c.j && !used.has(o.i) && o.score === c.score);
++			if (tie) { takenJ.add(c.j); continue; }
++			used.add(c.i); matchOf[c.j] = c.i; takenJ.add(c.j);
++		}
++	}
++	// d. Positional pairing by node type for whatever is still unmatched —
++	//    upstream's own rule (an index-aligned child of the same type is
++	//    updated in place). Monotone so relative order is kept; this is
++	//    what keeps a paragraph's or head's identity through ordinary
++	//    typing, which the tiers above cannot see as "the same".
++	{
++		let i = 0;
++		for (let j = 0; j < nodeSpan; j++) {
++			if (matchOf[j] >= 0) continue;
++			while (i < loroSpan && (used.has(i) || !eqNodeName(olds[i], news[j]))) i++;
++			if (i >= loroSpan) break;
++			used.add(i); matchOf[j] = i; i++;
++		}
++	}
++	// 1. Containers with no PM counterpart go (descending keeps indexes valid).
++	for (let i = loroSpan - 1; i >= 0; i--) {
++		if (used.has(i)) continue;
++		const doomed = loroChildren.get(left + i);
++		if (isContainer(doomed)) mapping.delete(doomed.id);
++		loroChildren.delete(left + i, 1);
++	}
++	// 2. Survivors into PM order: settle the prefix with identity-preserving
++	//    moves (delete-then-insert index semantics, k > t always).
++	const cur = [];
++	for (let i = 0; i < loroSpan; i++) if (used.has(i)) cur.push(i);
++	const target = matchOf.filter((i) => i >= 0);
++	for (let t = 0; t < target.length; t++) {
++		if (cur[t] === target[t]) continue;
++		const k = cur.indexOf(target[t], t + 1);
++		if (k < 0) continue; // impossible (target is a permutation of cur); never corrupt
++		loroChildren.move(left + k, left + t);
++		cur.splice(k, 1);
++		cur.splice(t, 0, target[t]);
++	}
++	// 3. New PM children at their final positions (ascending: everything
++	//    before index j is already in place).
++	for (let j = 0; j < nodeSpan; j++) {
++		if (matchOf[j] >= 0) continue;
++		createLoroChild(loroChildren, left + j, news[j], mapping);
++	}
++	// 4. Matched containers updated in place — attrs, children, identity kept.
++	for (let j = 0; j < nodeSpan; j++) {
++		if (matchOf[j] < 0) continue;
++		updateLoroMap(loroChildren.get(left + j), news[j], mapping);
++	}
++	return true;
  }
  function updateLoroMapChildren(obj, node, mapping) {
  	const loroChildren = getLoroMapChildren(obj);
-@@ -257,6 +687,24 @@ function updateLoroMapChildren(obj, node, mapping) {
+@@ -257,6 +869,26 @@ function updateLoroMapChildren(obj, node, mapping) {
  			if (!Array.isArray(rightNode)) updateLoroMap(rightLoro, rightNode, mapping);
  		} else break;
  	}
@@ -1300,11 +1666,13 @@ index e41095d..87f4f89 100644
 +			}
 +			return;
 +		}
++		// Not a pure permutation: keep every identifiable container anyway.
++		if (cardmirrorReconcileMovable(loroChildren, nodeChildren, left, right, loroChildLength, nodeChildLength, mapping)) return;
 +	}
  	while (loroChildLength - left - right > 0 && nodeChildLength - left - right > 0) {
  		const leftLoro = loroChildren.get(left);
  		const leftNode = nodeChildren[left];
-@@ -421,27 +869,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
+@@ -421,27 +1053,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
  	for (const [peer, cursor] of Object.entries(all)) {
  		if (peer === thisPeer) continue;
  		if (!cursor.anchor || !cursor.focus) continue;
@@ -1353,7 +1721,7 @@ index e41095d..87f4f89 100644
  	}
  	return DecorationSet.create(state.doc, d);
  }
-@@ -505,7 +955,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
+@@ -505,7 +1139,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
  	}
  	while (loroNode != null) {
  		const children = loroNode.get(CHILDREN_KEY);
@@ -1362,7 +1730,7 @@ index e41095d..87f4f89 100644
  			const childIds = children.toArray();
  			for (const iter of childIds) {
  				if (iter.id === targetChildId) break;
-@@ -586,6 +1036,23 @@ const LoroSyncPlugin = (props) => {
+@@ -586,6 +1220,23 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -1386,7 +1754,7 @@ index e41095d..87f4f89 100644
  				return state;
  			}
  		},
-@@ -649,14 +1116,72 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -649,14 +1300,72 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);

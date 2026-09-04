@@ -21,6 +21,15 @@ see `DETAILED_CHANGELOG.md`.
 
 ### Fixed
 
+- **Co-editing: undo can no longer delete a partner's typing.** Undoing
+  an Enter-in-tag, a card insert, or a card paste while a partner had
+  already typed into the new card used to remove the card and their
+  text with it, silently. Such an undo is now reversed on the spot with
+  a note; undoing your own untouched edits works as before.
+- **Co-editing: moves and splits keep cards' identities.** When a card
+  was moved or split while a partner edited it, the sync layer could
+  rebuild the card, orphaning the partner's edit (lost text) or leaving
+  two copies. Cards now keep their identity through those merges.
 - **The Send pill scrolls while you drag.** Long recipient lists were
   unreachable past the first screenful during a drag; holding the
   dragged card near the top or bottom of the list now scrolls it.
