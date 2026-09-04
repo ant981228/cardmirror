@@ -16,7 +16,8 @@
  */
 
 import type { EditorView } from 'prosemirror-view';
-import { LoroUndoPlugin, loroSyncPluginKey, loroUndoPluginKey, undo as loroUndo, redo as loroRedo } from 'loro-prosemirror';
+import { LoroUndoPlugin, loroSyncPluginKey, loroUndoPluginKey } from 'loro-prosemirror';
+import { createUndoGuard } from './undo-guard.js';
 import { settings } from '../settings.js';
 import { showToast } from '../toast.js';
 import { surfaceError } from '../error-surface.js';
@@ -127,6 +128,8 @@ interface ActiveSession {
   lastStatus: { connected: boolean; queuedUpdates: number } | null;
   offlineSince: number | null;
   offlineTimer: ReturnType<typeof setTimeout> | null;
+  /** Container-safe undo ledger (undo-guard.ts); disposed at teardown. */
+  undoGuardDispose: () => void;
 }
 
 const sessions = new Map<string, ActiveSession>();
@@ -516,6 +519,7 @@ function installSeams(
     lastStatus: null,
     offlineSince: null,
     offlineTimer: null,
+    undoGuardDispose: () => undoGuard.dispose(),
   };
   sessions.set(ownerUid, sess);
   // Cross-window live-session claim: while this session is live, other
@@ -526,6 +530,17 @@ function installSeams(
   claimRoom(session.roomId);
   // A session just appeared — repaint slot footers (this doc's may be visible).
   notifyCollabCopresenceChange();
+  const undoManager = new UndoManager(session.loroDoc, {
+    excludeOriginPrefixes: [COMMENTS_COMMIT_ORIGIN, META_COMMIT_ORIGIN],
+  });
+  // Container-safe undo: an undo/redo that would delete a container a
+  // partner edited since is reversed and explained (see undo-guard.ts).
+  const undoGuard = createUndoGuard({
+    doc: session.loroDoc,
+    undoManager,
+    getView: () => (deps.getViewForUid?.(ownerUid) ?? null) ?? deps.getView(),
+    onBlocked: (message) => showToast(message),
+  });
   registerCollabPluginSource({
     ownerUid,
     plugins: () => [
@@ -536,12 +551,8 @@ function installSeams(
       // comments/replies session-wide when a comment op sat on top of it
       // (audit find, 2026-07-10). The plugin still adds 'sys:init' and wires
       // its own cursor-restore hooks onto this manager.
-      LoroUndoPlugin({
-        doc: session.loroDoc,
-        undoManager: new UndoManager(session.loroDoc, {
-          excludeOriginPrefixes: [COMMENTS_COMMIT_ORIGIN, META_COMMIT_ORIGIN],
-        }),
-      }),
+      LoroUndoPlugin({ doc: session.loroDoc, undoManager }),
+      undoGuard.plugin,
       collabInvariantHealPlugin(),
       // Inserter-intent for the read layers: strips highlight/underline/
       // emphasis/shading inherited by text whose typist never saw the
@@ -558,9 +569,9 @@ function installSeams(
     // undo transactions carry the binding meta (→ sync-origin) and would
     // otherwise sail through the read-mode lock and revert real edits.
     undo: (state, dispatch, view) =>
-      readModePlugin.getState(state)?.on ? true : loroUndo(state, dispatch, view),
+      readModePlugin.getState(state)?.on ? true : undoGuard.undo(state, dispatch, view),
     redo: (state, dispatch, view) =>
-      readModePlugin.getState(state)?.on ? true : loroRedo(state, dispatch, view),
+      readModePlugin.getState(state)?.on ? true : undoGuard.redo(state, dispatch, view),
   });
   return sess;
 }
@@ -580,6 +591,7 @@ function teardownSession(sess: ActiveSession, keepRecord = false): Promise<void>
   // the End/Leave/close paths that already stopped are unaffected.
   sess.cursors.farewell(); // departure frame needs the stream — before stop()
   if (sess.offlineTimer !== null) clearTimeout(sess.offlineTimer);
+  sess.undoGuardDispose();
   clearNotice('collab-offline');
   clearNotice('collab-send-stuck');
   void sess.session.stop().catch(() => {});
