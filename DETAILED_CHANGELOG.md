@@ -5,6 +5,125 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## 1.7.0 — 2026-09-04
+
+### Added: choose which machine to unlink (seat picker)
+
+A membership carries two machine seats. Linking a third used to evict
+the least-recently-renewed seat with a yes/no confirm — which, for a
+member who set up a laptop, a desktop and then a school machine, was
+usually the machine they use most. The relay's seat-limit refusal now
+carries the machines already linked (a device label the client reports
+at link and refreshes on every renewal, the link date, and last
+activity), and the client's Settings → Collaboration flow shows them as
+a route-style list: pick the one to unlink, or cancel. The retry names
+the chosen seat; if that seat vanished in between (unlinked from its
+own machine, or evicted by a parallel link), the relay refuses again
+with a fresh list rather than guessing. The web client offers the same
+pick. Older clients keep working against the new relay — the legacy
+"would evict" field is still sent, and a retry without a named target
+still evicts the oldest. The relay side of this went live on 2026-09-04
+ahead of the client.
+
+Two adjacent seat fixes ride along. Regenerating a pairing code now
+releases the old code's seat first (its identity row was left held, so
+a regenerated machine's re-link counted as a THIRD machine and pushed
+out one you still use). And a machine whose renewal the relay refuses
+backs off — the client used to retry every few minutes for the life of
+the process, which showed up in relay logs as a steady stream of 403s
+from lapsed or unlinked machines.
+
+Server-side, and independent of the client build: a membership that
+lapses and later re-subscribes recovers its linked machines without
+re-linking. Ghost now notifies the relay on member edits and deletions
+(the relay's seat-eviction state is left alone by those notifications;
+an earlier handler would have resurrected evicted seats), so the next
+renewal after re-subscribing succeeds on its own.
+
+### Added: Send to Recipient
+
+Send to Starred sends the focused card or selection to the starred
+contact. Send to Recipient is its keyboard sibling for everyone else:
+it lists contacts and groups (type to filter), then sends the same
+payload through the same path. Unbound by default; run it from the
+command bar or bind a key in Keyboard settings.
+
+### Fixed: the Send pill scrolls during a drag
+
+Dragging a card onto the Send pill opens the recipient list, but a
+native drag never fires scroll events, so any recipient past the first
+screenful was unreachable. Holding the drag near the top or bottom
+edge now scrolls the list on a frame loop and re-dispatches the hit
+test as it moves, so the highlighted target follows the pointer.
+
+### Fixed: co-editing — undo can no longer delete a partner's typing
+
+Undo in a shared session is per-author, but a container is not: undo
+your Enter-in-tag, card insert or card paste after a partner had
+already typed into the card it created, and the card went away with
+their text inside it, silently, on every peer. Undo/redo now run
+through a guard that keeps a ledger of containers a partner has touched
+(from the sync layer's import events; your own later edits clear a
+mark). After each undo it checks which heading ids left the document;
+if any of them is partner-touched, it reverses the undo on the spot and
+shows a note. Undoing your own untouched edits is unchanged, and the
+check is a microtask, not a keystroke cost. The chaos rig described
+below drove this: the mechanism is deterministic, not a race.
+
+### Fixed: co-editing — moves and splits keep cards' identities
+
+When a card was moved or split while a partner was editing it, the sync
+layer could fail to recognise the moved card as the same container and
+rebuild it from scratch: a delete plus a fresh insert. The partner's
+concurrent edit was addressed to the deleted container and vanished, or
+their copy of the card survived alongside the rebuilt one. The binding
+now reconciles a rebuilt container against the existing one in tiers —
+equality, then a unique heading id, then text similarity, then
+positional pairing of the same type — and reuses the existing
+identity, so a move stays a move and a split keeps the first half.
+
+### Fixed: co-editing — typed text no longer tears under a concurrent split or delete
+
+The root cause behind most of the "lost a few characters" reports from
+shared sessions. The sync layer turned every local edit into CRDT
+operations by diffing the paragraph's before and after strings: common
+prefix, common suffix, replace the middle. When the text you typed
+began or ended with the same letters as its neighbour, the diff reused
+part of the neighbour as "your" text and inserted a different slice as
+new — visually identical, but the character identities were shuffled.
+A partner splitting or deleting that neighbour at the same moment then
+took a piece of your word with it, and the merge converged on the
+damage. Deterministic reproduction: insert "«tk16» " before "«tk3»"
+while a partner splits before "«tk3»" and you get "16» «tk" in one
+paragraph and "«tk3» end" in the other. In prose that is any word
+sharing its first or last letters with the next or previous one.
+
+The ProseMirror transaction already says what changed, so the binding
+now records each inline replace and each split per final paragraph and
+applies them as exact delete/insert operations. A replace is first
+trimmed to its changed middle WITHIN its own range — a command that
+rewrites a whole tag head to drop the first word is a prefix delete,
+and treating it literally would re-mint the kept tail on every peer
+that runs it — and that bounded trim is the only place existing
+identity is reused; it can never borrow from outside the step. Block
+steps in the same batch (card inserts, moves, attribute changes) stay
+with the container diff. Anything else (marks, joins, plugin repairs)
+sends the whole batch to the old diff, and every exact result is
+replayed against the ProseMirror text before it is written, falling
+back on mismatch.
+
+Verification: a new opt-in chaos rig runs real clients against a local
+copy of the production relay through a fault-injecting proxy
+(disconnects, reconnects, delayed deliveries, concurrent moves, splits,
+duplicate pastes and undo), and an in-memory pairwise-sync fuzz runs
+alongside it. Across the campaign nothing diverged, no heading id
+duplicated and no schema-invalid document appeared; every loss traced
+to the two mechanisms fixed above. One residual is documented rather
+than hidden: two peers splitting the SAME paragraph before syncing each
+copy its tail into their own new paragraph (a split is delete-plus-copy
+in the CRDT, not a text move), so the overlap shows twice — visible,
+and a one-keystroke fix for the user, unlike a loss.
+
 ## 1.6.0 — 2026-09-01
 
 ### Added: Reading view (Word-style paginated columns)
