@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SettingsStore } from '../../src/editor/settings.js';
 import { resolveStarredTarget } from '../../src/editor/pairing/send-to-starred.js';
+import { listRecipientChoices } from '../../src/editor/pairing/send-to-recipient.js';
 import {
   filterBlockedItems,
   mergeRecentSenders,
@@ -284,5 +285,35 @@ describe('room-invite items', async () => {
 
   it('declares a real version floor (old clients must drop invites)', () => {
     expect(ROOM_INVITE_MIN_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe('listRecipientChoices (Send to Recipient picker rows)', () => {
+  it('visible contacts first, then groups, then hidden contacts; code-less contacts skipped', () => {
+    const partners = [
+      { code: 'cmk1.aaa', name: 'Alice' },
+      { code: 'cmk1.bbb', name: 'Bob', hidden: true },
+      { code: '', name: 'Nobody' },
+      { code: 'cmk1.ccc', name: '' },
+    ];
+    const groups = [{ id: 'grp-1', label: 'Squad', memberCodes: ['cmk1.aaa', 'cmk1.bbb', 'cmk1.gone'] }];
+    const rows = listRecipientChoices(partners, groups);
+    expect(rows.map((r) => `${r.kind}:${r.label}`)).toEqual([
+      'partner:Alice',
+      'partner:cmk1.ccc',
+      'group:Squad',
+      'partner:Bob',
+    ]);
+    expect(rows.find((r) => r.label === 'Bob')?.hidden).toBe(true);
+    expect(rows.find((r) => r.label === 'Squad')?.sub).toBe('Group · 2 recipients');
+  });
+
+  it('a picked row resolves through the same target resolver as Send to Starred', () => {
+    const partners = [{ code: 'cmk1.aaa', name: 'Alice', hidden: true }];
+    const row = listRecipientChoices(partners, [])[0]!;
+    expect(resolveStarredTarget({ kind: row.kind, ref: row.ref }, partners, [])).toEqual({
+      codes: ['cmk1.aaa'],
+      label: 'Alice',
+    });
   });
 });

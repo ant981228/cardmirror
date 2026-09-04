@@ -35,6 +35,7 @@ export const RIBBON_GROUPS: RibbonGroup[] = [
     commands: [
       'sendToDropzone',
       'sendToStarred',
+      'sendToRecipient',
       'insertReceivedAtCursor',
       'insertReceivedAtEnd',
     ],

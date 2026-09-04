@@ -11012,7 +11012,8 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
    Cross-window doc picker for the speech-doc designation. Gold
    accents on the header + current-speech-doc row stay consistent
    with the `--pmd-c-speech-*` tokens used by the speech banner. */
-.pmd-select-speech-overlay {
+.pmd-select-speech-overlay,
+.pmd-list-pick-overlay {
   position: fixed;
   inset: 0;
   background: var(--pmd-c-shadow-fade);
@@ -11021,7 +11022,8 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   justify-content: center;
   z-index: 1000;
 }
-.pmd-select-speech-dialog {
+.pmd-select-speech-dialog,
+.pmd-list-pick-dialog {
   background: var(--pmd-c-bg);
   border-radius: 8px;
   box-shadow: 0 8px 32px var(--pmd-c-shadow-deep);
@@ -11032,7 +11034,8 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   flex-direction: column;
   font-family: var(--pmd-ui-font);
 }
-.pmd-select-speech-header {
+.pmd-select-speech-header,
+.pmd-list-pick-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -11042,12 +11045,14 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   color: var(--pmd-c-speech-text);
   flex: 0 0 auto;
 }
-.pmd-select-speech-header h2 {
+.pmd-select-speech-header h2,
+.pmd-list-pick-header h2 {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
 }
-.pmd-select-speech-close {
+.pmd-select-speech-close,
+.pmd-list-pick-close {
   background: transparent;
   border: none;
   font-size: 1.4rem;
@@ -11056,15 +11061,18 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   color: inherit;
   padding: 0 0.4rem;
 }
-.pmd-select-speech-close:hover { opacity: 0.7; }
-.pmd-select-speech-intro {
+.pmd-select-speech-close:hover,
+.pmd-list-pick-close:hover { opacity: 0.7; }
+.pmd-select-speech-intro,
+.pmd-list-pick-intro {
   margin: 0;
   padding: 0.75rem 1rem 0.25rem;
   font-size: 0.85rem;
   color: var(--pmd-c-text-muted);
   flex: 0 0 auto;
 }
-.pmd-select-speech-list {
+.pmd-select-speech-list,
+.pmd-list-pick-list {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 0.25rem 0.5rem 0.75rem;
@@ -11072,12 +11080,14 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   flex-direction: column;
   gap: 2px;
 }
-.pmd-select-speech-empty {
+.pmd-select-speech-empty,
+.pmd-list-pick-empty {
   margin: 1rem;
   color: var(--pmd-c-text-muted);
   font-size: 0.9rem;
 }
-.pmd-select-speech-row {
+.pmd-select-speech-row,
+.pmd-list-pick-row {
   appearance: none;
   background: transparent;
   border: 1px solid transparent;
@@ -11091,30 +11101,51 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   text-align: left;
   color: var(--pmd-c-text);
 }
-.pmd-select-speech-row:hover {
+.pmd-select-speech-row:hover,
+.pmd-list-pick-row:hover {
   background: var(--pmd-c-hover);
 }
 
+.pmd-list-pick-filter {
+  margin: 0.25rem 1rem 0.25rem;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--pmd-c-text);
+  background: var(--pmd-c-bg);
+  border: 1px solid var(--pmd-c-border);
+  border-radius: 6px;
+}
+.pmd-list-pick-row:focus-visible {
+  outline: 2px solid var(--pmd-c-accent);
+  outline-offset: -2px;
+}
+.pmd-list-pick-row-muted .pmd-list-pick-row-name {
+  color: var(--pmd-c-text-muted);
+}
 .pmd-select-speech-row-indicator {
   flex: 0 0 1.25rem;
   text-align: center;
   font-size: 1rem;
   line-height: 1;
 }
-.pmd-select-speech-row-text {
+.pmd-select-speech-row-text,
+.pmd-list-pick-row-text {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
-.pmd-select-speech-row-name {
+.pmd-select-speech-row-name,
+.pmd-list-pick-row-name {
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pmd-select-speech-row-sub {
+.pmd-select-speech-row-sub,
+.pmd-list-pick-row-sub {
   font-size: 0.78rem;
   color: var(--pmd-c-text-muted);
   white-space: nowrap;

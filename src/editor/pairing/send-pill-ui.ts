@@ -106,8 +106,36 @@ export function bundleSendItems(items: CapturedItem[]): SendItem[] {
   ];
 }
 
+/** Edge-band autoscroll: how far a scrollable list should move this
+ *  frame for a pointer at `pointerY` over `rect`. Zero outside the top
+ *  and bottom bands; inside a band the step grows linearly toward the
+ *  edge (up to `maxStep` px), negative = scroll up. Pure, for tests. */
+export function edgeAutoscrollStep(
+  pointerY: number,
+  rect: { top: number; bottom: number },
+  band = AUTOSCROLL_BAND_PX,
+  maxStep = AUTOSCROLL_MAX_STEP_PX,
+): number {
+  if (rect.bottom - rect.top <= band * 2) return 0; // too short to have distinct bands
+  if (pointerY < rect.top || pointerY > rect.bottom) return 0;
+  const fromTop = pointerY - rect.top;
+  const fromBottom = rect.bottom - pointerY;
+  if (fromTop < band) return -Math.ceil(((band - fromTop) / band) * maxStep);
+  if (fromBottom < band) return Math.ceil(((band - fromBottom) / band) * maxStep);
+  return 0;
+}
+const AUTOSCROLL_BAND_PX = 28;
+const AUTOSCROLL_MAX_STEP_PX = 14;
+
 export class SendPillController {
   private root!: HTMLDivElement;
+  /** Drag autoscroll: the list under the pointer and the last pointer
+   *  position, while the pointer sits in an edge band. The list is
+   *  capped at 320px, so a long recipient list was unreachable past the
+   *  first screenful during a drag — nothing scrolled (field report,
+   *  2026-09-04). Driven from hitTest (every pointermove) and kept
+   *  alive by a frame loop while the pointer rests in the band. */
+  private autoscroll: { el: HTMLElement; x: number; y: number; timer: number | null } | null = null;
   private bar!: HTMLDivElement;
   private panel!: HTMLDivElement;
   private surface: DragSurface | null = null;
@@ -189,6 +217,7 @@ export class SendPillController {
           }
         }
         if (!inside) return null;
+        this.updateAutoscroll(clientX, clientY);
         // Hovering the pill: it becomes the winning surface (dy 0). Once
         // expanded, resolve which target row the pointer is over.
         if (this.expanded) {
@@ -649,6 +678,71 @@ export class SendPillController {
     }
   }
 
+  /** Start, retarget, or stop the edge-band autoscroll for the pointer
+   *  at (x, y): the recent-senders flyout when the pointer is over it,
+   *  else the panel. Called from hitTest; the frame loop re-runs the
+   *  controller's hit test after every step so the highlighted row
+   *  follows the content moving under a stationary pointer. */
+  private updateAutoscroll(x: number, y: number): void {
+    if (!this.expanded) {
+      this.stopAutoscroll();
+      return;
+    }
+    let el: HTMLElement | null = null;
+    if (this.recentSection && !this.recentSection.hidden && pointInRect(this.recentSection.getBoundingClientRect(), x, y)) {
+      el = this.recentSection;
+    } else if (pointInRect(this.panel.getBoundingClientRect(), x, y)) {
+      el = this.panel;
+    }
+    if (!el || edgeAutoscrollStep(y, el.getBoundingClientRect()) === 0) {
+      this.stopAutoscroll();
+      return;
+    }
+    if (this.autoscroll && this.autoscroll.el === el) {
+      this.autoscroll.x = x;
+      this.autoscroll.y = y;
+      return;
+    }
+    this.stopAutoscroll();
+    this.autoscroll = { el, x, y, timer: null };
+    this.scheduleAutoscrollFrame();
+  }
+
+  private scheduleAutoscrollFrame(): void {
+    const state = this.autoscroll;
+    if (!state) return;
+    const raf: (cb: () => void) => number =
+      typeof requestAnimationFrame === 'function'
+        ? (cb) => requestAnimationFrame(cb)
+        : (cb) => setTimeout(cb, 16) as unknown as number;
+    state.timer = raf(() => {
+      state.timer = null;
+      if (this.autoscroll !== state || !this.expanded) return;
+      const step = edgeAutoscrollStep(state.y, state.el.getBoundingClientRect());
+      const before = state.el.scrollTop;
+      const max = Math.max(0, state.el.scrollHeight - state.el.clientHeight);
+      const next = Math.min(max, Math.max(0, before + step));
+      if (step === 0 || next === before) {
+        this.stopAutoscroll();
+        return;
+      }
+      state.el.scrollTop = next;
+      // Content moved under a resting pointer: re-resolve the hovered row.
+      dragController.dispatchHit(state.x, state.y);
+      if (this.autoscroll === state) this.scheduleAutoscrollFrame();
+    });
+  }
+
+  private stopAutoscroll(): void {
+    const state = this.autoscroll;
+    if (!state) return;
+    this.autoscroll = null;
+    if (state.timer !== null) {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(state.timer);
+      clearTimeout(state.timer);
+    }
+  }
+
   private expand(): void {
     if (this.expanded) return;
     this.expanded = true;
@@ -672,6 +766,7 @@ export class SendPillController {
     }
     this.expanded = false;
     this.root.dataset['open'] = 'false';
+    this.stopAutoscroll();
     this.clearRowHighlight();
     this.setRecentVisible(false);
     this.applyDragZoneLabels(false);

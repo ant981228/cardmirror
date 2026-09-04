@@ -4376,6 +4376,7 @@ export type RibbonCommandId =
   | 'checkLiveZoneSources'
   | 'detachLiveZone'
   | 'sendToStarred'
+  | 'sendToRecipient'
   | 'insertReceivedAtCursor'
   | 'insertReceivedAtEnd'
   // Select / copy the cursor's enclosing structure (the current card /
@@ -4608,6 +4609,7 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'checkLiveZoneSources',
   'detachLiveZone',
   'sendToStarred',
+  'sendToRecipient',
   'insertReceivedAtCursor',
   'insertReceivedAtEnd',
   'selectCurrentHeading',
@@ -4792,6 +4794,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   checkLiveZoneSources: 'Check Linked Copy Sources for Updates',
   detachLiveZone: 'Unlink Copy',
   sendToStarred: 'Send to Starred Recipient',
+  sendToRecipient: 'Send to Recipient…',
   insertReceivedAtCursor: 'Insert Received Card (At Cursor)',
   insertReceivedAtEnd: 'Insert Received Card (At End)',
   selectCurrentHeading: 'Select Current Heading',
@@ -4878,6 +4881,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
  * Keep entries lowercase. Only commands that need an alias appear here.
  */
 export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly string[]>> = {
+  sendToRecipient: ['send to contact', 'send card to', 'pick recipient', 'send to group'],
   minimizeWindow: ['minimize', 'hide window', 'window menu'],
   openJournalsFolder: ['crash', 'recovery', 'journal', 'restore', 'lost work', 'autosave folder'],
   toggleMorphMode: ['morph', 'sensel', 'control surface', 'jog wheel', 'overlay'],
@@ -5151,6 +5155,7 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   sendToSpeechAtEnd: 'Alt-`',
   sendToDropzone: 'Mod-`',
   sendToStarred: '',
+  sendToRecipient: '',
   insertReceivedAtCursor: 'Mod-p',
   insertReceivedAtEnd: 'Mod-Alt-p',
   selectCurrentHeading: 'Alt-a',
@@ -5388,6 +5393,9 @@ export interface RibbonContext {
   insertInDocCopy: () => void;
   /** Send the cursor's card (or selection) to the starred recipient/group. */
   sendToStarred: () => void;
+  /** Same source as sendToStarred; the target is picked from a list of
+   *  contacts and groups. */
+  sendToRecipient: () => void;
   /** Insert the most-recently-received card (from the receive pill) into the
    *  active doc — at the cursor, or at the end of the doc. */
   insertReceivedAtCursor: () => void;
@@ -5547,6 +5555,7 @@ const DEFAULT_RIBBON_CONTEXT: RibbonContext = {
   insertSelfLiveZone: () => {},
   insertInDocCopy: () => {},
   sendToStarred: () => {},
+  sendToRecipient: () => {},
   insertReceivedAtCursor: () => {},
   insertReceivedAtEnd: () => {},
   sendToSpeechAtEnd: () => {},
@@ -6134,6 +6143,12 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
         if (!dispatch) return true;
         const sel = selectedTransclusion(view ? view.state.selection : state.selection);
         if (view && sel) detachZoneAtPos(view, sel.pos);
+        return true;
+      };
+    case 'sendToRecipient':
+      return (_state, dispatch) => {
+        if (!dispatch) return true;
+        ctx.sendToRecipient();
         return true;
       };
     case 'sendToStarred':

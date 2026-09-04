@@ -1252,7 +1252,9 @@ drop on a row to send. Dragging a **multi-selection** (from the nav pane)
 sends everything as **one bundle**: the recipient sees a single item and
 takes the whole set at once. **Send to Starred** sends the card under the
 cursor (or the current selection) to your starred target without opening
-the pill.
+the pill; **Send to Recipient** (unbound by default — run it from the
+command bar or give it a key) does the same but asks which contact or
+group to send to first.
 
 The pill's bottom row does more than send. **Clicking** the pill opens it
 with two buttons there: **Add contact** (paste a pairing code, name them,

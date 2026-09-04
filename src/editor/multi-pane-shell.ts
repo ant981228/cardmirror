@@ -122,6 +122,7 @@ import {
   sendViewToDropzone,
 } from './index.js';
 import { sendViewToStarred } from './pairing/send-to-starred.js';
+import { sendViewToRecipient } from './pairing/send-to-recipient.js';
 import { isSyncOrigin } from './sync-origin.js';
 import { editorNodeViews } from './image-resize-nodeview.js';
 import { coordinatorBlocks, flashLockedLeases } from './ai/edit-coordinator.js';
@@ -2908,6 +2909,14 @@ class MultiPaneShell {
     void sendViewToStarred(sourceRec.view);
   }
 
+  /** Send to Recipient for the focused pane (picker, then the same
+   *  source as sendToStarred). */
+  sendToRecipient(): void {
+    const sourceRec = this.focusedSlot?.visible;
+    if (!sourceRec) return;
+    void sendViewToRecipient(sourceRec.view);
+  }
+
   /** Send the focused pane's selection (or its enclosing heading-
    *  and-content range if the selection is empty) into the speech
    *  doc. `atEnd` controls the insertion point — true → after the
@@ -3377,6 +3386,7 @@ export function mountMultiPaneShell(): void {
     sendToSpeechAtEnd: () => shell!.sendToSpeech(true),
     sendToDropzone: () => shell!.sendToDropzone(),
     sendToStarred: () => shell!.sendToStarred(),
+    sendToRecipient: () => shell!.sendToRecipient(),
     getFocusedFilename: () => shell!.getFocusedFilename(),
     setFocusedFilename: (name) => shell!.setFocusedFilename(name),
     getFocusedFile: () => shell!.getFocusedFile(),

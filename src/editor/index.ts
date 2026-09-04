@@ -58,6 +58,7 @@ import { mountPairingPills, initPairingWiring } from './pairing/pairing-wiring.j
 import {
   setReceivedInsertNavHook, insertMostRecentReceived, RECEIVE_NEEDS_DOC_MESSAGE } from './pairing/inbox-insert.js';
 import { sendViewToStarred } from './pairing/send-to-starred.js';
+import { sendViewToRecipient } from './pairing/send-to-recipient.js';
 import { installExternalConsent } from './external-consent-ui.js';
 import { maybeSnapshotVersion } from './version-history.js';
 import { awaitWithSaveWatchdog, warnIfSlow } from './save-watchdog.js';
@@ -997,6 +998,7 @@ let multiDocSendToSpeechAtCursor: (() => void) | null = null;
 let multiDocSendToSpeechAtEnd: (() => void) | null = null;
 let multiDocSendToDropzone: (() => void) | null = null;
 let multiDocSendToStarred: (() => void) | null = null;
+let multiDocSendToRecipient: (() => void) | null = null;
 /** Filename plumbing for Save-As. In single-doc mode the module's
  *  `currentDocFilename` is the source of truth; in multi-doc each
  *  pane owns its own filename, so the shell installs these hooks
@@ -1108,6 +1110,7 @@ export function enableMultiDocMode(opts: {
   sendToSpeechAtEnd?: () => void;
   sendToDropzone?: () => void;
   sendToStarred?: () => void;
+  sendToRecipient?: () => void;
   getFocusedFilename?: () => string | null;
   setFocusedFilename?: (name: string) => void;
   getFocusedFile?: () => {
@@ -1174,6 +1177,7 @@ export function enableMultiDocMode(opts: {
   multiDocSendToSpeechAtEnd = opts.sendToSpeechAtEnd ?? null;
   multiDocSendToDropzone = opts.sendToDropzone ?? null;
   multiDocSendToStarred = opts.sendToStarred ?? null;
+  multiDocSendToRecipient = opts.sendToRecipient ?? null;
   multiDocGetFocusedFilename = opts.getFocusedFilename ?? null;
   multiDocSetFocusedFilename = opts.setFocusedFilename ?? null;
   multiDocGetFocusedFile = opts.getFocusedFile ?? null;
@@ -1989,6 +1993,13 @@ const ribbonContext: RibbonContext = {
       return;
     }
     if (view) void sendViewToStarred(view);
+  },
+  sendToRecipient: () => {
+    if (multiDocSendToRecipient) {
+      multiDocSendToRecipient();
+      return;
+    }
+    if (view) void sendViewToRecipient(view);
   },
   insertReceivedAtCursor: () => {
     // The home screen covers the destination doc — same interdiction as

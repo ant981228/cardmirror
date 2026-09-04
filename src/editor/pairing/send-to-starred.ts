@@ -45,12 +45,23 @@ export async function sendViewToStarred(view: EditorView): Promise<void> {
     settings.get('pairingGroups'),
   );
   if (!target) return; // nothing starred (or the starred target was deleted) → no-op
+  await sendViewTo(view, target, 'The starred group has no recipients yet');
+}
+
+/** Shared tail of the keyboard send commands (Send to Starred, Send to
+ *  Recipient): the same source as Send to Dropzone, routed to the relay
+ *  with the Send pill's payload shape. */
+export async function sendViewTo(
+  view: EditorView,
+  target: { codes: string[]; label: string; via?: string },
+  emptyGroupMessage = 'That group has no recipients yet',
+): Promise<void> {
   if (!settings.get('pairingEnabled')) {
     showToast('Card sharing is off');
     return;
   }
   if (target.codes.length === 0) {
-    showToast('The starred group has no recipients yet');
+    showToast(emptyGroupMessage);
     return;
   }
   const slice = takeSendSlice(view);

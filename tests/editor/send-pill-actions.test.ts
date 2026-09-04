@@ -16,7 +16,8 @@ vi.mock('../../src/editor/pairing/inbox-store.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/editor/toast.js', () => ({ showToast: vi.fn() }));
 
-import { SendPillController, bundleSendItems } from '../../src/editor/pairing/send-pill-ui.js';
+import { SendPillController, bundleSendItems, edgeAutoscrollStep } from '../../src/editor/pairing/send-pill-ui.js';
+import { dragController } from '../../src/editor/drag-controller.js';
 import { Slice, Fragment } from 'prosemirror-model';
 import { schema, newHeadingId } from '../../src/schema/index.js';
 import { settings } from '../../src/editor/settings.js';
@@ -259,5 +260,61 @@ describe('multi-selection bundling', () => {
     ])[0]!;
     expect(inboxItemCardCount({ sliceJson: single.sliceJson })).toBe(1);
     expect(inboxItemCardCount({ sliceJson: null })).toBe(1); // malformed → plain
+  });
+});
+
+describe('drag autoscroll over the send pill (field report 2026-09-04)', () => {
+  it('edgeAutoscrollStep: zero mid-list, grows toward the edges, negative at the top', () => {
+    const rect = { top: 100, bottom: 400 };
+    expect(edgeAutoscrollStep(250, rect)).toBe(0);
+    expect(edgeAutoscrollStep(50, rect)).toBe(0); // outside
+    expect(edgeAutoscrollStep(399, rect)).toBeGreaterThan(edgeAutoscrollStep(380, rect));
+    expect(edgeAutoscrollStep(380, rect)).toBeGreaterThan(0);
+    expect(edgeAutoscrollStep(101, rect)).toBeLessThan(0);
+    expect(edgeAutoscrollStep(150, { top: 100, bottom: 140 })).toBe(0); // too short for bands
+  });
+
+  it('a pointer resting in the bottom band scrolls the expanded list frame after frame and re-hit-tests', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    try {
+      settings.set(
+        'pairingPartners',
+        Array.from({ length: 30 }, (_, i) => ({ code: `cmk1.p${i}`, name: `Partner ${i}` })),
+      );
+      const { pill, root } = mountPill();
+      const panel = root.querySelector('.pmd-send-panel') as HTMLElement;
+      const bar = root.querySelector('.pmd-send-bar') as HTMLElement;
+      // jsdom has no layout: give the panel a box, a scroll range, and a live scrollTop.
+      panel.getBoundingClientRect = () => ({ top: 100, bottom: 400, left: 0, right: 300, width: 300, height: 300, x: 0, y: 100, toJSON: () => ({}) });
+      bar.getBoundingClientRect = () => ({ top: 406, bottom: 430, left: 0, right: 120, width: 120, height: 24, x: 0, y: 406, toJSON: () => ({}) });
+      Object.defineProperty(panel, 'scrollHeight', { value: 1200, configurable: true });
+      Object.defineProperty(panel, 'clientHeight', { value: 300, configurable: true });
+      let top = 0;
+      Object.defineProperty(panel, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+      const surface = (pill as unknown as { surface: { hitTest: (x: number, y: number) => unknown; highlight: (el: HTMLElement | null) => void } }).surface;
+      const rehits = vi.spyOn(dragController, 'dispatchHit').mockImplementation(() => {});
+      // Expand (the controller does this via highlight) and rest the pointer in the bottom band.
+      surface.highlight(bar);
+      expect(surface.hitTest(150, 395)).not.toBeNull();
+      vi.advanceTimersByTime(16 * 5);
+      expect(top).toBeGreaterThan(0);
+      expect(rehits).toHaveBeenCalled();
+      const afterFive = top;
+      vi.advanceTimersByTime(16 * 5);
+      expect(top).toBeGreaterThan(afterFive);
+      // Moving to the middle of the list stops it.
+      surface.hitTest(150, 250);
+      const settled = top;
+      vi.advanceTimersByTime(16 * 5);
+      expect(top).toBe(settled);
+      // Collapse (drag end) stops it too.
+      surface.hitTest(150, 395);
+      surface.highlight(null);
+      const collapsedAt = top;
+      vi.advanceTimersByTime(16 * 5);
+      expect(top).toBe(collapsedAt);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

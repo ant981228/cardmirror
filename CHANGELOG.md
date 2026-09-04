@@ -14,8 +14,16 @@ see `DETAILED_CHANGELOG.md`.
   last active) and asks which one to unlink, instead of silently
   unlinking the oldest one — which was often the machine you use most.
 
+- **Send to Recipient.** A keyboard sibling of Send to Starred: the
+  same card or selection, but you pick the contact or group from a
+  list (type to filter). Unbound by default — run it from the command
+  bar or bind a key.
+
 ### Fixed
 
+- **The Send pill scrolls while you drag.** Long recipient lists were
+  unreachable past the first screenful during a drag; holding the
+  dragged card near the top or bottom of the list now scrolls it.
 - **Regenerating your pairing code releases its seat.** The old code's
   seat stayed held on the relay, so the regenerated machine's re-link
   could push out a machine you still use.
