@@ -126,6 +126,22 @@ describe('cut in place', () => {
     expect(v.dom.querySelectorAll(`.${CUT_PENDING_CLASS}`).length).toBe(1);
   });
 
+  it('a text selection spanning the whole card (Select Current Heading) counts as the card', async () => {
+    const v = mk('A', card('One', 'one'), card('Two', 'two'), card('Three', 'three'));
+    const pos = cardPos(v.state.doc, 'Two');
+    const node = v.state.doc.nodeAt(pos)!;
+    // From the first character of the tag to the last of the body.
+    v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, pos + 2, pos + node.nodeSize - 2)));
+    expect(fireCut(v).handled).toBe(true);
+    await flush();
+    expect(pendingCut(v.state)!.items[0]!.id).toBe(ids(v.state.doc)[1]);
+    expect(heads(v.state.doc)).toEqual(['One', 'Two', 'Three']);
+    // Leaving out the last character is a text cut, not the card.
+    fireKey(v, 'Escape');
+    v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, pos + 2, pos + node.nodeSize - 3)));
+    expect(fireCut(v).handled).toBe(false);
+  });
+
   it('a text selection, or a solo document, keeps the ordinary cut', () => {
     const v = mk('A', card('One', 'one'), card('Two', 'two'));
     caretInBody(v, 'Two');

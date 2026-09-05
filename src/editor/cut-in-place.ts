@@ -45,7 +45,7 @@
  *     moves the unit, which beats clearing the mark and pasting a copy.
  */
 
-import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
+import { Plugin, PluginKey, Selection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { DOMSerializer, Fragment, type Node as PMNode } from 'prosemirror-model';
 import { buildMoveTransaction, type DragItem } from './drag-controller.js';
@@ -128,11 +128,31 @@ export function wholeUnitRanges(state: EditorState): RangePair[] | null {
   const out: RangePair[] = [];
   for (const r of ranges) {
     if (r.to <= r.from) return null;
-    const unit = unitRangeAtPos(state.doc, r.from + 1);
-    if (!unit || unit.from !== r.from || unit.to !== r.to) return null;
-    out.push({ from: r.from, to: r.to });
+    const unit = wholeUnitFor(state.doc, r);
+    if (!unit) return null;
+    out.push(unit);
   }
   return out;
+}
+
+/** The unit a range means, when it means one: the unit's own node range
+ *  (a node selection), or a text selection that spans the unit's entire
+ *  inline content — Select Current Heading (Alt-A) and a drag from the
+ *  first to the last character both select a card that way. A range that
+ *  leaves out any of the unit's text, or reaches outside it, is not a
+ *  whole unit. */
+function wholeUnitFor(doc: PMNode, r: RangePair): RangePair | null {
+  const size = doc.content.size;
+  const unit = unitRangeAtPos(doc, Math.min(r.from + 1, size));
+  if (!unit) return null;
+  if (unit.from === r.from && unit.to === r.to) return { from: unit.from, to: unit.to };
+  if (r.from < unit.from || r.to > unit.to) return null;
+  const node = doc.nodeAt(unit.from);
+  if (!node) return null;
+  // First and last inline positions inside the unit, in document coordinates.
+  const first = Selection.atStart(node).from + unit.from + 1;
+  const last = Selection.atEnd(node).to + unit.from + 1;
+  return r.from <= first && r.to >= last ? { from: unit.from, to: unit.to } : null;
 }
 
 /** Whether cut in place is on for this view's document (a live session
@@ -141,9 +161,19 @@ export function isCutInPlaceDoc(view: EditorView): boolean {
   return !!ctx && ctx.isSessionDoc(view) && !!ctx.docKey(view);
 }
 
+const DEV = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+
 export function cutInPlaceApplies(view: EditorView): RangePair[] | null {
-  if (!ctx || !ctx.isSessionDoc(view) || !ctx.docKey(view)) return null;
-  return wholeUnitRanges(view.state);
+  if (!ctx || !ctx.isSessionDoc(view) || !ctx.docKey(view)) {
+    if (DEV) console.info(`[cut-in-place] off: ${!ctx ? 'no context' : !ctx.isSessionDoc(view) ? 'not a session document' : 'no document key'}`);
+    return null;
+  }
+  const ranges = wholeUnitRanges(view.state);
+  if (!ranges && DEV) {
+    const { ranges: ops } = getOperatingRanges(view.state);
+    console.info(`[cut-in-place] off: selection is not whole units (${ops.map((r) => `${r.from}-${r.to}`).join(', ') || 'empty'})`);
+  }
+  return ranges;
 }
 
 function clipboardPayload(view: EditorView, ranges: RangePair[], marker: string): { html: string; text: string } {
