@@ -10,6 +10,8 @@
 
 import { settings } from '../settings.js';
 import { setIcon } from '../icons';
+import { pushOverlay, popOverlay } from '../overlay-stack.js';
+import { installModalKeys, armDialogFocus, captureFocusForDialog } from '../text-prompt.js';
 import {
   CLOD_ACTIVITIES_BY_TIME,
   DEFAULT_CLOD_TIME_PERIODS,
@@ -33,6 +35,15 @@ export function openClodConfigurator(): void {
   const dialog = document.createElement('div');
   dialog.className = 'pmd-clod-dialog';
   overlay.appendChild(dialog);
+  // Register on the overlay stack and own the keyboard while open. The
+  // Settings dialog underneath runs installModalKeys too, which swallows
+  // every keystroke not aimed at ITS controls while it is the top overlay
+  // — without this registration it stayed on top and ate all typing into
+  // these fields (field report 2026-09-05; broken since the modal-key
+  // sweep of 2026-07-27). Stacked, it stands down by itself.
+  const overlayToken = pushOverlay();
+  const restoreFocus = captureFocusForDialog();
+  let removeKeys: (() => void) | null = null;
 
   // Header
   const header = document.createElement('header');
@@ -40,7 +51,13 @@ export function openClodConfigurator(): void {
   const title = document.createElement('h2');
   title.textContent = 'Customize Clod';
   header.appendChild(title);
-  const close = (): void => overlay.remove();
+  const close = (): void => {
+    removeKeys?.();
+    removeKeys = null;
+    popOverlay(overlayToken);
+    overlay.remove();
+    restoreFocus();
+  };
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'pmd-clod-close';
@@ -294,13 +311,14 @@ export function openClodConfigurator(): void {
   document.body.appendChild(overlay);
   activate('persona');
 
-  const onKey = (e: KeyboardEvent): void => {
+  removeKeys = installModalKeys(dialog, overlayToken, (e) => {
     if (e.key === 'Escape') {
-      document.removeEventListener('keydown', onKey);
       close();
+      return true;
     }
-  };
-  document.addEventListener('keydown', onKey);
+    return false;
+  });
+  armDialogFocus(dialog, 'dialog', 'Customize Clod');
 }
 
 function makeCustomField(label: string, value: string, onChange: (v: string) => void): HTMLInputElement {

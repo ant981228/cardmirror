@@ -123,6 +123,10 @@ see `DETAILED_CHANGELOG.md`.
 - **Web account renewals are single-flight** with a deadline, run on
   wake and tab focus, and no longer unlink the account when a captive
   portal answers with an HTML error.
+- **The AI persona's Customize dialog takes typing again.** Opened from
+  Settings, its fields ignored every keystroke: the Settings dialog kept
+  ownership of the keyboard because the dialog on top never registered
+  as one. It does now, and Escape closes only the dialog on top.
 - **Web: switching back to the tab no longer reconnects the session.**
   Returning to the tab restarted the live stream every time, which cost
   a reconnect, a catch-up and a presence flicker on every partner. It
