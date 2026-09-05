@@ -30,6 +30,12 @@
  * Shift+double-click and shift+triple-click are no-ops (shift
  * only modifies a single click).
  *
+ * Ctrl/Cmd (discontinuous add-to-selection) follows the same click
+ * ladder: a click adds the word, a double-click the word, a
+ * triple-click the whole paragraph; a drag adds the dragged range,
+ * snapped to whole words after a double-click and to whole
+ * paragraphs after a triple-click (`discontinuousRangeFor`).
+ *
  * The plugin tracks a module-level `currentAnchor` across
  * gestures so shift+click after a double-click extends in word
  * granularity, and shift+click after a single click follows the
@@ -164,7 +170,7 @@ function handleMousedown(view: EditorView, event: MouseEvent): boolean {
   const discontinuousMod = IS_MAC ? event.metaKey : event.ctrlKey;
   if (discontinuousMod && !event.shiftKey && !event.altKey) {
     event.preventDefault();
-    beginDiscontinuousSelect(view, clickPos);
+    beginDiscontinuousSelect(view, clickPos, detail);
     return true;
   }
 
@@ -257,12 +263,40 @@ export function createPointAnchor(view: EditorView, clickPos: number): Selection
   };
 }
 
-/** Ctrl/Cmd add-to-selection. From the pointer-down at `startPos`, track the
- *  gesture; on release add either the dragged range or (for a plain click) the
- *  word under the pointer to the discontinuous shadow selection. The set being
- *  extended is captured up front: any existing shadow matches, plus — on the
- *  FIRST such gesture — the current non-empty selection as the first range. */
-function beginDiscontinuousSelect(view: EditorView, startPos: number): void {
+/** The range a Ctrl/Cmd gesture adds to the discontinuous selection: pointer
+ *  down at `startPos` with click count `detail`, released at `endPos` (null or
+ *  `startPos` = no drag). A click adds the word under the pointer; a
+ *  triple-click the containing paragraph. A drag adds the dragged range,
+ *  snapped outward to whole words after a double-click and to whole paragraphs
+ *  after a triple-click — the same ladder as the plain gestures, minus the
+ *  anchor machinery (nothing here is ever re-anchored or reversed). The second
+ *  and third clicks of a sequence each add their own range; the shadow merge
+ *  folds the earlier word into the paragraph. Exported for tests. */
+export function discontinuousRangeFor(
+  view: EditorView,
+  startPos: number,
+  endPos: number | null,
+  detail: number,
+): RangePair {
+  const unitAt = (pos: number): RangePair | null =>
+    detail >= 3 ? textblockRangeAt(view, pos) : detail === 2 ? queryUnitAtDocPos(view, pos) : null;
+  if (endPos === null || endPos === startPos) {
+    return (detail >= 3 ? textblockRangeAt(view, startPos) : queryUnitAtDocPos(view, startPos)) ?? { from: startPos, to: startPos };
+  }
+  const lo = Math.min(startPos, endPos);
+  const hi = Math.max(startPos, endPos);
+  const a = unitAt(lo);
+  const b = unitAt(hi);
+  return { from: Math.min(lo, a?.from ?? lo), to: Math.max(hi, b?.to ?? hi) };
+}
+
+/** Ctrl/Cmd add-to-selection. From the pointer-down at `startPos` (click
+ *  count `detail`), track the gesture; on release add the range
+ *  `discontinuousRangeFor` decides to the discontinuous shadow selection. The
+ *  set being extended is captured up front: any existing shadow matches, plus
+ *  — on the FIRST such gesture — the current non-empty selection as the first
+ *  range. */
+function beginDiscontinuousSelect(view: EditorView, startPos: number, detail: number): void {
   const ps = similarSelectionKey.getState(view.state);
   const existing: RangePair[] =
     ps && ps.matches.length > 0 ? ps.matches.map((r) => ({ ...r })) : [];
@@ -285,22 +319,15 @@ function beginDiscontinuousSelect(view: EditorView, startPos: number): void {
     if (pos === null || pos === startPos) return;
     dragged = true;
     // Preview the pending range as a DECORATION (not the real selection) so the
-    // existing ranges aren't dismissed mid-drag.
-    setShadowPending(view, {
-      from: Math.min(startPos, pos),
-      to: Math.max(startPos, pos),
-    });
+    // existing ranges aren't dismissed mid-drag — snapped exactly as the
+    // release will add it.
+    setShadowPending(view, discontinuousRangeFor(view, startPos, pos, detail));
   };
   const onUp = (e: MouseEvent): void => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
     const endPos = posAt(e) ?? startPos;
-    let added: RangePair;
-    if (dragged && endPos !== startPos) {
-      added = { from: Math.min(startPos, endPos), to: Math.max(startPos, endPos) };
-    } else {
-      added = queryUnitAtDocPos(view, startPos) ?? { from: startPos, to: startPos };
-    }
+    const added = discontinuousRangeFor(view, startPos, dragged ? endPos : null, detail);
     // setManualShadowSelection clears the pending preview (its setMatches resets it).
     setManualShadowSelection(view, [...base, added]);
   };

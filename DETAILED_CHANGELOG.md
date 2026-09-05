@@ -394,6 +394,32 @@ and deliberately survive the session ending: a paste in the now-solo
 document still moves the unit, which beats clearing the mark and
 pasting a copy. A first-time notice explains the mode once.
 
+### Added: Ctrl/Cmd-triple-click adds a whole paragraph to a discontinuous selection
+
+Adding to a selection with Ctrl/Cmd (the discontinuous "add to
+selection" gesture) ignored the click count: the modifier branch in the
+mouse-selection plugin ran before the double- and triple-click checks,
+so every Ctrl/Cmd-click added the word under the pointer and a
+Ctrl/Cmd-triple-click added the same word three times, which the shadow
+merge collapsed to nothing new. Selecting several separate paragraphs
+therefore meant dragging each one out by hand.
+
+The gesture now follows the same ladder as plain clicking. A single
+decision, `discontinuousRangeFor`, takes the pointer-down position, the
+release position and the click count and returns the range to add: a
+click or double-click adds the word (with its trailing space, as
+before), a triple-click adds the containing paragraph, and a drag adds
+the dragged range snapped outward to whole words after a double-click
+or whole paragraphs after a triple-click. The drag preview is snapped
+the same way, so what is outlined while dragging is exactly what the
+release adds. The second and third clicks of a sequence each add their
+own range and the existing overlap merge folds the earlier words into
+the paragraph, so nothing needed to change in the shadow-selection
+plugin. Tests drive the decision directly with document positions
+(`tests/editor/discontinuous-click-ladder.test.ts`); the manual's
+mouse-selection section now documents the gesture, which it had not
+mentioned before.
+
 ### Fixed: merge-born duplicate heading ids are repaired in a session
 
 The heading-id guard heals local transactions only, deliberately: it

@@ -737,6 +737,12 @@ Mouse selection mirrors Word too:
 - **Shift-click** extends the current selection to where you click, using
   whatever unit you last selected by: Shift-click after a double-click
   extends by word, after a triple-click by paragraph.
+- **Ctrl/Cmd-click** adds to the selection without dropping what you
+  already have, so you can select several separate stretches at once and
+  then format, copy or cut them together. The same ladder applies:
+  Ctrl/Cmd-click adds a word, Ctrl/Cmd-triple-click adds a whole
+  paragraph, and Ctrl/Cmd-drag adds exactly what you drag over (snapped to
+  whole words after a double-click, whole paragraphs after a triple-click).
 
 ### Converting blocks
 
