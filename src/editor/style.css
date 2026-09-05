@@ -5507,6 +5507,15 @@ html.pmd-nav-flat .pmd-nav-type-analytic:hover .pmd-nav-label {
 .pmd-read-mode .ProseMirror-trailingBreak {
   display: none;
 }
+/* …except in heading blocks. An EMPTY pocket / hat / block / tag /
+   analytic gets its whole height from that trailing break (it has no
+   text to set a line), so hiding it shrank an empty pocket to its
+   padding in read mode while a filled one kept its full line height
+   (field report 2026-09-05). Headings never flow inline, so the break
+   costs nothing there; `revert` restores the browser's own br display. */
+.pmd-read-mode :is(.pmd-pocket, .pmd-hat, .pmd-block, .pmd-tag, .pmd-analytic) > .ProseMirror-trailingBreak {
+  display: revert;
+}
 
 /* Strip the emphasis border in read mode WHEN the emphasis span has
    no visible (highlighted) child. Without this, emphasis spans that

@@ -445,6 +445,18 @@ nudge because the rebuild is O(doc). Tests cover the whole-cite keep,
 the unmarked-cite collapse, the rebuild on a flip and the anchor search,
 plus the conversion command.
 
+### Fixed: empty pockets shrank in read mode
+
+Read mode hides ProseMirror's trailing line break (the `<br>` it places
+in every empty textblock so the caret has somewhere to sit) so that
+empty body and cite paragraphs flow away instead of each costing a
+line. The rule was unscoped and so also hit heading blocks, where an
+empty pocket, hat, block or tag has nothing else to set its height: the
+box collapsed to its padding in read mode while a pocket with text kept
+its full line. The trailing break is now left alone inside heading
+blocks (`display: revert`), so an empty pocket is the same height in
+both modes. Headings never flow inline, so nothing else changes.
+
 ### Fixed: merge-born duplicate heading ids are repaired in a session
 
 The heading-id guard heals local transactions only, deliberately: it

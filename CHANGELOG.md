@@ -55,6 +55,9 @@ see `DETAILED_CHANGELOG.md`.
 
 ### Fixed
 
+- **Empty pockets kept their height in read mode.** An empty pocket
+  (or hat, block or tag) shrank to a thin box in read mode; it is now
+  the same height as when editing.
 - **Co-editing: undo can no longer delete a partner's typing.** Undoing
   an Enter-in-tag, a card insert, or a card paste while a partner had
   already typed into the new card used to remove the card and their
