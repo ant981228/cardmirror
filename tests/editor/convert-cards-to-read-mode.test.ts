@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { schema } from '../../src/schema/index.js';
+import { settings } from '../../src/editor/settings.js';
 import {
   DEFAULT_RIBBON_KEYS,
   RIBBON_COMMAND_ALIASES,
@@ -238,6 +239,74 @@ describe('Convert Cards to Read Mode command', () => {
     expect(Array.from({ length: converted.childCount }, (_, index) =>
       converted.child(index).textContent,
     )).toEqual(['Ordered card', 'before', 'source', 'after']);
+  });
+
+  it('keeps an undertag\'s highlighted text as an undertag, the way read mode reads it', () => {
+    const highlight = schema.marks['highlight']!.create({ color: 'yellow' });
+    const card = schema.nodes['card']!.createChecked(null, [
+      schema.nodes['tag']!.create({ id: 'under-card' }, schema.text('Under card')),
+      schema.nodes['undertag']!.create(null, [
+        schema.text('unread under '),
+        schema.text('kept under', [highlight]),
+      ]),
+      schema.nodes['card_body']!.create(null, [
+        schema.text('unread '),
+        schema.text('kept body', [highlight]),
+      ]),
+    ]);
+    const doc = schema.nodes['doc']!.createChecked(null, [card]);
+    const base = EditorState.create({ doc });
+    const state = base.apply(base.tr.setSelection(TextSelection.create(doc, 2)));
+    let next: EditorState | null = null;
+
+    getRibbonCommand('convertCardsToReadMode')(
+      state,
+      (tr) => { next = state.apply(tr); },
+    );
+
+    const converted = next!.doc.firstChild!;
+    expect(Array.from({ length: converted.childCount }, (_, index) => converted.child(index).type.name))
+      .toEqual(['tag', 'undertag', 'card_body']);
+    expect(converted.child(1).textContent).toBe('kept under');
+    expect(converted.child(2).textContent).toBe('kept body');
+  });
+
+  describe('follows read mode\'s paragraph-integrity setting', () => {
+    const before = settings.get('readModeParagraphIntegrity');
+    afterEach(() => settings.set('readModeParagraphIntegrity', before));
+
+    function twoBodyCard() {
+      const highlight = schema.marks['highlight']!.create({ color: 'yellow' });
+      const card = schema.nodes['card']!.createChecked(null, [
+        schema.nodes['tag']!.create({ id: 'para-card' }, schema.text('Paragraphs')),
+        schema.nodes['card_body']!.create(null, [schema.text('unread '), schema.text('first', [highlight])]),
+        schema.nodes['card_body']!.create(null, schema.text('nothing read here')),
+        schema.nodes['card_body']!.create(null, [schema.text('second', [highlight]), schema.text(' unread')]),
+      ]);
+      const doc = schema.nodes['doc']!.createChecked(null, [card]);
+      const base = EditorState.create({ doc });
+      return base.apply(base.tr.setSelection(TextSelection.create(doc, 2)));
+    }
+    function convert(state: EditorState): EditorState {
+      let next: EditorState | null = null;
+      getRibbonCommand('convertCardsToReadMode')(state, (tr) => { next = state.apply(tr); });
+      return next!;
+    }
+
+    it('off: the body paragraphs flow together into one', () => {
+      settings.set('readModeParagraphIntegrity', false);
+      const converted = convert(twoBodyCard()).doc.firstChild!;
+      expect(converted.childCount).toBe(2);
+      expect(converted.child(1).textContent).toBe('first second');
+    });
+
+    it('on: each paragraph with audible text keeps its own line; empty ones collapse', () => {
+      settings.set('readModeParagraphIntegrity', true);
+      const converted = convert(twoBodyCard()).doc.firstChild!;
+      expect(converted.childCount).toBe(3);
+      expect(converted.child(1).textContent).toBe('first');
+      expect(converted.child(2).textContent).toBe('second');
+    });
   });
 
   it('removes inline images that read mode hides from tags', () => {

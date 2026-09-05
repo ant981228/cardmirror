@@ -1,7 +1,19 @@
-/** Destructively reduce cards to the text shown by default read mode. */
+/**
+ * Destructively reduce cards to the text read mode shows.
+ *
+ * Every rule here is read mode's own: which text is audible comes from
+ * the read-mode plugin (`isReadModeKeptText` — highlights, cites, the
+ * reading-marker color, whatever the settings say), and the paragraph
+ * shape follows the "Read mode: preserve paragraph integrity" setting —
+ * off, a card's body paragraphs flow together into one; on, each source
+ * paragraph with audible text keeps its own line and empty ones collapse.
+ * Undertags and cites keep their own node with only their audible text,
+ * as read mode displays them.
+ */
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import type { Command, EditorState } from 'prosemirror-state';
 import { isReadModeKeptText } from './read-mode-plugin.js';
+import { settings } from './settings.js';
 
 interface CardAt {
   node: PMNode;
@@ -64,6 +76,8 @@ function selectedCards(state: EditorState): CardAt[] {
 }
 
 function convertCard(card: PMNode): PMNode {
+  const schema = card.type.schema;
+  const separateParagraphs = settings.get('readModeParagraphIntegrity');
   const sourceTag = card.firstChild!;
   const tagContent: PMNode[] = [];
   sourceTag.forEach((child) => {
@@ -72,33 +86,48 @@ function convertCard(card: PMNode): PMNode {
   const tag = sourceTag.type.create(sourceTag.attrs, tagContent, sourceTag.marks);
   const children: PMNode[] = [tag];
   let body = new AudibleInlineBuilder();
+  const flushBody = (): void => {
+    if (body.nodes.length > 0) children.push(schema.nodes['card_body']!.create(null, body.nodes));
+    body = new AudibleInlineBuilder();
+  };
+  // A body-like source paragraph: joined into the running body (read
+  // mode's default flow), or — with paragraph integrity on — its own
+  // paragraph when it has audible text, nothing at all when it has none.
+  const addBodyParagraph = (node: PMNode): void => {
+    if (!separateParagraphs) {
+      body.addTextblock(node);
+      return;
+    }
+    const one = new AudibleInlineBuilder();
+    one.addTextblock(node);
+    if (one.nodes.length === 0) return;
+    flushBody();
+    children.push(schema.nodes['card_body']!.create(null, one.nodes));
+  };
 
   card.forEach((child, _offset, index) => {
     if (index === 0) return;
-    if (child.type.name === 'cite_paragraph') {
+    if (child.type.name === 'cite_paragraph' || child.type.name === 'undertag') {
+      // Their own node, audible text only — read mode shows an undertag's
+      // highlighted words just as it shows a cite's.
       const kept = new AudibleInlineBuilder();
       kept.addTextblock(child);
       if (kept.nodes.length > 0) {
-        if (body.nodes.length > 0) {
-          children.push(card.type.schema.nodes['card_body']!.create(null, body.nodes));
-          body = new AudibleInlineBuilder();
-        }
+        flushBody();
         children.push(child.type.create(child.attrs, kept.nodes));
       }
     } else if (child.type.name === 'card_body') {
-      body.addTextblock(child);
+      addBodyParagraph(child);
     } else if (child.type.name === 'table') {
       child.descendants((descendant) => {
         if (descendant.type.name !== 'paragraph') return true;
-        body.addTextblock(descendant);
+        addBodyParagraph(descendant);
         return false;
       });
     }
   });
 
-  if (body.nodes.length > 0) {
-    children.push(card.type.schema.nodes['card_body']!.create(null, body.nodes));
-  }
+  flushBody();
   return card.type.createChecked(card.attrs, children, card.marks);
 }
 
