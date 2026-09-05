@@ -103,3 +103,6 @@ TOAST_AUDIT.md
 # Machine-local scratch tests (absolute-path deps; must never reach CI).
 tests/scratch/
 COLLAB_ADDITIVE_REVIEW.md
+
+# opt-in mixed-version fuzz peer: a git worktree of an OLD release (see tests/collab/real-relay-chaos-fuzz.test.ts, FUZZ_OLD_PEER_DIR)
+.fuzz-old-*/

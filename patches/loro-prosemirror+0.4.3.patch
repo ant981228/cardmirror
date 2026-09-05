@@ -1,5 +1,5 @@
 diff --git a/node_modules/loro-prosemirror/dist/index.cjs b/node_modules/loro-prosemirror/dist/index.cjs
-index 74c4b30..c03dba4 100644
+index 74c4b30..ea3abe0 100644
 --- a/node_modules/loro-prosemirror/dist/index.cjs
 +++ b/node_modules/loro-prosemirror/dist/index.cjs
 @@ -28,6 +28,82 @@ function updateLoroToPmState(doc, mapping, editorState, containerId) {
@@ -329,7 +329,7 @@ index 74c4b30..c03dba4 100644
  	const res = [];
  	let textNodes = null;
  	node.content.forEach((node, _offset, _i) => {
-@@ -226,13 +455,550 @@ function updateLoroMapAttributes(obj, node, _mapping) {
+@@ -226,13 +455,560 @@ function updateLoroMapAttributes(obj, node, _mapping) {
  	for (const [key, value] of Object.entries(pAttrs)) {
  		if (value !== null) {
  			if (!(0, lib0_function.equalityDeep)(attrs.get(key), value)) attrs.set(key, value);
@@ -762,6 +762,12 @@ index 74c4b30..c03dba4 100644
 + * before anything is written, falling back to the diff on mismatch.
 + */
 +let cardmirrorExactEdits = null;
++/** Diagnostics (read from a console as __CM_TEXT_SYNC_STATS__): exact =
++ *  paragraphs synced by exact ops; mismatch = exact edits that did not
++ *  reproduce the PM text (fell back to the diff — a classifier bug if
++ *  it ever moves); diffBatches = doc-changing batches with no exact
++ *  edits at all (marks, joins, structure, plugin repairs). */
++const cardmirrorTextSyncStats = (globalThis.__CM_TEXT_SYNC_STATS__ = globalThis.__CM_TEXT_SYNC_STATS__ || { exact: 0, mismatch: 0, diffBatches: 0 });
 +
 +function cardmirrorStepIsPlainReplace(step) {
 +	return step && typeof step.from === "number" && typeof step.to === "number" && step.slice != null && !("gapFrom" in step) && !("mark" in step) && !("attr" in step);
@@ -872,7 +878,11 @@ index 74c4b30..c03dba4 100644
 +		if (e.offset < 0 || e.offset + e.deleteLen > s.length) return false;
 +		s = s.slice(0, e.offset) + e.insert + s.slice(e.offset + e.deleteLen);
 +	}
-+	if (s !== target) return false;
++	if (s !== target) {
++		cardmirrorTextSyncStats.mismatch++;
++		return false;
++	}
++	cardmirrorTextSyncStats.exact++;
 +	mapping.set(obj.id, nodes);
 +	for (const e of edits) {
 +		if (e.deleteLen > 0) obj.delete(e.offset, e.deleteLen);
@@ -883,7 +893,7 @@ index 74c4b30..c03dba4 100644
  }
  function updateLoroMapChildren(obj, node, mapping) {
  	const loroChildren = getLoroMapChildren(obj);
-@@ -258,13 +1024,35 @@ function updateLoroMapChildren(obj, node, mapping) {
+@@ -258,13 +1034,35 @@ function updateLoroMapChildren(obj, node, mapping) {
  			if (!Array.isArray(rightNode)) updateLoroMap(rightLoro, rightNode, mapping);
  		} else break;
  	}
@@ -920,7 +930,7 @@ index 74c4b30..c03dba4 100644
  			left += 1;
  		} else {
  			let updateLeft = leftLoro instanceof loro_crdt.LoroMap && eqNodeName(leftLoro, leftNode);
-@@ -422,27 +1210,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
+@@ -422,27 +1220,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
  	for (const [peer, cursor] of Object.entries(all)) {
  		if (peer === thisPeer) continue;
  		if (!cursor.anchor || !cursor.focus) continue;
@@ -969,7 +979,7 @@ index 74c4b30..c03dba4 100644
  	}
  	return prosemirror_view.DecorationSet.create(state.doc, d);
  }
-@@ -506,7 +1296,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
+@@ -506,7 +1306,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
  	}
  	while (loroNode != null) {
  		const children = loroNode.get(CHILDREN_KEY);
@@ -978,13 +988,14 @@ index 74c4b30..c03dba4 100644
  			const childIds = children.toArray();
  			for (const iter of childIds) {
  				if (iter.id === targetChildId) break;
-@@ -573,7 +1363,14 @@ const LoroSyncPlugin = (props) => {
+@@ -573,7 +1373,15 @@ const LoroSyncPlugin = (props) => {
  				else state.changedBy = "local";
  				switch (meta?.type) {
  					case "doc-changed":
 -						if (!undoState?.isUndoing.current) updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
 +						if (!undoState?.isUndoing.current) {
 +							cardmirrorExactEdits = meta.cmExact || null;
++							if (!cardmirrorExactEdits) cardmirrorTextSyncStats.diffBatches++;
 +							try {
 +								updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
 +							} finally {
@@ -994,7 +1005,7 @@ index 74c4b30..c03dba4 100644
  						break;
  					case "update-state":
  						state = {
-@@ -587,11 +1384,28 @@ const LoroSyncPlugin = (props) => {
+@@ -587,11 +1395,28 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -1024,7 +1035,7 @@ index 74c4b30..c03dba4 100644
  			return null;
  		},
  		view: (view) => {
-@@ -650,14 +1464,63 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -650,14 +1475,63 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -1095,7 +1106,7 @@ index 74c4b30..c03dba4 100644
  /**
  * Update ProseMirror selection based on the given Loro cursors.
 diff --git a/node_modules/loro-prosemirror/dist/index.js b/node_modules/loro-prosemirror/dist/index.js
-index e41095d..929fdaf 100644
+index e41095d..0b30af6 100644
 --- a/node_modules/loro-prosemirror/dist/index.js
 +++ b/node_modules/loro-prosemirror/dist/index.js
 @@ -1,6 +1,185 @@
@@ -1576,12 +1587,12 @@ index e41095d..929fdaf 100644
 +		if (av.length !== bv.length) return false;
 +		for (let i = 0; i < av.length; i++) if (!cardmirrorCanonicalAttrsEqual(av[i], bv[i])) return false;
 +		return true;
-+	}
+ 	}
+-	return eq;
 +	const keys = new Set([...Object.keys(av), ...Object.keys(bv)]);
 +	for (const key of keys) {
 +		if (!cardmirrorCanonicalAttrsEqual(av[key] ?? null, bv[key] ?? null)) return false;
- 	}
--	return eq;
++	}
 +	return true;
 +}
 +function cardmirrorCanonicalizeAttrs(attrs) {
@@ -1611,7 +1622,7 @@ index e41095d..929fdaf 100644
  	const res = [];
  	let textNodes = null;
  	node.content.forEach((node, _offset, _i) => {
-@@ -225,13 +633,372 @@ function updateLoroMapAttributes(obj, node, _mapping) {
+@@ -225,13 +633,382 @@ function updateLoroMapAttributes(obj, node, _mapping) {
  	for (const [key, value] of Object.entries(pAttrs)) {
  		if (value !== null) {
  			if (!equalityDeep(attrs.get(key), value)) attrs.set(key, value);
@@ -1866,6 +1877,12 @@ index e41095d..929fdaf 100644
 + * before anything is written, falling back to the diff on mismatch.
 + */
 +let cardmirrorExactEdits = null;
++/** Diagnostics (read from a console as __CM_TEXT_SYNC_STATS__): exact =
++ *  paragraphs synced by exact ops; mismatch = exact edits that did not
++ *  reproduce the PM text (fell back to the diff — a classifier bug if
++ *  it ever moves); diffBatches = doc-changing batches with no exact
++ *  edits at all (marks, joins, structure, plugin repairs). */
++const cardmirrorTextSyncStats = (globalThis.__CM_TEXT_SYNC_STATS__ = globalThis.__CM_TEXT_SYNC_STATS__ || { exact: 0, mismatch: 0, diffBatches: 0 });
 +
 +function cardmirrorStepIsPlainReplace(step) {
 +	return step && typeof step.from === "number" && typeof step.to === "number" && step.slice != null && !("gapFrom" in step) && !("mark" in step) && !("attr" in step);
@@ -1976,7 +1993,11 @@ index e41095d..929fdaf 100644
 +		if (e.offset < 0 || e.offset + e.deleteLen > s.length) return false;
 +		s = s.slice(0, e.offset) + e.insert + s.slice(e.offset + e.deleteLen);
 +	}
-+	if (s !== target) return false;
++	if (s !== target) {
++		cardmirrorTextSyncStats.mismatch++;
++		return false;
++	}
++	cardmirrorTextSyncStats.exact++;
 +	mapping.set(obj.id, nodes);
 +	for (const e of edits) {
 +		if (e.deleteLen > 0) obj.delete(e.offset, e.deleteLen);
@@ -1987,7 +2008,7 @@ index e41095d..929fdaf 100644
  }
  function updateLoroMapChildren(obj, node, mapping) {
  	const loroChildren = getLoroMapChildren(obj);
-@@ -257,13 +1024,35 @@ function updateLoroMapChildren(obj, node, mapping) {
+@@ -257,13 +1034,35 @@ function updateLoroMapChildren(obj, node, mapping) {
  			if (!Array.isArray(rightNode)) updateLoroMap(rightLoro, rightNode, mapping);
  		} else break;
  	}
@@ -2024,7 +2045,7 @@ index e41095d..929fdaf 100644
  			left += 1;
  		} else {
  			let updateLeft = leftLoro instanceof LoroMap && eqNodeName(leftLoro, leftNode);
-@@ -421,27 +1210,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
+@@ -421,27 +1220,29 @@ function createDecorations(state, store, _plugin, createSelection, createCursor)
  	for (const [peer, cursor] of Object.entries(all)) {
  		if (peer === thisPeer) continue;
  		if (!cursor.anchor || !cursor.focus) continue;
@@ -2073,7 +2094,7 @@ index e41095d..929fdaf 100644
  	}
  	return DecorationSet.create(state.doc, d);
  }
-@@ -505,7 +1296,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
+@@ -505,7 +1306,7 @@ function cursorToAbsolutePosition(cursor, doc, mapping) {
  	}
  	while (loroNode != null) {
  		const children = loroNode.get(CHILDREN_KEY);
@@ -2082,13 +2103,14 @@ index e41095d..929fdaf 100644
  			const childIds = children.toArray();
  			for (const iter of childIds) {
  				if (iter.id === targetChildId) break;
-@@ -572,7 +1363,14 @@ const LoroSyncPlugin = (props) => {
+@@ -572,7 +1373,15 @@ const LoroSyncPlugin = (props) => {
  				else state.changedBy = "local";
  				switch (meta?.type) {
  					case "doc-changed":
 -						if (!undoState?.isUndoing.current) updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
 +						if (!undoState?.isUndoing.current) {
 +							cardmirrorExactEdits = meta.cmExact || null;
++							if (!cardmirrorExactEdits) cardmirrorTextSyncStats.diffBatches++;
 +							try {
 +								updateLoroToPmState(state.doc, state.mapping, newEditorState, props.containerId);
 +							} finally {
@@ -2098,7 +2120,7 @@ index e41095d..929fdaf 100644
  						break;
  					case "update-state":
  						state = {
-@@ -586,11 +1384,28 @@ const LoroSyncPlugin = (props) => {
+@@ -586,11 +1395,28 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -2128,7 +2150,7 @@ index e41095d..929fdaf 100644
  			return null;
  		},
  		view: (view) => {
-@@ -649,14 +1464,72 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -649,14 +1475,72 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
