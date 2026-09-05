@@ -41,12 +41,14 @@ see `DETAILED_CHANGELOG.md`.
   anything else ends it. Pasting into another document copies the card
   there and removes it from the original when that document is open.
   Text cuts and solo documents are unchanged.
+
 - **Ctrl/Cmd-triple-click adds a whole paragraph.** Adding to a
   selection with Ctrl/Cmd now follows the same ladder as plain
   clicking: a click adds a word, a triple-click adds the paragraph, and
   a drag snaps to whole words after a double-click and whole paragraphs
   after a triple-click. Ctrl/Cmd-triple-click used to add just the word
   under the pointer.
+
 - **Read mode: keep entire cite.** A new setting (General, next to
   "Read mode: preserve paragraph integrity", off by default) makes read
   mode show the whole of any cite that has read-aloud text in it,
