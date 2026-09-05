@@ -75,6 +75,21 @@ export function totalWords(counts: ReadAloudCounts): number {
   return counts.body + counts.other;
 }
 
+/** Count structural cards intersecting [from, to). When the range is
+ * omitted, count every card in the document. */
+export function countCards(doc: PMNode, from?: number, to?: number): number {
+  const lo = from ?? 0;
+  const hi = to ?? doc.content.size;
+  if (lo >= hi) return 0;
+  let cards = 0;
+  doc.nodesBetween(lo, hi, (node) => {
+    if (node.type.name !== 'card') return true;
+    cards++;
+    return false;
+  });
+  return cards;
+}
+
 function readAloudBucket(node: PMNode, parent: PMNode): 'body' | 'other' | null {
   const parentType = parent.type.name;
   if (parentType === 'tag' || parentType === 'analytic') return 'other';

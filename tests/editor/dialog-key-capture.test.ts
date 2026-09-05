@@ -192,6 +192,8 @@ describe('read-only modals (word count, shortcuts reference)', () => {
     const view = mkView();
     const before = view.state.doc.toJSON();
     openWordCount(view);
+    expect(document.querySelector('.pmd-wc-scope')?.textContent)
+      .toBe('Full document: 1 read-aloud words · 1 card');
     expect(isAnyOverlayOpen()).toBe(true);
     pressOnEditor(view, 'Backspace');
     pressOnEditor(view, 'Enter');
