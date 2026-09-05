@@ -19,6 +19,17 @@ see `DETAILED_CHANGELOG.md`.
   list (type to filter). Unbound by default — run it from the command
   bar or bind a key.
 
+- **Co-editing: cut moves a card instead of copying it.** In a shared
+  document, cutting a whole card (or a section) no longer removes it:
+  the card stays where it is, dimmed and labelled, and pasting it in
+  the same document moves it, with everything a partner typed into it
+  in the meantime. Cut-then-paste used to be a delete and a fresh copy,
+  which could drop a partner's concurrent typing or leave the card
+  twice. Esc cancels the cut, Delete removes the card, and pasting
+  anything else ends it. Pasting into another document copies the card
+  there and removes it from the original when that document is open.
+  Text cuts and solo documents are unchanged.
+
 ### Fixed
 
 - **Co-editing: undo can no longer delete a partner's typing.** Undoing
@@ -30,6 +41,11 @@ see `DETAILED_CHANGELOG.md`.
   was moved or split while a partner edited it, the sync layer could
   rebuild the card, orphaning the partner's edit (lost text) or leaving
   two copies. Cards now keep their identity through those merges.
+- **Co-editing: a duplicated heading id born from a merge is repaired.**
+  Pasted cards get fresh ids, but an older client's paste, or an edge
+  case in a merge, could leave two cards sharing one id, and nothing
+  looked at remote edits to fix it. The session's repair pass now does,
+  on the leader, and every peer converges on unique ids.
 - **Co-editing: typed text no longer tears under a partner's concurrent
   split or delete.** When a word you typed began or ended with the same
   letters as its neighbour, the sync layer treated part of the

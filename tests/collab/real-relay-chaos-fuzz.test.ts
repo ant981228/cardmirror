@@ -57,7 +57,7 @@
  * Run (skipped unless REAL_RELAY_CHAOS=1):
  *   REAL_RELAY_CHAOS=1 FUZZ_SEEDS=10 npx vitest run tests/collab/real-relay-chaos-fuzz.test.ts
  * Knobs: FUZZ_SEEDS, FUZZ_SEED_START, FUZZ_ROUNDS, FUZZ_PEERS,
- * FUZZ_NO_CHAOS / NO_MOVE / NO_CUTPASTE / NO_SPLIT / NO_HEAL / NO_DUPPASTE /
+ * FUZZ_NO_CHAOS / NO_MOVE / NO_CUTPASTE / NO_CUTINPLACE / NO_SPLIT / NO_HEAL / NO_DUPPASTE /
  * NO_AUTOCORRECT / NO_PRESENCE / NO_COMMENTS, FUZZ_UNDO (+UNDO_OPS=0,
  * UNDO_GUARD=0, UNDO_MERGE_MS), FUZZ_SCALE=N cards (+FUZZ_SCALE_OP_P95_MS
  * threshold; timings land in the per-seed ops line), FUZZ_LONG_OUTAGE_MS,
@@ -85,6 +85,9 @@ import { collabRepairPlugin, lowestPeerIsLeader } from '../../src/editor/collab/
 import { headingIdGuardPlugin } from '../../src/editor/heading-id-guard.js';
 import { cardNumberingPlugin } from '../../src/editor/numbering-plugin.js';
 import { enterMidTag } from '../../src/editor/tag-keymap.js';
+import { freshHeadingIds } from '../../src/editor/drag-controller.js';
+import { buildCutInPlacePlugin, installCutInPlaceContext, markCutInPlace, handleCutInPlacePaste, pendingCut } from '../../src/editor/cut-in-place.js';
+import { Slice, Fragment } from 'prosemirror-model';
 import { LoroUndoPlugin, undo as loroUndo, redo as loroRedo } from 'loro-prosemirror';
 import { createUndoGuard, type UndoGuard } from '../../src/editor/collab/undo-guard.js';
 import { UndoManager } from 'loro-crdt';
@@ -114,6 +117,27 @@ const NO_MOVE = process.env['FUZZ_NO_MOVE'] === '1';
 const NO_SPLIT = process.env['FUZZ_NO_SPLIT'] === '1';
 /** FUZZ_NO_CUTPASTE=1: keep one-transaction moves, drop the two-transaction cut+paste. */
 const NO_CUTPASTE = process.env['FUZZ_NO_CUTPASTE'] === '1';
+/** FUZZ_NO_CUTINPLACE=1: drop the session cut (mark, then a paste that
+ *  moves) — the way a 1.7.0 client cuts a whole card in a session. */
+const NO_CUTINPLACE = process.env['FUZZ_NO_CUTINPLACE'] === '1';
+/** Cut-in-place plumbing for the rig's views: every view is a session
+ *  doc keyed by itself; the clipboard write hands the payload back. */
+const docKeys = new WeakMap<EditorView, string>();
+const cutHtml = new WeakMap<EditorView, string>();
+let lastCutHtml = '';
+let docKeySeq = 0;
+installCutInPlaceContext({
+  isSessionDoc: () => true,
+  docKey: (view) => docKeys.get(view) ?? null,
+  viewForDocKey: () => null,
+  hasSeenNotice: () => true,
+  markNoticeSeen: () => {},
+  writeClipboard: async (html) => {
+    lastCutHtml = html;
+    return true;
+  },
+  clipboardBusyMessage: 'busy',
+});
 /** Drop the invariant-heal / causal-mark-heal / repair plugins (the app's
  *  in-session menders) to see whether a loss needs them. */
 const NO_HEAL = process.env['FUZZ_NO_HEAL'] === '1';
@@ -634,6 +658,26 @@ function applyOp(view: EditorView, rnd: () => number, o: Oracle, seed: number, a
         name = 'commentResolve';
         bump(o, 'commentResolve');
       }
+    } else if (roll < 0.14 && !NO_CUTINPLACE && !agnostic) {
+      // cut in place: mark a whole card now; a later op pastes it (a MOVE)
+      const pending = pendingCut(view.state);
+      const cards = topCards(doc);
+      if (pending) {
+        const dst = cards[Math.floor(rnd() * cards.length)]!;
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, Math.min(dst.pos + 2, view.state.doc.content.size))));
+        handleCutInPlacePaste(view, cutHtml.get(view) ?? '');
+        name = 'cutInPlacePaste';
+        bump(o, 'cutInPlacePaste');
+      } else {
+        if (cards.length < 2) return 'skip';
+        const src = cards[Math.floor(rnd() * cards.length)]!;
+        touch(o, doc, src.pos + 1);
+        lastCutHtml = '';
+        void markCutInPlace(view, [{ from: src.pos, to: src.pos + src.node.nodeSize }]);
+        cutHtml.set(view, lastCutHtml);
+        name = 'cutInPlaceMark';
+        bump(o, 'cutInPlaceMark');
+      }
     } else if (roll < 0.34) {
       // insert a tracked token inside a body textblock
       const bodies = textblocks(doc).filter((t) => t.node.type.name === 'card_body' || t.node.type.name === 'paragraph');
@@ -724,9 +768,12 @@ function applyOp(view: EditorView, rnd: () => number, o: Oracle, seed: number, a
       name = 'moveCard';
       bump(o, 'moveCard');
     } else if (roll < 0.8 && !NO_MOVE && !NO_CUTPASTE) {
-      // cut + paste of a whole card as TWO transactions (Cmd-X … Cmd-V):
-      // the binding sees a delete batch, then an insert batch with the
-      // same heading id (the guard keeps it: the original is gone).
+      // cut + paste of a whole card as TWO transactions (Cmd-X … Cmd-V) the
+      // way a SOLO document or an old client does it: the binding sees a
+      // delete batch, then an insert batch — with FRESH ids, as the app's
+      // paste stamps (the head TOKEN still duplicates against a partner's
+      // concurrent move; the id does not). In a session, new clients cut
+      // in place instead (a move) — see the cutInPlace op.
       const cards = topCards(doc);
       if (cards.length < 2) return 'skip';
       const src = cards[Math.floor(rnd() * cards.length)]!;
@@ -738,7 +785,7 @@ function applyOp(view: EditorView, rnd: () => number, o: Oracle, seed: number, a
       const now = topCards(view.state.doc);
       const dst = now[Math.floor(rnd() * now.length)]!;
       const at = dst.pos + (rnd() < 0.5 ? 0 : dst.node.nodeSize);
-      view.dispatch(view.state.tr.insert(at, src.node));
+      view.dispatch(view.state.tr.insert(at, freshHeadingIds(new Slice(Fragment.from(src.node), 0, 0)).content));
       name = 'cutPaste';
       bump(o, 'cutPaste');
     } else if (roll < 0.88 && process.env['FUZZ_NO_DUPPASTE'] !== '1') {
@@ -906,6 +953,7 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
               }
             }
             return [
+            buildCutInPlacePlugin(),
             headingIdGuardPlugin,
             cardNumberingPlugin,
             ...(WITH_AUTOCORRECT ? [smartQuotesPlugin(), customDashPlugin(), customAutocorrectPlugin(), autoCapitalizePlugin()] : []),
@@ -930,6 +978,7 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
             if (WITH_PRESENCE) cursorsOf.set(s, installCursorPresence(s, () => ref.current));
             const v = mkView(plugsFor(s));
             ref.current = v;
+            docKeys.set(v, `rig-doc-${++docKeySeq}`);
             commentsOf.get(s)?.pull();
             // The cursor plugin publishes a local cursor only while the view
             // has focus, which jsdom never grants a contenteditable: stub it

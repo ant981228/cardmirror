@@ -354,6 +354,61 @@ account. Renewals are single-flight, carry a 10 s deadline, run on
 online and tab-visible (margin-gated), and unlink only when the body is
 relay-shaped JSON.
 
+### Added: cut in place — a whole-card cut in a shared document is a move
+
+A nav-pane drag has always been safe in a session: it is one
+transaction, delete plus insert, which the binding turns into a real
+move that keeps the card's container identity. Cut then paste was not:
+the container died on the cut and a fresh copy (fresh ids — the paste
+path stamps them) appeared on the paste. Racing a partner, the chaos rig
+showed the three shapes of that: their concurrent typing into the card
+vanished with the delete, a delete of theirs was resurrected by the
+paste, and against their move of the same card the merge kept both the
+moved original and the pasted copy.
+
+So in a document bound to a live session, a cut whose every operating
+range is exactly a whole card, analytic unit or outline subtree deletes
+nothing. It marks the units (dimmed, dashed, "Cut — paste to move"),
+writes them to the clipboard with a marker (an opaque document key and
+a nonce) and waits. A paste in the same document that carries the
+marker resolves the units by their head ids in the current document,
+so partner edits and moves since the cut are honored, and moves them in
+one transaction, the drag transaction, to the nearest outline slot for
+the caret. Ids stay continuous, so live views and linked copies never
+see a dangling window.
+
+The rules that keep a cut that no longer deletes legible: Esc, or Cmd-Z
+while a mark is pending, clears the mark (a reflexive "undo the cut"
+must not undo the last real edit); Delete removes the marked unit as
+always, and a drag of it is already the move and clears the mark; a
+paste of anything else clears it (the paste event is the observation
+point, so an external copy the app cannot see costs nothing); our own
+payload pasted after the mark cleared inserts a copy, as before. A
+partner deleting the marked unit makes the paste refuse with a note
+rather than quietly re-inserting what someone removed; pasting again
+inserts a copy on purpose. Cross-document paste is Word-like: a fresh
+copy lands there, and the unit is removed from the source when that
+document is open in the window; a closed source, or one in another
+window, keeps it and the note says so. Marks are transient editor state
+and deliberately survive the session ending: a paste in the now-solo
+document still moves the unit, which beats clearing the mark and
+pasting a copy. A first-time notice explains the mode once.
+
+### Fixed: merge-born duplicate heading ids are repaired in a session
+
+The heading-id guard heals local transactions only, deliberately: it
+must not fight an older client edit for edit. Pasted cards get fresh
+ids, so a duplicate id normally cannot arise, but an older client's
+paste or a merge edge case could leave two cards sharing one id, and
+nothing looked at remote edits to repair it. The session repair pass
+now keeps a heading-id count index in its plugin state, maintained from
+each transaction's step ranges (a body keystroke visits no heading, so
+the hot path is untouched; one full walk at install). After a binding
+batch the leader checks the merged region's bearers against the index
+and re-mints every bearer after the first in document order, the
+guard's own fallback rule and identical on every peer once documents
+converge, so followers agree with the fix that arrives.
+
 ### Fixed: web tab return and tab close (web-build audit)
 
 The web build and the desktop build are one bundle; the differences are

@@ -8914,6 +8914,26 @@ body:has(#comments-column:not([hidden])) :is(#editor, .pmd-pane-editor) .pmd-com
    drag-pickup box (.pmd-editor-pickup-highlight) but in the purple
    "Thinking…" pill accent. Applied as a node decoration on the
    container, so it boxes the whole card, not the text. View-only. */
+/* Cut in place (shared documents): the unit stays, dimmed and labelled,
+   until the paste moves it — see cut-in-place.ts. Dimming goes through
+   the inherited text color (not opacity) so the label keeps full ink. */
+:is(#editor, .pmd-pane-editor) .pmd-cut-pending {
+  position: relative;
+  color: color-mix(in srgb, currentColor 50%, transparent);
+  outline: 2px dashed var(--pmd-c-comment-thread);
+  outline-offset: -2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--pmd-c-comment-thread) 6%, transparent);
+}
+:is(#editor, .pmd-pane-editor) .pmd-cut-pending::after {
+  content: attr(data-pmd-cut-label);
+  position: absolute;
+  top: 2px;
+  right: 8px;
+  font: 600 11px/1.4 system-ui, sans-serif;
+  color: var(--pmd-c-comment-thread);
+  pointer-events: none;
+}
 :is(#editor, .pmd-pane-editor) .pmd-ai-working {
   outline: 2px solid var(--pmd-c-comment-thread);
   outline-offset: -2px;

@@ -16,6 +16,7 @@ import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { type Mappable } from 'prosemirror-transform';
 import { settings, SETTINGS_DEFAULTS } from './settings.js';
 import { CLIPBOARD_BUSY_MESSAGE, writeClipboardHtml } from './clipboard-write.js';
+import { isCutInPlaceDoc, markCutInPlace } from './cut-in-place.js';
 import { showToast } from './toast.js';
 import { setManualShadowSelection } from './similar-selection-plugin.js';
 import {
@@ -2417,6 +2418,12 @@ export class NavigationPanel {
     if (!this.view) return;
     const ranges = this.headingRanges(this.contextTargets(entry));
     if (ranges.length === 0) return;
+    // A shared document: whole units are cut IN PLACE — marked and copied,
+    // moved by the paste (cut-in-place.ts). Nothing is deleted here.
+    if (isCutInPlaceDoc(this.view)) {
+      await markCutInPlace(this.view, ranges);
+      return;
+    }
     const docAtCopy = this.view.state.doc;
     const { html, text } = this.rangeClipboardPayload(...ranges);
 

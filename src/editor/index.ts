@@ -50,6 +50,7 @@ import { createReference } from './create-reference.js';
 import { showToast } from './toast.js';
 import { maybeDecryptForOpen, OpenCancelledError, UnsupportedEncryptionError } from './open-encrypted.js';
 import { CLIPBOARD_BUSY_MESSAGE, writeClipboardHtml } from './clipboard-write.js';
+import { buildCutInPlacePlugin, installCutInPlaceContext } from './cut-in-place.js';
 import { suppressGuiSelectAll } from './editable-target.js';
 import { openSelectSpeechDocModal } from './select-speech-doc-ui.js';
 import { dropzoneStore, deriveDropzoneLabel } from './dropzone-store.js';
@@ -5345,12 +5346,29 @@ function makeNewDocBody(): PMNode {
 // session-owning doc; every other pane (and the null/omitted case) stays
 // independent, so opening a second doc during a session can't fuse it onto the
 // session's shared LoroDoc. See CollabPluginSource.ownerUid.
+// Cut in place (shared documents): whole units cut in a session are
+// marked, not deleted; the paste moves them. Resolves the session and the
+// document identity lazily through the speech-doc registry.
+installCutInPlaceContext({
+  isSessionDoc: (view) => collabPluginSourceFor(getSpeechDocResolver().uidForView(view)) != null,
+  docKey: (view) => getSpeechDocResolver().uidForView(view),
+  viewForDocKey: (key) => getSpeechDocResolver().viewForUid(key),
+  hasSeenNotice: () => settings.get('hasSeenCutInPlaceNotice'),
+  markNoticeSeen: () => settings.set('hasSeenCutInPlaceNotice', true),
+  writeClipboard: writeClipboardHtml,
+  clipboardBusyMessage: CLIPBOARD_BUSY_MESSAGE,
+});
+
 export function buildEditorPlugins(targetUid?: string | null): Plugin[] {
   const plugins: Plugin[] = [
     // First so its `editable` / read-mode tap-marker props win on the
     // mobile shell; a no-op everywhere else (the active flag is set
     // once at boot, before any view mounts).
     mobilePlugin,
+    // Cut in place — ahead of the undo keymap (Cmd-Z while a cut is
+    // pending clears the mark, not the last edit) and of the paste
+    // plugin (our own payload pasted in the same document is a MOVE).
+    buildCutInPlacePlugin(),
     // A live collaboration session owns undo: the CRDT undo manager
     // reverts only this peer's edits, which prosemirror-history cannot
     // guarantee once remote transactions interleave. Outside a session,

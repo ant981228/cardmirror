@@ -1346,6 +1346,15 @@ the session (rejoin later from the Sessions list) or end/leave it now. The
 ✕ on a home-screen Sessions row: as host, asks whether to end for everyone
 or just forget your copy; as guest, forgets your copy.
 
+**Cutting cards in a shared document.** Cut (Cmd/Ctrl-X, or Cut in the
+nav pane's menu) on a whole card or section does not remove it: the card
+stays, dimmed and labelled *Cut — paste to move*, until you paste. Pasting
+in the same document moves it, together with anything a partner typed
+into it in the meantime. Delete removes it, Esc cancels, and copying or
+pasting anything else ends the cut. Pasting into another document inserts
+a copy there and removes the original when that document is open in the
+same window. Cutting text inside a card works as usual.
+
 ### Collaboration on the web
 
 Everything above works in the web editor on a desktop-layout browser —
