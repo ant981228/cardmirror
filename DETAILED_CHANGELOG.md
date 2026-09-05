@@ -409,6 +409,28 @@ and re-mints every bearer after the first in document order, the
 guard's own fallback rule and identical on every peer once documents
 converge, so followers agree with the fix that arrives.
 
+### Fixed: the binding's mapping went stale under the caret after every bounded render
+
+The loro-prosemirror binding builds a fresh ProseMirror tree from the
+CRDT on every incoming batch and maps each Loro container to the node
+objects it just built. Upstream then replaced the whole document with
+that tree, so those objects became the document and the mapping held.
+A CardMirror patch from August replaced the whole-document replace with
+a bounded one, splicing only the changed span in so plugin positions
+survive remote batches (the "card moved — cut not applied" fix). The
+cost nobody saw: ProseMirror rebuilds the ancestors around the splice
+boundary as new node objects, typically the card and the paragraph
+being edited, and the mapping kept pointing at objects that never
+entered the document. Every cursor conversion under the caret then
+failed, one "Cannot find the loroNode" per transaction, until a local
+edit happened to re-map that paragraph; the undo path renders this way
+every time, so the undo guard's extra dispatches made it loud in the
+1.7.0 test build. The render now walks the built tree and the document
+in parallel and points the mapping at the document's own objects
+wherever they differ; identical subtrees are skipped, so the walk is
+bounded to the splice's ancestors. Pinned by a test that undoes an edit
+and checks every container is mapped and no error is logged.
+
 ### Fixed: a comments pane could keep a lost resolved toggle on screen
 
 The comment sync's pull skips its editor dispatch when the room's thread

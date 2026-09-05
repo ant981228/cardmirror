@@ -1,5 +1,5 @@
 diff --git a/node_modules/loro-prosemirror/dist/index.cjs b/node_modules/loro-prosemirror/dist/index.cjs
-index 74c4b30..ea3abe0 100644
+index 74c4b30..037eee3 100644
 --- a/node_modules/loro-prosemirror/dist/index.cjs
 +++ b/node_modules/loro-prosemirror/dist/index.cjs
 @@ -28,6 +28,82 @@ function updateLoroToPmState(doc, mapping, editorState, containerId) {
@@ -91,7 +91,7 @@ index 74c4b30..ea3abe0 100644
  		} catch (e) {
 -			console.error(e);
 +			retval = cardmirrorHealInvalidNode(schema, nodeName, attributes.toJSON(), mappedChildren, obj.id);
-+			if (retval != null) WEAK_NODE_TO_LORO_CONTAINER_MAPPING.set(retval, obj.id);
++			if (retval != null) { WEAK_NODE_TO_LORO_CONTAINER_MAPPING.set(retval, obj.id); cardmirrorHealedNodes.add(retval); }
 +			else console.error(e);
  		}
  	} else if (obj instanceof loro_crdt.LoroText) {
@@ -298,8 +298,7 @@ index 74c4b30..ea3abe0 100644
 +	const keys = new Set([...Object.keys(av), ...Object.keys(bv)]);
 +	for (const key of keys) {
 +		if (!cardmirrorCanonicalAttrsEqual(av[key] ?? null, bv[key] ?? null)) return false;
- 	}
--	return eq;
++	}
 +	return true;
 +}
 +function cardmirrorCanonicalizeAttrs(attrs) {
@@ -307,7 +306,8 @@ index 74c4b30..ea3abe0 100644
 +	for (const key of Object.keys(attrs ?? {})) {
 +		const v = attrs[key];
 +		if (v !== null && v !== undefined) out[key] = v;
-+	}
+ 	}
+-	return eq;
 +	return out;
 +}
 +// PATCHED (cardmirror): canonical equality — the old form counted
@@ -1035,7 +1035,58 @@ index 74c4b30..ea3abe0 100644
  			return null;
  		},
  		view: (view) => {
-@@ -650,14 +1475,63 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -642,6 +1467,50 @@ function init(view) {
+ 		view.dispatch(tr);
+ 	}
+ }
++/**
++ * CardMirror patch: re-map after the bounded replace above.
++ *
++ * `createNodeFromLoroObj` maps every container id to the node objects it
++ * just built. Upstream then replaced the WHOLE document with that tree,
++ * so those exact objects became the document and the mapping held. The
++ * bounded replace splices only the changed span in, and ProseMirror
++ * rebuilds the ancestors around the splice boundary as NEW node objects
++ * — the card and the paragraph being edited, typically — leaving the
++ * mapping (and the node→container weak map) pointing at objects that
++ * never entered the document. Every cursor conversion under the caret
++ * then fails ("Cannot find the loroNode", one per transaction) until a
++ * local edit happens to re-map that textblock; the undo path, which
++ * always renders this way, was the loudest (field report 2026-09-05).
++ *
++ * The bounded replace is verified structurally equal to the built tree,
++ * so walk both in parallel and point the mapping at the document's own
++ * objects wherever they differ; identical subtrees are skipped, which
++ * bounds the walk to the splice boundary's ancestors.
++ *
++ * One deliberate exception: a container the display-layer heal
++ * synthesized (a missing head, a padded table cell) is left UNMAPPED.
++ * The heal is display-only until the next sync writes it back into the
++ * CRDT — "all-peer write-back" is what makes every peer, old clients
++ * included, converge on the same healed head — and that write-back only
++ * happens when the sync sees the container as changed. Before this
++ * re-map the stale mapping produced that by accident for every
++ * boundary container; now it is explicit and scoped to healed ones.
++ */
++const cardmirrorHealedNodes = new WeakSet();
++function cardmirrorRemapRendered(built, actual, mapping) {
++	if (built === actual || built.isText || actual.isText) return;
++	const id = WEAK_NODE_TO_LORO_CONTAINER_MAPPING.get(built);
++	if (cardmirrorHealedNodes.has(built)) {
++		if (id != null && mapping.get(id) === built) mapping.delete(id);
++		return;
++	}
++	if (id != null) {
++		if (mapping.get(id) === built) mapping.set(id, actual);
++		WEAK_NODE_TO_LORO_CONTAINER_MAPPING.set(actual, id);
++	}
++	if (built.childCount !== actual.childCount) return;
++	for (let i = 0; i < built.childCount; i++) cardmirrorRemapRendered(built.child(i), actual.child(i), mapping);
++}
+ function updateNodeOnLoroEvent(view, event) {
+ 	if (view.isDestroyed) return;
+ 	const state = loroSyncPluginKey.getState(view.state);
+@@ -650,14 +1519,64 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -1096,6 +1147,7 @@ index 74c4b30..ea3abe0 100644
 +			}
 +		}
 +	}
++	if (tr.docChanged) cardmirrorRemapRendered(node, tr.doc, mapping);
  	tr.setMeta(loroSyncPluginKey, { type: "non-local-updates" });
  	view.dispatch(tr);
 -	if (anchor == null) return;
@@ -1106,7 +1158,7 @@ index 74c4b30..ea3abe0 100644
  /**
  * Update ProseMirror selection based on the given Loro cursors.
 diff --git a/node_modules/loro-prosemirror/dist/index.js b/node_modules/loro-prosemirror/dist/index.js
-index e41095d..0b30af6 100644
+index e41095d..c0133ef 100644
 --- a/node_modules/loro-prosemirror/dist/index.js
 +++ b/node_modules/loro-prosemirror/dist/index.js
 @@ -1,6 +1,185 @@
@@ -1385,7 +1437,7 @@ index e41095d..0b30af6 100644
  		} catch (e) {
 -			console.error(e);
 +			retval = cardmirrorHealInvalidNode(schema, nodeName, attributes.toJSON(), mappedChildren, obj.id);
-+			if (retval != null) WEAK_NODE_TO_LORO_CONTAINER_MAPPING.set(retval, obj.id);
++			if (retval != null) { WEAK_NODE_TO_LORO_CONTAINER_MAPPING.set(retval, obj.id); cardmirrorHealedNodes.add(retval); }
 +			else console.error(e);
  		}
  	} else if (obj instanceof LoroText) {
@@ -1587,12 +1639,12 @@ index e41095d..0b30af6 100644
 +		if (av.length !== bv.length) return false;
 +		for (let i = 0; i < av.length; i++) if (!cardmirrorCanonicalAttrsEqual(av[i], bv[i])) return false;
 +		return true;
- 	}
--	return eq;
++	}
 +	const keys = new Set([...Object.keys(av), ...Object.keys(bv)]);
 +	for (const key of keys) {
 +		if (!cardmirrorCanonicalAttrsEqual(av[key] ?? null, bv[key] ?? null)) return false;
-+	}
+ 	}
+-	return eq;
 +	return true;
 +}
 +function cardmirrorCanonicalizeAttrs(attrs) {
@@ -2150,7 +2202,58 @@ index e41095d..0b30af6 100644
  			return null;
  		},
  		view: (view) => {
-@@ -649,14 +1475,72 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -641,6 +1467,50 @@ function init(view) {
+ 		view.dispatch(tr);
+ 	}
+ }
++/**
++ * CardMirror patch: re-map after the bounded replace above.
++ *
++ * `createNodeFromLoroObj` maps every container id to the node objects it
++ * just built. Upstream then replaced the WHOLE document with that tree,
++ * so those exact objects became the document and the mapping held. The
++ * bounded replace splices only the changed span in, and ProseMirror
++ * rebuilds the ancestors around the splice boundary as NEW node objects
++ * — the card and the paragraph being edited, typically — leaving the
++ * mapping (and the node→container weak map) pointing at objects that
++ * never entered the document. Every cursor conversion under the caret
++ * then fails ("Cannot find the loroNode", one per transaction) until a
++ * local edit happens to re-map that textblock; the undo path, which
++ * always renders this way, was the loudest (field report 2026-09-05).
++ *
++ * The bounded replace is verified structurally equal to the built tree,
++ * so walk both in parallel and point the mapping at the document's own
++ * objects wherever they differ; identical subtrees are skipped, which
++ * bounds the walk to the splice boundary's ancestors.
++ *
++ * One deliberate exception: a container the display-layer heal
++ * synthesized (a missing head, a padded table cell) is left UNMAPPED.
++ * The heal is display-only until the next sync writes it back into the
++ * CRDT — "all-peer write-back" is what makes every peer, old clients
++ * included, converge on the same healed head — and that write-back only
++ * happens when the sync sees the container as changed. Before this
++ * re-map the stale mapping produced that by accident for every
++ * boundary container; now it is explicit and scoped to healed ones.
++ */
++const cardmirrorHealedNodes = new WeakSet();
++function cardmirrorRemapRendered(built, actual, mapping) {
++	if (built === actual || built.isText || actual.isText) return;
++	const id = WEAK_NODE_TO_LORO_CONTAINER_MAPPING.get(built);
++	if (cardmirrorHealedNodes.has(built)) {
++		if (id != null && mapping.get(id) === built) mapping.delete(id);
++		return;
++	}
++	if (id != null) {
++		if (mapping.get(id) === built) mapping.set(id, actual);
++		WEAK_NODE_TO_LORO_CONTAINER_MAPPING.set(actual, id);
++	}
++	if (built.childCount !== actual.childCount) return;
++	for (let i = 0; i < built.childCount; i++) cardmirrorRemapRendered(built.child(i), actual.child(i), mapping);
++}
+ function updateNodeOnLoroEvent(view, event) {
+ 	if (view.isDestroyed) return;
+ 	const state = loroSyncPluginKey.getState(view.state);
+@@ -649,14 +1519,73 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -2220,6 +2323,7 @@ index e41095d..0b30af6 100644
 +			}
 +		}
 +	}
++	if (tr.docChanged) cardmirrorRemapRendered(node, tr.doc, mapping);
  	tr.setMeta(loroSyncPluginKey, { type: "non-local-updates" });
  	view.dispatch(tr);
 -	if (anchor == null) return;

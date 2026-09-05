@@ -123,6 +123,13 @@ see `DETAILED_CHANGELOG.md`.
   generic error over "Session ended". Switching to three-pane or
   quitting now flushes version history as well as the recovery copy,
   and hiding the tab flushes unsent edits immediately.
+- **Co-editing: the caret's paragraph stays known to the sync layer
+  after an undo or a partner's edit.** Every render from the shared
+  document rebuilt the card and paragraph around the change as new
+  objects without telling the sync layer, so cursor sharing and undo
+  bookkeeping under the caret failed quietly, once per keystroke, until
+  the next local edit in that paragraph. Loudest after undo; on the web,
+  and in the console, as "Cannot find the loroNode".
 - **Co-editing: a resolved/reopened comment no longer shows stale on the
   peer that lost the race.** If two people toggled a comment's resolved
   state at the same moment, the loser's own screen kept its value while
