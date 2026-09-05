@@ -431,6 +431,36 @@ wherever they differ; identical subtrees are skipped, so the walk is
 bounded to the splice's ancestors. Pinned by a test that undoes an edit
 and checks every container is mapped and no error is logged.
 
+Two more sources of the same message turned out to be noise rather than
+staleness, and are silenced by construction: the binding's own init
+runs on a timer after the view is built, so a selection dispatched in
+that window met an empty mapping; and a selection-only transaction
+appended after another plugin's document change in the same batch was
+converted against a document the sync had not yet seen. The selection
+stash now runs only against a document the binding has synced, and so
+does the undo plugin's per-transaction selection capture, which had the
+same exposure whenever a plugin ahead of the sync appended a document
+change (the app's own numbering, heading-id and autocorrect plugins all
+do). One real case of staleness remained beyond the bounded render: a
+remote batch that produced exactly what this peer already showed (both
+peers moved the same card the same way) rebuilt the touched containers'
+mapping entries as fresh objects and then, having nothing to render,
+never re-pointed them; the re-map now runs after every render, visible
+change or not.
+
+The chaos rig gained a silent-failure battery from this: a
+console-error oracle, a per-round check that every container in every
+live document is in the binding's mapping, schema validity per round, a
+guard that the session repair pass never full-scans, a check that no
+peer ends with pending imports latched, and an end-of-seed comparison
+between each peer's live document and a fresh render of its own CRDT
+state; selection-only transactions and undo/redo are now in the default
+op mix, and a last-position plugin on every rig peer records the first
+batch that leaves a container unmapped, so a future stale mapping
+arrives with its own attribution. Every "Cannot find the loroNode" the
+rig had been printing — 65 per undo sweep, unread — resolved to the
+causes above.
+
 ### Fixed: a comments pane could keep a lost resolved toggle on screen
 
 The comment sync's pull skips its editor dispatch when the room's thread

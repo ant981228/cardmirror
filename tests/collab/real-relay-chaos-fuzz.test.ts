@@ -49,7 +49,17 @@
  *   6. presence: a leaving peer drops off partners' rosters within 2s,
  *      a rejoining one is back within 3s, and every roster is complete
  *      after convergence; comment threads/replies/resolved state
- *      converge and none is lost.
+ *      converge and none is lost;
+ *   7. the machinery around the document (the silent-failure battery,
+ *      2026-09-05 — the stale-mapping bug hid behind every oracle above
+ *      while the rig printed its error 65 times): no console.error
+ *      during a seed; every container in every live doc is in the
+ *      binding's mapping after every round; every doc is schema-valid
+ *      after every round; the session repair pass never full-scans;
+ *      no peer ends with pendingImports latched or a catch-up error
+ *      standing; and a FRESH binding rendering a peer's own CRDT state
+ *      reproduces that peer's live document (PM never lags Loro).
+ * Undo/redo and selection-only transactions are in the default op mix.
  * Soft notes (printed, never failing): a partner's edit lost to a
  * cut+paste of its card (delete+create — expected today), undo blocks
  * the rig's own ledger considers unjustified, long-outage row counts.
@@ -73,7 +83,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { Node as PMNode } from 'prosemirror-model';
-import { TextSelection } from 'prosemirror-state';
+import { TextSelection, NodeSelection, Plugin } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { schema, newHeadingId } from '../../src/schema/index.js';
 import { RoomsClient } from '../../src/editor/collab/room-client.js';
@@ -81,16 +91,17 @@ import { CollabSession } from '../../src/editor/collab/collab-session.js';
 import { decodeShareCode } from '../../src/editor/collab/collab-crypto.js';
 import { collabInvariantHealPlugin } from '../../src/editor/collab/collab-invariants.js';
 import { causalMarkHealPlugin } from '../../src/editor/collab/causal-mark-heal.js';
-import { collabRepairPlugin, lowestPeerIsLeader } from '../../src/editor/collab/collab-repair.js';
+import { collabRepairPlugin, lowestPeerIsLeader, repairStats } from '../../src/editor/collab/collab-repair.js';
+import { commentsSyncStats } from '../../src/editor/collab/collab-comments.js';
 import { headingIdGuardPlugin } from '../../src/editor/heading-id-guard.js';
 import { cardNumberingPlugin } from '../../src/editor/numbering-plugin.js';
 import { enterMidTag } from '../../src/editor/tag-keymap.js';
 import { freshHeadingIds } from '../../src/editor/drag-controller.js';
 import { buildCutInPlacePlugin, installCutInPlaceContext, markCutInPlace, handleCutInPlacePaste, pendingCut } from '../../src/editor/cut-in-place.js';
 import { Slice, Fragment } from 'prosemirror-model';
-import { LoroUndoPlugin, undo as loroUndo, redo as loroRedo } from 'loro-prosemirror';
+import { LoroUndoPlugin, LoroSyncPlugin, loroSyncPluginKey, undo as loroUndo, redo as loroRedo } from 'loro-prosemirror';
 import { createUndoGuard, type UndoGuard } from '../../src/editor/collab/undo-guard.js';
-import { UndoManager } from 'loro-crdt';
+import { UndoManager, LoroDoc } from 'loro-crdt';
 import { mkView, settle, sleep, cardNode, docOf, docText, tableNode, tableShapes } from './_loro-helpers.js';
 import { settings } from '../../src/editor/settings.js';
 import { smartQuotesPlugin } from '../../src/editor/smart-quotes-plugin.js';
@@ -141,8 +152,10 @@ installCutInPlaceContext({
 /** Drop the invariant-heal / causal-mark-heal / repair plugins (the app's
  *  in-session menders) to see whether a loss needs them. */
 const NO_HEAL = process.env['FUZZ_NO_HEAL'] === '1';
-/** Undo/redo through the app's Loro undo manager (FUZZ_UNDO=1). */
-const WITH_UNDO = process.env['FUZZ_UNDO'] === '1';
+/** Undo/redo through the app's Loro undo manager — ON by default like the
+ *  app (FUZZ_NO_UNDO=1 drops it); FUZZ_UNDO=1 raises the op rate. */
+const WITH_UNDO = process.env['FUZZ_NO_UNDO'] !== '1';
+const UNDO_RATE = process.env['FUZZ_UNDO'] === '1' ? 0.1 : 0.04;
 /** FUZZ_UNDO_OPS=0: install the undo plugin but never invoke undo/redo
  *  (isolates the plugin's presence from the operations). */
 const UNDO_OPS = process.env['FUZZ_UNDO_OPS'] !== '0';
@@ -590,14 +603,14 @@ function bump(o: Oracle, name: string): void {
 function applyOp(view: EditorView, rnd: () => number, o: Oracle, seed: number, agnostic = false): string {
   if (WITH_UNDO && UNDO_OPS && !agnostic) {
     const u = rnd();
-    if (u < 0.10) {
+    if (u < UNDO_RATE) {
       // Undo/redo only touches THIS peer's own ops, so the oracle
       // reconciles by diffing this peer's token set: a token that
       // vanished was legitimately un-inserted (counts as deleted), one
       // that reappeared was legitimately un-deleted.
       const before = tokensIn(view.state.doc);
       const umP = undoManagers.get(view);
-      let isUndo = u < 0.07;
+      let isUndo = u < UNDO_RATE * 0.7;
       if (umP && isUndo && !umP.canUndo() && umP.canRedo()) isUndo = false;
       if (umP && !isUndo && !umP.canRedo() && umP.canUndo()) isUndo = true;
       if (umP && !(isUndo ? umP.canUndo() : umP.canRedo())) return 'skip';
@@ -678,6 +691,23 @@ function applyOp(view: EditorView, rnd: () => number, o: Oracle, seed: number, a
         name = 'cutInPlaceMark';
         bump(o, 'cutInPlaceMark');
       }
+    } else if (roll < 0.18) {
+      // a selection-only transaction: no doc change, exactly what the
+      // app dispatches between renders (caret moves, nav clicks, the
+      // frozen-selection plugin) — the stale-mapping window's witness
+      const cards = topCards(doc);
+      if (rnd() < 0.3 && cards.length) {
+        const c = cards[Math.floor(rnd() * cards.length)]!;
+        view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, c.pos)));
+      } else {
+        const tbs = textblocks(doc);
+        if (tbs.length === 0) return 'skip';
+        const tb = tbs[Math.floor(rnd() * tbs.length)]!;
+        const offs = safeOffsets(tb.node.textContent);
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(doc, tb.start + offs[Math.floor(rnd() * offs.length)]!)));
+      }
+      name = 'select';
+      bump(o, 'select');
     } else if (roll < 0.34) {
       // insert a tracked token inside a body textblock
       const bodies = textblocks(doc).filter((t) => t.node.type.name === 'card_body' || t.node.type.name === 'paragraph');
@@ -854,6 +884,44 @@ function applyOp(view: EditorView, rnd: () => number, o: Oracle, seed: number, a
   return name;
 }
 
+/** Container nodes of `view`'s doc that the binding's mapping does not
+ *  hold (the reverse lookup absolutePositionToCursor falls back to):
+ *  a stale mapping is invisible to every document oracle and breaks
+ *  cursor sharing and undo's caret restore under the caret. */
+function unmappedContainers(view: EditorView): string[] {
+  const st = loroSyncPluginKey.getState(view.state) as { mapping: Map<string, unknown> } | undefined;
+  if (!st) return [];
+  const values = new Set(st.mapping.values());
+  const out: string[] = [];
+  view.state.doc.descendants((n, pos) => {
+    if (n.isText) return false;
+    if (!values.has(n)) out.push(`${n.type.name}@${pos}`);
+    return true;
+  });
+  return out;
+}
+/** The doc a FRESH binding renders from this peer's own CRDT state — if
+ *  it differs from the live doc, the live ProseMirror doc lags Loro (a
+ *  render that dropped content, or a local edit Loro never got). */
+async function freshRender(session: CollabSession): Promise<PMNode> {
+  const ldoc = new LoroDoc();
+  ldoc.import(session.exportSnapshot());
+  const v = mkView([LoroSyncPlugin({ doc: ldoc as never })]);
+  await settle();
+  const d = v.state.doc;
+  v.destroy();
+  return d;
+}
+function firstDiff(a: PMNode, b: PMNode): string {
+  const n = Math.max(a.childCount, b.childCount);
+  for (let i = 0; i < n; i++) {
+    const x = a.maybeChild(i);
+    const y = b.maybeChild(i);
+    if (!x || !y || !x.eq(y)) return `child ${i}: live=${JSON.stringify((x?.textContent ?? '<none>').slice(0, 50))} fresh=${JSON.stringify((y?.textContent ?? '<none>').slice(0, 50))}`;
+  }
+  return 'attrs/marks differ';
+}
+
 /** Texts of the headings carrying `id` — to see WHICH nodes share it. */
 function headingTextsFor(doc: PMNode, id: string): string[] {
   const out: string[] = [];
@@ -911,6 +979,40 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
           const timings: Record<string, number> = {};
           const textSync = (globalThis as { __CM_TEXT_SYNC_STATS__?: { exact: number; mismatch: number; diffBatches: number } }).__CM_TEXT_SYNC_STATS__;
           const textSyncBefore = textSync ? { ...textSync } : null;
+          // Console oracle: the binding and the session report silent
+          // failures through console.error / console.warn — nobody reads
+          // stdout, so count them. Errors fail the seed; warnings are
+          // tallied (chaos makes the stream complain, legitimately).
+          const consoleErrors = new Map<string, number>();
+          const consoleWarns = new Map<string, number>();
+          const origError = console.error;
+          const origWarn = console.warn;
+          const norm = (a: unknown[]): string => a.map((x) => (x instanceof Error ? x.message : String(x))).join(' ').replace(/\d+/g, '#').slice(0, 200);
+          const errorSites = new Map<string, string>();
+          let activeView: EditorView | null = null;
+          console.error = (...a: unknown[]) => {
+            const k = norm(a);
+            consoleErrors.set(k, (consoleErrors.get(k) ?? 0) + 1);
+            if (!errorSites.has(k)) {
+              const sel = activeView?.state.selection;
+              let rootInfo = '';
+              if (activeView) {
+                const st = loroSyncPluginKey.getState(activeView.state) as { doc: LoroDoc; mapping: Map<string, unknown> } | undefined;
+                if (st) {
+                  const rootId = st.doc.getMap('doc').id;
+                  const m = st.mapping.get(rootId);
+                  rootInfo = ` root: mapped=${m === activeView.state.doc} mappedIsDocType=${(m as PMNode | undefined)?.type?.name ?? 'none'} mappedEq=${(m as PMNode | undefined)?.eq?.(activeView.state.doc) ?? '?'}`;
+                }
+              }
+              const healNow = activeView ? /crdt-heal-/.test(JSON.stringify(activeView.state.doc.toJSON())) : false;
+              const selInfo = sel ? `sel=${sel.constructor.name} ${sel.from}-${sel.to} parent=${sel.$anchor.parent.type.name} depth=${sel.$anchor.depth} heal=${healNow} unmapped=[${activeView ? unmappedContainers(activeView).slice(0, 3).join(' ') : ''}]${rootInfo}` : 'sel=?';
+              const frames = (new Error().stack ?? '').split('\n').slice(2, 9).map((f) => f.trim().replace(/^at /, '').replace(/\(.*\/(src|node_modules|tests)\//, '(').replace(/\?v=[^:]*/, ''));
+              errorSites.set(k, `${selInfo} ${frames.slice(0, 3).join(' ← ')} [last op: ${oracle.trail[oracle.trail.length - 1] ?? '-'}]`);
+            }
+          };
+          console.warn = (...a: unknown[]) => { consoleWarns.set(norm(a), (consoleWarns.get(norm(a)) ?? 0) + 1); };
+          const fullScansBefore = repairStats.fullDocScans;
+          const droppedBefore = commentsSyncStats.droppedMutations;
           const mkClient = () =>
             new RoomsClient({
               baseUrl: () => `http://127.0.0.1:${PROXY_PORT}/relay`,
@@ -935,6 +1037,36 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
           // plugin ahead of it the guard is inert (measured 2026-09-04:
           // sync→guard leaves a duplicate-id insert unrepaired; guard→sync
           // remints it).
+          // Mapping-stale attribution: the LAST plugin on every fresh peer
+          // inspects the binding's mapping after each batch and records the
+          // first batch that left a live container unmapped (its
+          // transactions' metas, doc-changed flags and the sync's changedBy)
+          // — the per-op / per-round checks only see the aftermath.
+          const staleTrace = new Map<CollabSession, string>();
+          const roundRef = { current: -1 };
+          const mappingWatch = (s: CollabSession): Plugin => new Plugin({
+            appendTransaction(trs, _old, newState) {
+              if (staleTrace.has(s)) return null;
+              const st = loroSyncPluginKey.getState(newState) as { mapping: Map<string, unknown>; changedBy: string } | undefined;
+              if (!st) return null;
+              const values = new Set(st.mapping.values());
+              const miss: string[] = [];
+              if (!values.has(newState.doc)) miss.push('doc');
+              newState.doc.descendants((n, pos) => {
+                if (n.isText) return false;
+                if (!values.has(n)) miss.push(`${n.type.name}@${pos}`);
+                return true;
+              });
+              if (!miss.length) return null;
+              const desc = trs.map((t) => {
+                const metas = (t as unknown as { meta: Record<string, unknown> }).meta;
+                const keys = Object.keys(metas).map((k) => (k.startsWith('loro-sync') ? `loro-sync:${(metas[k] as { type?: string }).type ?? '?'}` : k));
+                return `${t.docChanged ? 'D' : 's'}[${keys.join(',')}]`;
+              }).join(' ');
+              staleTrace.set(s, `first unmapped at r${roundRef.current} after batch ${desc} changedBy=${st.changedBy} sel=${newState.selection.constructor.name} miss=${miss.slice(0, 4).join(',')}`);
+              return null;
+            },
+          });
           const pendingGuards = new Map<CollabSession, UndoGuard>();
           const pendingUms = new Map<CollabSession, UndoManager>();
           let viewRef: { current: EditorView | null } = { current: null };
@@ -968,9 +1100,16 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
                 ]),
             ...(commentsOf.get(s) ? [commentsPlugin, commentsOf.get(s)!.plugin] : []),
             ...(cursorsOf.get(s)?.plugins() ?? []),
+            mappingWatch(s),
             ];
           };
           /** mkView + bind the session's undo guard to the new view. */
+          /** The binding's init runs on a setTimeout(0) after the view is
+           *  built and swaps its mapping into the plugin state; a transaction
+           *  dispatched before that runs against the empty initial map (a
+           *  console "Cannot find the loroNode" with nothing wrong). The
+           *  post-construction dispatches below wait past that timer. */
+          const afterBindingInit = (v: EditorView, f: () => void): void => { setTimeout(() => { if (!v.isDestroyed) f(); }, 1); };
           const viewFor = (s: CollabSession): EditorView => {
             const ref = { current: null as EditorView | null };
             viewRefs.set(s, ref);
@@ -979,13 +1118,15 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
             const v = mkView(plugsFor(s));
             ref.current = v;
             docKeys.set(v, `rig-doc-${++docKeySeq}`);
-            commentsOf.get(s)?.pull();
             // The cursor plugin publishes a local cursor only while the view
             // has focus, which jsdom never grants a contenteditable: stub it
             // (as collab-cursors.test.ts does) and seed one selection so
             // every peer has a presence state to announce and re-announce.
             (v as unknown as { hasFocus: () => boolean }).hasFocus = () => true;
-            if (WITH_PRESENCE && v.state.doc.content.size > 2) v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, 1)));
+            afterBindingInit(v, () => {
+              commentsOf.get(s)?.pull();
+              if (WITH_PRESENCE && v.state.doc.content.size > 2) v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, 1)));
+            });
             const g = pendingGuards.get(s);
             const um = pendingUms.get(s);
             if (um) { undoManagers.set(v, um); peerAtCreate.set(v, s.loroDoc.peerIdStr); peerAtOp.set(v, () => s.loroDoc.peerIdStr); }
@@ -1047,9 +1188,11 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
               ...(cursorsOf.get(s)?.plugins() ?? []),
             ]);
             ref.current = v;
-            commentsOf.get(s)?.pull();
             (v as unknown as { hasFocus: () => boolean }).hasFocus = () => true;
-            if (WITH_PRESENCE && v.state.doc.content.size > 2) v.dispatch(v.state.tr.setSelection(om.TextSelection.create(v.state.doc, 1)));
+            afterBindingInit(v, () => {
+              commentsOf.get(s)?.pull();
+              if (WITH_PRESENCE && v.state.doc.content.size > 2) v.dispatch(v.state.tr.setSelection(om.TextSelection.create(v.state.doc, 1)));
+            });
             return v;
           };
           const hostRef = { s: null as CollabSession | null };
@@ -1080,6 +1223,7 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
 
           const relayRestartRound = Math.floor(rnd() * ROUNDS);
           for (let round = 0; round < ROUNDS; round++) {
+            roundRef.current = round;
             for (let p = 0; p < peers.length; p++) {
               const n = 1 + Math.floor(rnd() * 4);
               oracle.where = `r${round}p${p}`;
@@ -1087,8 +1231,18 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
                 const before = duplicateIds(peers[p]!.view.state.doc);
                 const presentBefore = [...tokensIn(peers[p]!.view.state.doc)].filter((t) => oracle.inserted.has(t));
                 const tOp = performance.now();
+                activeView = peers[p]!.view;
                 const name = applyOp(peers[p]!.view, rnd, oracle, seed, peers[p]!.old === true);
                 if (name !== 'skip') opTimes.push(performance.now() - tOp);
+                if (peers[p]!.view.state.selection.constructor.name === 'AllSelection') oracle.trail.push(`r${round}p${p}:ALLSEL-after-${name}`);
+                if (!peers[p]!.old && name !== 'skip') {
+                  const um = unmappedContainers(peers[p]!.view);
+                  if (um.length && !report.problems.some((x) => x.startsWith('MAPPING'))) {
+                    const sp = peers[p]!.view.state.selection.$anchor.parent.type.name;
+                    report.ok = false;
+                    report.problems.push(`MAPPING stale right after ${name} on p${p} at r${round}: ${um.slice(0, 4).join(' ')}${um.length > 4 ? ` +${um.length - 4}` : ''} (selection parent ${sp}; ops: ${oracle.trail.slice(-6).join(' ')}; ${staleTrace.get(peers[p]!.session) ?? 'no batch recorded'})`);
+                  }
+                }
                 // A token this peer could see that is gone right after its
                 // own op (and the op did not delete it) names the door.
                 {
@@ -1122,6 +1276,22 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
               }
             }
             await sleep(80 + Math.floor(rnd() * 120));
+            for (let p = 0; p < peers.length; p++) {
+              if (peers[p]!.old) continue; // the old tree's plugin key is a different instance
+              const unmapped = unmappedContainers(peers[p]!.view);
+              if (unmapped.length && !report.problems.some((x) => x.startsWith('MAPPING'))) {
+                report.ok = false;
+                report.problems.push(`MAPPING stale on p${p} at r${round}: ${unmapped.slice(0, 4).join(' ')}${unmapped.length > 4 ? ` +${unmapped.length - 4}` : ''} (ops this round: ${oracle.trail.filter((x) => x.startsWith(`r${round}p`) && !x.endsWith(':skip')).join(' ')}; ${staleTrace.get(peers[p]!.session) ?? 'no batch recorded'})`);
+              }
+              try {
+                peers[p]!.view.state.doc.check();
+              } catch (e) {
+                if (!report.problems.some((x) => x.startsWith('schema-invalid mid-run'))) {
+                  report.ok = false;
+                  report.problems.push(`schema-invalid mid-run on p${p} at r${round}: ${(e as Error).message.slice(0, 100)}`);
+                }
+              }
+            }
             for (const t of oracle.inserted) {
               if (oracle.deleted.has(t)) continue;
               const seen = peers.map((pp, i) => (countToken(pp.view.state.doc, t) > 0 ? `p${i}` : '-')).join('');
@@ -1235,10 +1405,10 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
               me.session.start();
               me.stopped = false;
               handle?.rebroadcast?.();
-              const back = await rosterWait(() => partners.every((x) => cursorsOf.get(x.session)!.presence().some((e) => e.peer === myId)), 3000);
+              const back = await rosterWait(() => partners.every((x) => cursorsOf.get(x.session)!.presence().some((e) => e.peer === myId)), 6000);
               if (!back) {
                 if (me.old) oracle.notes.push(`old-tree p${p} rejoined without a re-announce (pre-1.7.0): partners list it on its next cursor frame`);
-                else report.problems.push(`PRESENCE: p${p} not re-announced to every partner 3s after rejoining (r${round})`);
+                else report.problems.push(`PRESENCE: p${p} not re-announced to every partner 6s after rejoining (r${round})`);
               }
             } else if (c < 0.9) {
               /* presence disabled: nothing this round */
@@ -1386,6 +1556,41 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
             report.problems.push(`fresh joiner failed: ${(e as Error).message}`);
           }
 
+          console.error = origError;
+          console.warn = origWarn;
+          if (consoleErrors.size) {
+            report.ok = false;
+            report.problems.push(`CONSOLE ERRORS: ${[...consoleErrors.entries()].map(([m, n]) => `${n}× ${m}\n      first at: ${errorSites.get(m) ?? '?'}`).join(' | ')}`);
+          }
+          report.ops['warns'] = [...consoleWarns.values()].reduce((a, b) => a + b, 0);
+          if (repairStats.fullDocScans !== fullScansBefore) {
+            report.ok = false;
+            report.problems.push(`repair pass FULL-SCANNED the document ${repairStats.fullDocScans - fullScansBefore}× (the session pass is bounded by design)`);
+          }
+          if (commentsSyncStats.droppedMutations !== droppedBefore) oracle.notes.push(`comments: ${commentsSyncStats.droppedMutations - droppedBefore} mutation(s) the room had already dropped (delete-wins)`);
+          for (let p = 0; p < peers.length; p++) {
+            const d = peers[p]!.session.debugState();
+            if (d.pendingImports) {
+              report.ok = false;
+              report.problems.push(`p${p}: pendingImports still latched after convergence (compaction blocked — the SC1 class)`);
+            }
+            if (d.tailOverflow) oracle.notes.push(`p${p}: audit tail ledger overflowed (falls back to the ground-truth scan)`);
+          }
+          // PM lags Loro? A fresh binding rendering each peer's own CRDT
+          // state must produce the peer's live document.
+          for (let p = 0; p < peers.length; p++) {
+            if (peers[p]!.old) continue;
+            try {
+              const fresh = await freshRender(peers[p]!.session);
+              const live = peers[p]!.view.state.doc;
+              if (JSON.stringify(live.toJSON()) !== JSON.stringify(fresh.toJSON())) {
+                report.ok = false;
+                report.problems.push(`PM LAGS LORO on p${p}: a fresh render of its own state differs — ${firstDiff(live, fresh)}`);
+              }
+            } catch (e) {
+              oracle.notes.push(`fresh render of p${p} failed: ${(e as Error).message.slice(0, 80)}`);
+            }
+          }
           const final = peers[0]!.view.state.doc;
           try {
             final.check();

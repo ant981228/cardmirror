@@ -1,5 +1,5 @@
 diff --git a/node_modules/loro-prosemirror/dist/index.cjs b/node_modules/loro-prosemirror/dist/index.cjs
-index 74c4b30..037eee3 100644
+index 74c4b30..84cebde 100644
 --- a/node_modules/loro-prosemirror/dist/index.cjs
 +++ b/node_modules/loro-prosemirror/dist/index.cjs
 @@ -28,6 +28,82 @@ function updateLoroToPmState(doc, mapping, editorState, containerId) {
@@ -1005,7 +1005,7 @@ index 74c4b30..037eee3 100644
  						break;
  					case "update-state":
  						state = {
-@@ -587,11 +1395,28 @@ const LoroSyncPlugin = (props) => {
+@@ -587,11 +1395,37 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -1019,7 +1019,16 @@ index 74c4b30..037eee3 100644
 +				// doc-changing keystroke tr runs BEFORE its doc-changed
 +				// follow-up, so capturing there both misses (loro lags one
 +				// step) and spams "Cannot find the loroNode" per keystroke.
-+				if (state.changedBy === "local" && (meta?.type === "doc-changed" || !tr.docChanged)) {
++				// CardMirror patch: only against a document the binding has
++				// synced. The stash exists to capture the selection while PM and
++				// Loro AGREE; two windows break that: before init has bound the
++				// document (init runs on a setTimeout(0) after the view is
++				// built), and a selection-only transaction appended AFTER
++				// another plugin's doc-changing one in the same batch, whose
++				// doc the PM→Loro sync has not seen yet. Both only logged
++				// "Cannot find the loroNode" for nothing. A synced doc is in the
++				// node→container weak map (set by every sync and every render).
++				if (state.changedBy === "local" && WEAK_NODE_TO_LORO_CONTAINER_MAPPING.has(newEditorState.doc) && (meta?.type === "doc-changed" || !tr.docChanged)) {
 +					try {
 +						state.selectionCursors = convertPmSelectionToCursors(newEditorState.doc, newEditorState.selection, state);
 +					} catch (e) {
@@ -1035,7 +1044,7 @@ index 74c4b30..037eee3 100644
  			return null;
  		},
  		view: (view) => {
-@@ -642,6 +1467,50 @@ function init(view) {
+@@ -642,6 +1476,50 @@ function init(view) {
  		view.dispatch(tr);
  	}
  }
@@ -1086,7 +1095,7 @@ index 74c4b30..037eee3 100644
  function updateNodeOnLoroEvent(view, event) {
  	if (view.isDestroyed) return;
  	const state = loroSyncPluginKey.getState(view.state);
-@@ -650,14 +1519,64 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -650,14 +1528,68 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -1147,7 +1156,11 @@ index 74c4b30..037eee3 100644
 +			}
 +		}
 +	}
-+	if (tr.docChanged) cardmirrorRemapRendered(node, tr.doc, mapping);
++	// Always — a render with NO visible change (the remote batch produced
++	// what this peer already showed, e.g. both peers moved the same card
++	// the same way) still rebuilt the changed containers' mapping entries
++	// as fresh objects the document never adopts.
++	cardmirrorRemapRendered(node, tr.docChanged ? tr.doc : view.state.doc, mapping);
  	tr.setMeta(loroSyncPluginKey, { type: "non-local-updates" });
  	view.dispatch(tr);
 -	if (anchor == null) return;
@@ -1157,8 +1170,24 @@ index 74c4b30..037eee3 100644
  }
  /**
  * Update ProseMirror selection based on the given Loro cursors.
+@@ -848,7 +1780,14 @@ const LoroUndoPlugin = (props) => {
+ 				if (!undoState || !loroState) return state;
+ 				const canUndo = undoState.undoManager.canUndo();
+ 				const canRedo = undoState.undoManager.canRedo();
+-				{
++				// CardMirror patch: only against a document the binding has
++				// synced (upstream converts on EVERY transaction). In a batch
++				// where another plugin appends a doc-changing transaction after
++				// a raw edit, this old document is one the sync has not seen —
++				// its root is unmapped — and a whole-card node selection logged
++				// "Cannot find the loroNode" for nothing. The next transaction's
++				// old document is the synced one, so nothing is lost.
++				if (WEAK_NODE_TO_LORO_CONTAINER_MAPPING.has(oldEditorState.doc)) {
+ 					const { anchor, focus } = convertPmSelectionToCursors(oldEditorState.doc, oldEditorState.selection, loroState);
+ 					lastSelection = {
+ 						anchor: anchor ?? null,
 diff --git a/node_modules/loro-prosemirror/dist/index.js b/node_modules/loro-prosemirror/dist/index.js
-index e41095d..c0133ef 100644
+index e41095d..3ea475a 100644
 --- a/node_modules/loro-prosemirror/dist/index.js
 +++ b/node_modules/loro-prosemirror/dist/index.js
 @@ -1,6 +1,185 @@
@@ -2172,7 +2201,7 @@ index e41095d..c0133ef 100644
  						break;
  					case "update-state":
  						state = {
-@@ -586,11 +1395,28 @@ const LoroSyncPlugin = (props) => {
+@@ -586,11 +1395,37 @@ const LoroSyncPlugin = (props) => {
  						break;
  					default: break;
  				}
@@ -2186,7 +2215,16 @@ index e41095d..c0133ef 100644
 +				// doc-changing keystroke tr runs BEFORE its doc-changed
 +				// follow-up, so capturing there both misses (loro lags one
 +				// step) and spams "Cannot find the loroNode" per keystroke.
-+				if (state.changedBy === "local" && (meta?.type === "doc-changed" || !tr.docChanged)) {
++				// CardMirror patch: only against a document the binding has
++				// synced. The stash exists to capture the selection while PM and
++				// Loro AGREE; two windows break that: before init has bound the
++				// document (init runs on a setTimeout(0) after the view is
++				// built), and a selection-only transaction appended AFTER
++				// another plugin's doc-changing one in the same batch, whose
++				// doc the PM→Loro sync has not seen yet. Both only logged
++				// "Cannot find the loroNode" for nothing. A synced doc is in the
++				// node→container weak map (set by every sync and every render).
++				if (state.changedBy === "local" && WEAK_NODE_TO_LORO_CONTAINER_MAPPING.has(newEditorState.doc) && (meta?.type === "doc-changed" || !tr.docChanged)) {
 +					try {
 +						state.selectionCursors = convertPmSelectionToCursors(newEditorState.doc, newEditorState.selection, state);
 +					} catch (e) {
@@ -2202,7 +2240,7 @@ index e41095d..c0133ef 100644
  			return null;
  		},
  		view: (view) => {
-@@ -641,6 +1467,50 @@ function init(view) {
+@@ -641,6 +1476,50 @@ function init(view) {
  		view.dispatch(tr);
  	}
  }
@@ -2253,7 +2291,7 @@ index e41095d..c0133ef 100644
  function updateNodeOnLoroEvent(view, event) {
  	if (view.isDestroyed) return;
  	const state = loroSyncPluginKey.getState(view.state);
-@@ -649,14 +1519,73 @@ function updateNodeOnLoroEvent(view, event) {
+@@ -649,14 +1528,77 @@ function updateNodeOnLoroEvent(view, event) {
  	const mapping = state.mapping;
  	clearChangedNodes(state.doc, event, mapping);
  	const node = createNodeFromLoroObj(view.state.schema, state.containerId ? state.doc.getContainerById(state.containerId) : state.doc.getMap(ROOT_DOC_KEY), mapping);
@@ -2323,7 +2361,11 @@ index e41095d..c0133ef 100644
 +			}
 +		}
 +	}
-+	if (tr.docChanged) cardmirrorRemapRendered(node, tr.doc, mapping);
++	// Always — a render with NO visible change (the remote batch produced
++	// what this peer already showed, e.g. both peers moved the same card
++	// the same way) still rebuilt the changed containers' mapping entries
++	// as fresh objects the document never adopts.
++	cardmirrorRemapRendered(node, tr.docChanged ? tr.doc : view.state.doc, mapping);
  	tr.setMeta(loroSyncPluginKey, { type: "non-local-updates" });
  	view.dispatch(tr);
 -	if (anchor == null) return;
@@ -2333,3 +2375,19 @@ index e41095d..c0133ef 100644
  }
  /**
  * Update ProseMirror selection based on the given Loro cursors.
+@@ -847,7 +1789,14 @@ const LoroUndoPlugin = (props) => {
+ 				if (!undoState || !loroState) return state;
+ 				const canUndo = undoState.undoManager.canUndo();
+ 				const canRedo = undoState.undoManager.canRedo();
+-				{
++				// CardMirror patch: only against a document the binding has
++				// synced (upstream converts on EVERY transaction). In a batch
++				// where another plugin appends a doc-changing transaction after
++				// a raw edit, this old document is one the sync has not seen —
++				// its root is unmapped — and a whole-card node selection logged
++				// "Cannot find the loroNode" for nothing. The next transaction's
++				// old document is the synced one, so nothing is lost.
++				if (WEAK_NODE_TO_LORO_CONTAINER_MAPPING.has(oldEditorState.doc)) {
+ 					const { anchor, focus } = convertPmSelectionToCursors(oldEditorState.doc, oldEditorState.selection, loroState);
+ 					lastSelection = {
+ 						anchor: anchor ?? null,

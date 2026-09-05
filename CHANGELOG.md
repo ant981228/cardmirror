@@ -129,7 +129,11 @@ see `DETAILED_CHANGELOG.md`.
   objects without telling the sync layer, so cursor sharing and undo
   bookkeeping under the caret failed quietly, once per keystroke, until
   the next local edit in that paragraph. Loudest after undo; on the web,
-  and in the console, as "Cannot find the loroNode".
+  and in the console, as "Cannot find the loroNode". A remote batch that
+  changed nothing visible left the same staleness behind; it no longer
+  does. The same message also fired, harmlessly, for selections made
+  before the sync layer had bound a freshly opened document or
+  mid-batch; it no longer does.
 - **Co-editing: a resolved/reopened comment no longer shows stale on the
   peer that lost the race.** If two people toggled a comment's resolved
   state at the same moment, the loser's own screen kept its value while

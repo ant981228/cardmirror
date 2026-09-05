@@ -27,6 +27,7 @@ function unmappedContainers(view: EditorView): string[] {
   const st = loroSyncPluginKey.getState(view.state) as { mapping: Map<string, unknown> };
   const values = new Set(st.mapping.values());
   const out: string[] = [];
+  if (!values.has(view.state.doc)) out.push('doc');
   view.state.doc.descendants((n, pos) => {
     if (n.isText) return false;
     if (!values.has(n)) out.push(`${n.type.name}@${pos}`);
@@ -69,6 +70,128 @@ describe('binding mapping survives the bounded render', () => {
       }
     } finally {
       A!.destroy();
+      globalThis.__CM_MOVABLE_LIST__ = undefined;
+    }
+  });
+
+  it('the selection stash stays silent on a selection-only transaction appended after a doc change (plugins ahead of the sync)', async () => {
+    // Batch shape the app produces: a raw edit → a plugin ahead of the sync
+    // appends a doc change → another appends a selection fix. The sync's
+    // own doc-changed transaction comes last, so the stash on that
+    // selection-only transaction met a document the sync had not seen.
+    globalThis.__CM_MOVABLE_LIST__ = true;
+    const { Plugin, NodeSelection: NS } = await import('prosemirror-state');
+    const { LoroSyncPlugin } = await import('loro-prosemirror');
+    const { LoroDoc } = await import('loro-crdt');
+    const { mkView } = await import('./_loro-helpers.js');
+    const [tmp] = await createLoroPeers(docOf(cardNode('Tag one', ['alpha bravo']), cardNode('Tag two', ['charlie'])), 1, () => []);
+    const blob = tmp!.exportAll();
+    tmp!.destroy();
+    const ldoc = new LoroDoc();
+    ldoc.import(blob);
+    const numbering = new Plugin({
+      appendTransaction(trs, _old, state) {
+        if (!trs.some((t) => t.getMeta('probe-select'))) return null;
+        return state.tr.insertText('!', bodyPos(state.doc, 1) + 1).setMeta('probe-step', true);
+      },
+    });
+    const fixup = new Plugin({
+      appendTransaction(trs, _old, state) {
+        if (!trs.some((t) => t.getMeta('probe-step'))) return null;
+        return state.tr.setSelection(NS.create(state.doc, 0)); // selection-only, unsynced doc
+      },
+    });
+    const view = mkView([numbering, fixup, LoroSyncPlugin({ doc: ldoc as never })]);
+    await settle();
+    await new Promise((r) => setTimeout(r, 5)); // past the binding's init timer
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      view.dispatch(view.state.tr.insertText('Y', bodyPos(view.state.doc, 0) + 1)); // a first synced edit
+      await settle();
+      view.dispatch(view.state.tr.insertText('X', bodyPos(view.state.doc, 0) + 2).setMeta('probe-select', true));
+      await settle();
+      expect(view.state.doc.child(1).child(1).textContent).toBe('c!harlie');
+      expect(errors.mock.calls.filter((c) => String(c[0]).includes('Cannot find the loroNode')).length).toBe(0);
+    } finally {
+      errors.mockRestore();
+      view.destroy();
+      globalThis.__CM_MOVABLE_LIST__ = undefined;
+    }
+  });
+
+  it('the undo plugin\'s selection capture stays silent when a plugin AHEAD of the sync appends a doc change (node selection)', async () => {
+    // The app's plugin order puts several appenders (heading-id guard,
+    // numbering, autocorrect) BEFORE the sync plugin, so their appended
+    // transactions land before the sync's own doc-changed one. The undo
+    // plugin's per-transaction capture converts the OLD state's selection
+    // against the old document — for such an appended transaction that is
+    // the raw edit's result, which nothing has synced yet — and a whole-
+    // card node selection at depth 0 logged "Cannot find the loroNode".
+    globalThis.__CM_MOVABLE_LIST__ = true;
+    const { Plugin, NodeSelection: NS } = await import('prosemirror-state');
+    const { LoroSyncPlugin } = await import('loro-prosemirror');
+    const { LoroDoc } = await import('loro-crdt');
+    const { mkView } = await import('./_loro-helpers.js');
+    const [tmp] = await createLoroPeers(docOf(cardNode('Tag one', ['alpha bravo']), cardNode('Tag two', ['charlie'])), 1, () => []);
+    const blob = tmp!.exportAll();
+    tmp!.destroy();
+    const ldoc = new LoroDoc();
+    ldoc.import(blob);
+    const appender = new Plugin({
+      appendTransaction(trs, _old, state) {
+        if (!trs.some((t) => t.getMeta('probe-select2'))) return null;
+        return state.tr.insertText('!', bodyPos(state.doc, 1) + 1);
+      },
+    });
+    const view = mkView([
+      appender, // ahead of the sync plugin, like the app's own appenders
+      LoroSyncPlugin({ doc: ldoc as never }),
+      LoroUndoPlugin({ doc: ldoc, undoManager: new UndoManager(ldoc, { mergeInterval: 0 }) }),
+    ]);
+    await settle();
+    await new Promise((r) => setTimeout(r, 5)); // past the binding's init timer
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      view.dispatch(view.state.tr.insertText('Y', bodyPos(view.state.doc, 0) + 1)); // a first synced edit
+      await settle();
+      const tr = view.state.tr.insertText('X', bodyPos(view.state.doc, 0) + 2);
+      tr.setSelection(NS.create(tr.doc, 0)).setMeta('probe-select2', true);
+      view.dispatch(tr);
+      await settle();
+      expect(view.state.doc.child(1).child(1).textContent).toBe('c!harlie');
+      expect(errors.mock.calls.filter((c) => String(c[0]).includes('Cannot find the loroNode')).length).toBe(0);
+    } finally {
+      errors.mockRestore();
+      view.destroy();
+      globalThis.__CM_MOVABLE_LIST__ = undefined;
+    }
+  });
+
+  it('a remote batch that changes nothing visible (both peers made the same move) keeps the mapping on the live objects', async () => {
+    globalThis.__CM_MOVABLE_LIST__ = true;
+    const [A, B] = await createLoroPeers(
+      docOf(cardNode('Tag one', ['alpha bravo']), cardNode('Tag two', ['charlie']), cardNode('Tag three', ['delta'])),
+      2,
+      () => [],
+    );
+    const moveFirstToEnd = (view: EditorView): void => {
+      const first = view.state.doc.child(0);
+      const tr = view.state.tr.delete(0, first.nodeSize);
+      tr.insert(tr.doc.content.size, first);
+      view.dispatch(tr);
+    };
+    try {
+      moveFirstToEnd(A!.view);
+      moveFirstToEnd(B!.view);
+      await settle();
+      await syncAll([A!, B!]);
+      await settle(3);
+      expect(A!.doc().child(2).firstChild!.textContent).toBe('Tag one');
+      expect(unmappedContainers(A!.view), 'A rendered a no-op batch and must still map its own objects').toEqual([]);
+      expect(unmappedContainers(B!.view)).toEqual([]);
+    } finally {
+      A!.destroy();
+      B!.destroy();
       globalThis.__CM_MOVABLE_LIST__ = undefined;
     }
   });
