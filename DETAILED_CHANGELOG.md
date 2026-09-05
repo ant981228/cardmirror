@@ -5,7 +5,7 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
-## 1.7.0 — 2026-09-04
+## 1.7.0 — 2026-09-05
 
 ### Added: choose which machine to unlink (seat picker)
 

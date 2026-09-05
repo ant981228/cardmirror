@@ -5,7 +5,7 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
-## 1.7.0 — 2026-09-04
+## 1.7.0 — 2026-09-05
 
 ### Added
 
