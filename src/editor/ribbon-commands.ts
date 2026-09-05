@@ -39,6 +39,7 @@ import { Selection, TextSelection, type Command, type EditorState, type Transact
 import type { EditorView } from 'prosemirror-view';
 import { toggleMark } from 'prosemirror-commands';
 import { toggleReadingMarkerCommand } from './reading-marker.js';
+import { convertCardsToReadMode } from './convert-cards-to-read-mode.js';
 import { openFootnoteEditor } from './footnote-popover.js';
 import { flipQuoteDirection } from './flip-quote-direction.js';
 import {
@@ -4312,6 +4313,7 @@ export type RibbonCommandId =
   | 'standardizeShading'
   | 'standardizeHighlightExcept'
   | 'standardizeShadingExcept'
+  | 'convertCardsToReadMode'
   | 'toggleReadMode'
   | 'toggleReaderView'
   | 'openContainingFolder'
@@ -4545,6 +4547,7 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'standardizeShading',
   'standardizeHighlightExcept',
   'standardizeShadingExcept',
+  'convertCardsToReadMode',
   'toggleReadMode',
   'toggleReaderView',
   'openContainingFolder',
@@ -4730,6 +4733,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   standardizeShading: 'Standardize Background Color',
   standardizeHighlightExcept: 'Standardize Highlighting (with Exception)',
   standardizeShadingExcept: 'Standardize Background Color (with Exception)',
+  convertCardsToReadMode: 'Convert Cards to Read Mode',
   toggleReadMode: 'Toggle Read Mode',
   toggleReaderView: 'Toggle Reading View',
   openContainingFolder: 'Open Containing Folder',
@@ -4902,6 +4906,7 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   // show/hide ⇄ toggle visibility pairs
   toggleCommentsVisible: ['toggle comments', 'comments'],
   toggleNavPane: ['toggle navigation pane', 'toggle nav pane', 'sidebar', 'outline pane'],
+  convertCardsToReadMode: ['zap card', 'zap cards'],
   toggleReadMode: ['show read mode', 'hide read mode', 'invisibility mode'],
   toggleReaderView: ['reading view', 'reader view', 'paginated view', 'read view', 'book view', 'columns'],
   openContainingFolder: ['reveal in finder', 'show in folder', 'show in explorer', 'reveal file', 'file location', 'containing folder'],
@@ -5076,6 +5081,7 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   standardizeShading: '',
   standardizeHighlightExcept: '',
   standardizeShadingExcept: '',
+  convertCardsToReadMode: '',
   toggleReadMode: '',
   toggleReaderView: '',
   openContainingFolder: '',
@@ -5753,6 +5759,8 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
           state.selection.empty ? 'document' : 'selection',
           () => settings.get('standardizeShadingException'),
         )(state, dispatch, view);
+    case 'convertCardsToReadMode':
+      return convertCardsToReadMode;
     case 'toggleReadMode':
       return (_state, dispatch) => {
         if (!dispatch) return true;
