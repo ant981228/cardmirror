@@ -31,17 +31,93 @@
  * them; the round cap applies) and sync like ordinary edits.
  */
 
-import { Plugin } from 'prosemirror-state';
+import { Plugin, PluginKey } from 'prosemirror-state';
 import { postNotice } from '../status-notices.js';
 import type { Transaction } from 'prosemirror-state';
+import type { Node as PMNode } from 'prosemirror-model';
 import { AddMarkStep, RemoveMarkStep } from 'prosemirror-transform';
+import { HEADING_TYPE_NAMES, newHeadingId } from '../../schema/ids.js';
 import { loroSyncPluginKey, loroUndoPluginKey } from 'loro-prosemirror';
 import { buildDocRepairTr, buildMarkRepairTr, type RepairRange } from '../../doc-repair.js';
 import { guardNormalizerTr } from '../normalizer-guard.js';
 
 /** Diagnostics for tests: session passes bounded to changed ranges vs
  *  full-document scans (which the session pass must never do). */
-export const repairStats = { boundedPasses: 0, fullDocScans: 0 };
+export const repairStats = { boundedPasses: 0, fullDocScans: 0, duplicateIdHeals: 0 };
+
+/**
+ * Merge-born duplicate heading ids (chaos rig, 2026-09-04).
+ *
+ * The heading-id guard heals LOCAL transactions only — policing remote
+ * content edit-for-edit would fight old clients. But a merge can mint a
+ * duplicate that no local transaction ever sees: a card cut and pasted
+ * (delete + create, same id on the copy) while a partner MOVED it — a
+ * concurrent move keeps a deleted movable-list element alive — leaves
+ * the card twice on every peer, same id on both, forever (nav jumps,
+ * live views and collab cursors all address by id). New clients no
+ * longer cut that way in a session (cut in place), but an old client
+ * still can, and nothing else would ever repair it.
+ *
+ * Detection must not walk the document per batch (the session pass is
+ * bounded by design), so the plugin keeps a heading-id → count index in
+ * its state, updated from each transaction's step ranges: the old range
+ * (pre-step doc) subtracts the ids it holds, the new range adds them. A
+ * text edit inside a body visits no heading, so the index is untouched
+ * on the hot path; one full walk happens at install. The index is
+ * mutated in place — it is a cache of the current document, not
+ * semantic state, and undo/redo pass through `apply` like any edit.
+ *
+ * Leader-gated like the structural repairs: every bearer after the
+ * first in document order is re-minted (the guard's own fallback rule
+ * when provenance cannot say which copy is "the original"; identical
+ * on every peer once docs converge, so followers agree with the fix
+ * that arrives). Locating the bearers is the one full walk, and it runs
+ * only when the index says a duplicate exists.
+ */
+interface RepairPluginState {
+  idCounts: Map<string, number>;
+}
+const collabRepairKey = new PluginKey<RepairPluginState>('cm-collab-repair');
+
+function addIdsIn(doc: PMNode, from: number, to: number, delta: number, counts: Map<string, number>): void {
+  const size = doc.content.size;
+  const f = Math.max(0, Math.min(from, size));
+  const t = Math.max(f, Math.min(to, size));
+  doc.nodesBetween(f, t, (n) => {
+    if (HEADING_TYPE_NAMES.has(n.type.name)) {
+      const id = n.attrs['id'];
+      if (typeof id === 'string' && id) {
+        const next = (counts.get(id) ?? 0) + delta;
+        if (next <= 0) counts.delete(id);
+        else counts.set(id, next);
+      }
+    }
+    return true;
+  });
+}
+
+function countAllIds(doc: PMNode): Map<string, number> {
+  const counts = new Map<string, number>();
+  addIdsIn(doc, 0, doc.content.size, 1, counts);
+  return counts;
+}
+
+/** Positions of every bearer of `ids`, in document order (the rare
+ *  full walk, taken only once the index reports a duplicate). */
+function bearersOf(doc: PMNode, ids: Set<string>): Map<string, Array<{ pos: number; node: PMNode }>> {
+  const out = new Map<string, Array<{ pos: number; node: PMNode }>>();
+  doc.descendants((n, pos) => {
+    if (!HEADING_TYPE_NAMES.has(n.type.name)) return true;
+    const id = n.attrs['id'];
+    if (typeof id === 'string' && ids.has(id)) {
+      let list = out.get(id);
+      if (!list) out.set(id, (list = []));
+      list.push({ pos, node: n });
+    }
+    return true;
+  });
+  return out;
+}
 
 /** Doc ranges the binding transactions touched, in `newState`
  *  coordinates (remapped across later transactions in the batch) —
@@ -105,7 +181,23 @@ function noteHealedMerge(): void {
 }
 
 export function collabRepairPlugin(isLeader: () => boolean): Plugin {
-  return new Plugin({
+  return new Plugin<RepairPluginState>({
+    key: collabRepairKey,
+    state: {
+      init: (_config, state) => ({ idCounts: countAllIds(state.doc) }),
+      apply(tr, value) {
+        if (!tr.docChanged) return value;
+        tr.steps.forEach((step, i) => {
+          const before = tr.docs[i]!;
+          const after = tr.docs[i + 1] ?? tr.doc;
+          step.getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
+            addIdsIn(before, oldStart, oldEnd, -1, value.idCounts);
+            addIdsIn(after, newStart, newEnd, 1, value.idCounts);
+          });
+        });
+        return value;
+      },
+    },
     appendTransaction(trs, oldState, newState) {
       if (!trs.some((tr) => tr.docChanged && isBindingTransaction(tr))) return null;
       // The merge's changed regions bound every sweep below (a violation
@@ -145,9 +237,38 @@ export function collabRepairPlugin(isLeader: () => boolean): Plugin {
       // oldState → prosemirror-tables' bounded fast path (see
       // buildDocRepairTr); the mark/sentinel sweeps inside are
       // unchanged.
-      const tr = isLeader()
+      const leader = isLeader();
+      let tr = leader
         ? buildDocRepairTr(newState, oldState, ranges)
         : buildMarkRepairTr(newState, ranges);
+      if (leader) {
+        // A merge-born duplicate id: a bearer inside the merged region
+        // whose id the index counts more than once.
+        const counts = collabRepairKey.getState(newState)?.idCounts;
+        const dupIds = new Set<string>();
+        if (counts) {
+          for (const { from, to } of ranges) {
+            const size = newState.doc.content.size;
+            const cf = Math.max(0, Math.min(from, size));
+            const ct = Math.max(cf, Math.min(to, size));
+            newState.doc.nodesBetween(cf, ct, (node) => {
+              if (!HEADING_TYPE_NAMES.has(node.type.name)) return true;
+              const id = node.attrs['id'];
+              if (typeof id === 'string' && (counts.get(id) ?? 0) > 1) dupIds.add(id);
+              return true;
+            });
+          }
+        }
+        if (dupIds.size) {
+          for (const [, bearers] of bearersOf(newState.doc, dupIds)) {
+            for (const { pos, node } of bearers.slice(1)) {
+              tr ??= newState.tr;
+              tr.setNodeMarkup(tr.mapping.map(pos), null, { ...node.attrs, id: newHeadingId() }, node.marks);
+              repairStats.duplicateIdHeals++;
+            }
+          }
+        }
+      }
       if (!tr) return null;
       return guardNormalizerTr(trs, tr);
     },
