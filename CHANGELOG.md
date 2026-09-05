@@ -19,6 +19,18 @@ see `DETAILED_CHANGELOG.md`.
   list (type to filter). Unbound by default — run it from the command
   bar or bind a key.
 
+- **Card count in Word Count.** The Word Count window now shows how
+  many cards are in the full document, or how many cards intersect the
+  current selection. Thanks to Shreeram (@shreerammodi)!
+
+- **Convert Cards to Read Mode.** A command (also answers to *zap
+  card*) that permanently reduces the selected cards, or the card at
+  the cursor, to what read mode shows: the tag, the cite, an undertag's
+  read words, and the highlighted or underlined text, with paragraphs
+  flowed together or kept on their own lines to match the "Read mode:
+  preserve paragraph integrity" setting. Undo restores the cards. Thanks
+  to Shreeram (@shreerammodi)!
+
 - **Co-editing: cut moves a card instead of copying it.** In a shared
   document, cutting a whole card (or a section) no longer removes it:
   the card stays where it is, dimmed and labelled, and pasting it in
@@ -153,9 +165,6 @@ see `DETAILED_CHANGELOG.md`.
 
 ### Added
 
-- **Card count in Word Count.** The Word Count window now shows how
-  many cards are in the full document, or how many cards intersect the
-  current selection.
 - **Reading view (Word-style paginated columns).** The new book
   button on the ribbon (in the navigation pane toggle's old spot)
   flips the current document into full-screen column pages for

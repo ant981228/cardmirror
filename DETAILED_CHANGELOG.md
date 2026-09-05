@@ -424,6 +424,26 @@ other (the chaos rig's comments oracle, 2026-09-05; never a CRDT
 divergence, and any later comment change or a reload cleared it). Every
 local write now resets the pulled signature, so the next pull renders.
 
+### Added: community PRs — card count in Word Count; Convert Cards to Read Mode
+
+Two contributions from Shreeram. The Word Count window's scope line now
+ends with the number of cards in the document, or intersecting the
+selection (cards only — analytics are not cards); a nested card inside a
+pocket or block counts. And a new command, Convert Cards to Read Mode
+(aliases: zap card), is the destructive counterpart of read mode, in the
+spirit of the ZapCard macro: the selected cards, or the card at the
+cursor, are reduced in one undoable transaction to what read mode
+displays. Every rule is read mode's own — which text is audible comes
+from the read-mode plugin's kept-text function (highlights, cites, the
+reading-marker color, whatever the settings say), the paragraph shape
+follows the "Read mode: preserve paragraph integrity" setting (off, a
+card's body paragraphs flow together; on, each paragraph with audible
+text keeps its line and empty ones collapse), undertags and cites keep
+their own node with only their audible text, tables fold their cell
+text in, and inline images go the way read mode hides them. Analytics
+are skipped; heading ids and numbering attributes survive, so live
+views and a co-editing partner's container pairing are unaffected.
+
 ### Fixed: web tab return and tab close (web-build audit)
 
 The web build and the desktop build are one bundle; the differences are

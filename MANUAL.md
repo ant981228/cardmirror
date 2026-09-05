@@ -989,6 +989,13 @@ Click the **eye** in the ribbon (or bind a key to *Toggle Read Mode*) to
 enter read mode — CardMirror's version of Verbatim's invisibility, with
 two improvements:
 
+**Convert Cards to Read Mode** (command bar; also *zap card*) makes that
+view permanent for the selected cards, or the card at the cursor: the
+tag, the cite, an undertag's read words, and the highlighted or
+underlined text stay; everything else is removed. Paragraphs flow
+together or keep their own lines to match the paragraph-integrity
+setting above. Undo restores the cards.
+
 - It hides everything that isn't read aloud: only **Tags, Cites,
   Analytics, and highlighted text** stay visible. Loose paragraphs,
   undertags, and un-highlighted body text disappear.
