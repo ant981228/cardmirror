@@ -38,6 +38,10 @@ import { LoroSyncPlugin, updateLoroToPmState } from 'loro-prosemirror';
 import { appVersion } from '../install-info.js';
 import { compareAppVersions, MOVABLE_ROOMS_MIN_VERSION } from '../relay-protocol.js';
 import { schema } from '../../schema/index.js';
+
+/** Browsers cap the bytes a page may have in flight on keepalive requests
+ *  (Chromium: 64 KB); the unload path only sends blobs under this. */
+const UNLOAD_KEEPALIVE_MAX_BYTES = 60_000;
 import {
   bytesToBase64,
   decryptBlob,
@@ -225,6 +229,9 @@ export class CollabSession {
      *  intermediate chunks ack to it so a crash mid-sequence re-sends
      *  the whole span instead of losing the tail. */
     from: ReturnType<LoroDoc['version']>;
+    /** The drain's encryption of `blob`, kept so a retry and — the point
+     *  — the unload path can post it without waiting on WebCrypto. */
+    encrypted?: Uint8Array;
   }[] = [];
   private sending = false;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
@@ -712,6 +719,29 @@ export class CollabSession {
     this.stream?.restart();
   }
 
+  /** Tab-return hook: a reconnect only if the stream is actually stale
+   *  (see RoomStream.restartIfStale). */
+  restartIfStale(): void {
+    this.stream?.restartIfStale();
+  }
+
+  /** The page is going away (web tab close or reload; a desktop reload).
+   *  The handler cannot wait — WebCrypto is asynchronous — so only a blob
+   *  the drain has ALREADY encrypted can go out, as a keepalive request the
+   *  browser finishes after the page is gone. The newest edits are queued
+   *  so the drain encrypts them if it gets a turn (with keepalive, since
+   *  the document is hidden by now); whatever stays unsent rides the
+   *  persist record to the next resume. Re-posting is idempotent for the
+   *  CRDT, so a duplicate row costs nothing. */
+  flushForUnload(): void {
+    if (this.ended) return;
+    this.flush();
+    const head = this.outQueue[0];
+    if (head?.encrypted && head.encrypted.length <= UNLOAD_KEEPALIVE_MAX_BYTES) {
+      void this.client.postUpdate(this.roomId, head.encrypted, { keepalive: true }).catch(() => {});
+    }
+  }
+
   get queuedUpdates(): number {
     return this.outQueue.length;
   }
@@ -900,10 +930,14 @@ export class CollabSession {
             this.chunkQueueHead();
             continue;
           }
-          const seq = await this.client.postUpdate(
-            this.roomId,
-            await encryptBlob(this.key, entry.blob),
-          );
+          const encrypted = (entry.encrypted ??= await encryptBlob(this.key, entry.blob));
+          // A hidden document is one the browser may be about to unload:
+          // a keepalive post survives that, a plain one is cancelled.
+          const keepalive =
+            typeof document !== 'undefined' &&
+            document.visibilityState === 'hidden' &&
+            encrypted.length <= UNLOAD_KEEPALIVE_MAX_BYTES;
+          const seq = await this.client.postUpdate(this.roomId, encrypted, { keepalive });
           this.foldTailMeta(seq, entry.blob);
           this.outQueue.shift();
           this.ackedVersion =
@@ -1528,7 +1562,7 @@ export class CollabSession {
 
   // --- presence ---
 
-  async sendPresence(blob: Uint8Array): Promise<void> {
+  async sendPresence(blob: Uint8Array, opts: { keepalive?: boolean } = {}): Promise<void> {
     if (this.ended) return;
     // Presence frames are DELIVERED over the stream, so while it isn't
     // connected nobody can see ours (and we can't see theirs) — posting
@@ -1537,7 +1571,7 @@ export class CollabSession {
     // cadence resumes on the next post after the stream re-hellos.
     if (!this.stream?.connected) return;
     try {
-      await this.client.postPresence(this.roomId, await encryptBlob(this.key, blob), this.streamSid);
+      await this.client.postPresence(this.roomId, await encryptBlob(this.key, blob), this.streamSid, opts);
     } catch {
       /* presence is fire-and-forget */
     }

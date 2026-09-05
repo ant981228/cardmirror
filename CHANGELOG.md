@@ -103,6 +103,15 @@ see `DETAILED_CHANGELOG.md`.
 - **Web account renewals are single-flight** with a deadline, run on
   wake and tab focus, and no longer unlink the account when a captive
   portal answers with an HTML error.
+- **Web: switching back to the tab no longer reconnects the session.**
+  Returning to the tab restarted the live stream every time, which cost
+  a reconnect, a catch-up and a presence flicker on every partner. It
+  now reconnects only if the stream has actually gone quiet.
+- **Web: closing the tab says goodbye and pushes your last edits.**
+  A tab close used to drop the departure notice (partners saw your
+  caret for 45 more seconds) and could cancel the final send. Both now
+  go out as requests the browser finishes after the tab is gone; the
+  crash-recovery record still re-sends anything that did not make it.
 - **The Send pill scrolls while you drag.** Long recipient lists were
   unreachable past the first screenful during a drag; holding the
   dragged card near the top or bottom of the list now scrolls it.

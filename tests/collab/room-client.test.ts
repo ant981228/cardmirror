@@ -643,3 +643,47 @@ describe('egress protocol additions (2026-07-24)', () => {
     sb.stop();
   });
 });
+
+describe('RoomStream.restartIfStale — tab return (web audit 2026-09-04)', () => {
+  const cbs = { onHello: () => {}, onUpdate: () => {}, onPresence: () => {}, onEnded: () => {}, onFull: () => {} };
+
+  it('leaves a healthy, byte-fresh stream alone (a tab switch costs no reconnect)', async () => {
+    const { roomId } = await client.createRoom();
+    const stream = new RoomStream({ baseUrl: () => mock.url, token: () => mock.token, roomId, minBackoffMs: 20, maxBackoffMs: 50, restartDebounceMs: 0, callbacks: cbs });
+    stream.start();
+    await sleep(60); // helloed; the hello frame is the freshest byte
+    const before = stream.stats.attempts;
+    try {
+      for (let i = 0; i < 5; i++) {
+        stream.restartIfStale(); // five Cmd-Tabs back to the tab
+        await sleep(10);
+      }
+      expect(stream.stats.attempts - before, 'restart() here would have aborted the stream five times').toBe(0);
+      expect(stream.connected).toBe(true);
+    } finally {
+      stream.stop();
+    }
+  });
+
+  it('connects at once when the stream is sitting out a backoff wait', async () => {
+    const { roomId } = await client.createRoom();
+    // A long backoff: with the relay unreachable the first attempt fails
+    // and the stream sits on a retry timer far beyond the test window.
+    const stream = new RoomStream({ baseUrl: () => mock.url, token: () => mock.token, roomId, minBackoffMs: 5000, maxBackoffMs: 5000, restartDebounceMs: 0, callbacks: cbs });
+    mock.pause();
+    try {
+      stream.start();
+      await sleep(80); // refused (503) → waiting out the 5s backoff
+      expect(stream.connected).toBe(false);
+      mock.resume();
+      await sleep(80);
+      expect(stream.connected, 'still waiting: the backoff has 4.8s to go').toBe(false);
+      stream.restartIfStale(); // tab return: skip the remainder of the wait
+      await sleep(120);
+      expect(stream.connected, 'reconnected now, not after the backoff').toBe(true);
+    } finally {
+      mock.resume();
+      stream.stop();
+    }
+  });
+});

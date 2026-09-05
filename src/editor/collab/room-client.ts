@@ -282,12 +282,17 @@ export class RoomsClient {
     }
   }
 
-  async postUpdate(roomId: string, blob: Uint8Array): Promise<number> {
+  /** `keepalive`: let the browser finish the request after the page
+   *  unloads (tab close / reload) — the only way a send started from a
+   *  hidden or unloading page survives. Browsers cap keepalive bodies
+   *  (~64 KB in flight); callers keep small blobs on it. */
+  async postUpdate(roomId: string, blob: Uint8Array, opts: { keepalive?: boolean } = {}): Promise<number> {
     const path = `/rooms/${roomId}/updates`;
     const res = await this.request(path, {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/octet-stream' }),
       body: blob as unknown as BodyInit,
+      ...(opts.keepalive ? { keepalive: true } : {}),
     }, this.opts.postTimeoutMs ?? 120_000);
     const body = await this.readJson<{ seq?: number }>(res, path);
     if (typeof body.seq !== 'number') throw new RoomsError(0, 'malformed postUpdate response');
@@ -343,12 +348,13 @@ export class RoomsClient {
    *  the server skips echoing this frame back to that stream. Old
    *  servers ignore the param; the client-side own-peer filter still
    *  drops the echo, so behavior is identical either way. */
-  async postPresence(roomId: string, blob: Uint8Array, from?: string): Promise<void> {
+  async postPresence(roomId: string, blob: Uint8Array, from?: string, opts: { keepalive?: boolean } = {}): Promise<void> {
     const q = from ? `?from=${encodeURIComponent(from)}` : '';
     await this.request(`/rooms/${roomId}/presence${q}`, {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/octet-stream' }),
       body: blob as unknown as BodyInit,
+      ...(opts.keepalive ? { keepalive: true } : {}),
     });
   }
 
@@ -502,6 +508,25 @@ export class RoomStream {
     if (now - this.lastRestartAt < (this.opts.restartDebounceMs ?? 2000)) return;
     this.lastRestartAt = now;
     this.controller?.abort();
+  }
+
+  /** A wake source that must cost nothing when nothing is wrong. Returning
+   *  to a browser tab fires visibilitychange→visible on every Cmd-Tab, and
+   *  restart() aborted a healthy, byte-fresh stream each time — reconnect,
+   *  catch-up, presence flicker, a ghost stream on the relay (web audit
+   *  2026-09-04). Reconnect only when the stream is sitting out a backoff
+   *  wait (connect now, as restart() does) or is helloed but silent past
+   *  the stall threshold — the socket that died while the tab's timers
+   *  were throttled, which is what the visible hook exists for. An
+   *  in-flight handshake is left alone. */
+  restartIfStale(): void {
+    if (this.stopped) return;
+    if (this.retryTimer !== null) {
+      this.restart();
+      return;
+    }
+    if (!this.helloed) return;
+    if (Date.now() - this.lastByteAt > (this.opts.stallMs ?? 70_000)) this.restart();
   }
 
   private clearStall(): void {

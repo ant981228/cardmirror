@@ -187,8 +187,9 @@ interface LeaseAd {
 const leaseAdsKey = new PluginKey<DecorationSet>('collab-lease-ads');
 
 export interface CursorsHandle {
-  /** Announce departure to partners now (call before dispose/stop). */
-  farewell(): void;
+  /** Announce departure to partners now (call before dispose/stop).
+   *  `keepalive`: the page is unloading — let the browser finish the post. */
+  farewell(opts?: { keepalive?: boolean }): void;
   /** Re-announce presence (after a stream reconnect). */
   rebroadcast(): void;
   /** Session plugins: the stock cursor plugin + the lease-ad renderer. */
@@ -424,7 +425,7 @@ export function installCursorPresence(
         }
       }
     },
-    farewell(): void {
+    farewell(opts: { keepalive?: boolean } = {}): void {
       // Departure frame, sent SYNCHRONOUSLY and before dispose/stop: the
       // ephemeral store's only expiry is its 45s timeout, and dispose()
       // set `disposed` before unhooking, so a leaving peer's caret and
@@ -443,7 +444,7 @@ export function installCursorPresence(
         } finally {
           off();
         }
-        if (bytes) void session.sendPresence(frame(FRAME_CURSOR, bytes));
+        if (bytes) void session.sendPresence(frame(FRAME_CURSOR, bytes), opts);
       } catch {
         /* best-effort — the 45s expiry remains the backstop */
       }

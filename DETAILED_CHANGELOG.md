@@ -354,6 +354,41 @@ account. Renewals are single-flight, carry a 10 s deadline, run on
 online and tab-visible (margin-gated), and unlink only when the body is
 relay-shaped JSON.
 
+### Fixed: web tab return and tab close (web-build audit)
+
+The web build and the desktop build are one bundle; the differences are
+runtime branches, and an audit of those branches against this release's
+co-editing changes found two. First, the visibility wake hook added
+with the liveness work called restart on every return to the tab, and
+restart aborts the live stream unconditionally outside its two-second
+debounce. Electron only flips visibility on minimize or occlusion, so
+desktop testing barely exercised it; in a browser it is every tab
+switch: a reconnect, a catch-up fetch, a presence rebroadcast, a chip
+flicker for the user and their partners, and a ghost stream the relay
+reaps a heartbeat later. The hook now asks the stream to restart only
+if it is stale: sitting out a backoff wait (connect now), or helloed but
+silent past the stall threshold, which is the dead-socket case the hook
+exists for. A healthy, byte-fresh stream is left alone; an in-flight
+handshake too. Sleep and network-return keep their unconditional
+restart, since those sockets are dead in practice.
+
+Second, a web tab close had no unload path at all. Desktop's close flow
+says goodbye and drains the queue before the window goes; on the web,
+the hidden-tab flush started an ordinary fetch that the browser cancels
+at unload, and no departure frame went out, so partners kept the ghost
+caret for 45 seconds. A pagehide hook now sends the departure frame and
+re-posts the queue head as keepalive requests, which the browser
+finishes after the page is gone. The handler cannot wait on WebCrypto,
+so only a blob the drain has already encrypted can go out from the
+handler itself; the drain therefore keeps each entry's encryption, and
+while the document is hidden it posts with keepalive in the first
+place, so the send started by the hide-time flush survives the close.
+Browsers cap keepalive bodies at about 64 KB, so larger blobs stay on
+the ordinary path. Everything here is idempotent for the CRDT and
+best-effort by nature: the crash-recovery record still re-sends
+whatever did not make it on the next resume, and partners still expire
+a silent caret.
+
 ## 1.6.0 — 2026-09-01
 
 ### Added: Reading view (Word-style paginated columns)

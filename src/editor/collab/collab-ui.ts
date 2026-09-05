@@ -120,6 +120,8 @@ interface ActiveSession {
    *  record, which is deleted on Leave/End/tombstone. */
   history: HistoryHandle;
   wakeCleanup: () => void;
+  /** Removes the pagehide goodbye/flush hook. */
+  unloadCleanup: () => void;
   /** Unsubscribe the meta-map (title) watcher installed by installSeams. */
   metaUnsub: () => void;
   /** Latest connection status for THIS session. The shared status-bar chip only
@@ -390,15 +392,35 @@ function collabTagger(tr: Parameters<typeof markSyncOrigin>[0]): void {
  *  stream socket is silently dead until timeouts notice — restart it
  *  the moment the OS tells us. Desktop: powerMonitor via the host
  *  seam; both editions: the browser 'online' event. */
+/** The page is going away — a web tab close or reload, a desktop reload.
+ *  Desktop's close flow already said goodbye and drained (and awaited
+ *  both) before the window unloads, so there this is an idempotent
+ *  leftover; on the web it is the ONLY chance: there is no close flow,
+ *  and a plain fetch started during unload is cancelled by the browser.
+ *  Both requests go keepalive. Best-effort by nature — the persist record
+ *  re-sends unsent ops on resume, and partners expire a silent caret. */
+function installUnloadHooks(session: CollabSession, cursors: CursorsHandle): () => void {
+  const onPageHide = (): void => {
+    cursors.farewell({ keepalive: true });
+    session.flushForUnload();
+  };
+  window.addEventListener('pagehide', onPageHide);
+  return () => window.removeEventListener('pagehide', onPageHide);
+}
+
 function installWakeHooks(session: CollabSession): () => void {
   const onOnline = (): void => session.restart();
   window.addEventListener('online', onOnline);
   const offResume = getElectronHost()?.onPowerResumed?.(() => session.restart()) ?? null;
   // A throttled background tab is exactly where a socket goes stale
-  // unnoticed; coming back to the tab is a wake too. restart() itself
-  // debounces the powerResumed/online/visible burst into one reconnect.
+  // unnoticed; coming back to the tab is a wake too — but on the web
+  // that is every Cmd-Tab, so it reconnects only if the stream is
+  // actually stale or sitting out a backoff (web audit 2026-09-04: an
+  // unconditional restart() aborted a healthy stream on every tab
+  // return). Sleep and network-return keep the unconditional restart:
+  // those sockets are dead in practice.
   const onVisible = (): void => {
-    if (document.visibilityState === 'visible') session.restart();
+    if (document.visibilityState === 'visible') session.restartIfStale();
   };
   document.addEventListener('visibilitychange', onVisible);
   return () => {
@@ -487,6 +509,7 @@ function installSeams(
     { onFailure: (n) => noteWriterFailure('collab-history-failing', 'session history', n) },
   );
   const cursors = installCursorPresence(session, ownerView);
+  const unloadCleanup = installUnloadHooks(session, cursors);
   // One shared timer refreshes the focused session's chip dots AND every slot
   // footer's copresence (peers join/leave/expire between status updates).
   if (presenceTimer === null)
@@ -515,6 +538,7 @@ function installSeams(
     persist,
     history,
     wakeCleanup,
+    unloadCleanup,
     metaUnsub,
     lastStatus: null,
     offlineSince: null,
@@ -602,6 +626,7 @@ function teardownSession(sess: ActiveSession, keepRecord = false): Promise<void>
   // A session went away — repaint slot footers (this doc's may be visible).
   notifyCollabCopresenceChange();
   sess.wakeCleanup();
+  sess.unloadCleanup();
   sess.metaUnsub();
   sess.commentsSync.dispose();
   sess.cursors.dispose();
