@@ -309,6 +309,51 @@ describe('Convert Cards to Read Mode command', () => {
     });
   });
 
+  describe('follows "Read mode: keep entire cite"', () => {
+    const before = settings.get('readModeKeepEntireCite');
+    afterEach(() => settings.set('readModeKeepEntireCite', before));
+
+    function citeCard() {
+      const highlight = schema.marks['highlight']!.create({ color: 'yellow' });
+      const cite = schema.marks['cite_mark']!.create();
+      const card = schema.nodes['card']!.createChecked(null, [
+        schema.nodes['tag']!.create({ id: 'cite-card' }, schema.text('Cites')),
+        schema.nodes['cite_paragraph']!.create(null, [
+          schema.text('Smith 24', [cite]),
+          schema.text(' — professor of things, Journal, 2024, '),
+          schema.text('p. 3', [highlight]),
+        ]),
+        schema.nodes['cite_paragraph']!.create(null, schema.text('an unmarked second cite')),
+        schema.nodes['card_body']!.create(null, [schema.text('unread '), schema.text('read', [highlight])]),
+      ]);
+      const doc = schema.nodes['doc']!.createChecked(null, [card]);
+      const base = EditorState.create({ doc });
+      return base.apply(base.tr.setSelection(TextSelection.create(doc, 2)));
+    }
+    function convert(state: EditorState): EditorState {
+      let next: EditorState | null = null;
+      getRibbonCommand('convertCardsToReadMode')(state, (tr) => { next = state.apply(tr); });
+      return next!;
+    }
+
+    it('off: only the marked and highlighted words of the cite survive', () => {
+      settings.set('readModeKeepEntireCite', false);
+      const converted = convert(citeCard()).doc.firstChild!;
+      expect(converted.childCount).toBe(3);
+      expect(converted.child(1).textContent).toBe('Smith 24 p. 3');
+      expect(converted.child(2).textContent).toBe('read');
+    });
+
+    it('on: the whole cite survives; an unmarked cite still goes; the body is unchanged', () => {
+      settings.set('readModeKeepEntireCite', true);
+      const converted = convert(citeCard()).doc.firstChild!;
+      expect(converted.childCount).toBe(3);
+      expect(converted.child(1).type.name).toBe('cite_paragraph');
+      expect(converted.child(1).textContent).toBe('Smith 24 — professor of things, Journal, 2024, p. 3');
+      expect(converted.child(2).textContent).toBe('read');
+    });
+  });
+
   it('removes inline images that read mode hides from tags', () => {
     const image = schema.nodes['image']!.create({
       data: 'aGVsbG8=',

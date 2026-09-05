@@ -7,7 +7,9 @@
  *
  * The decision is made per text node based on its parent paragraph and
  * its marks:
- *   - In `cite_paragraph`: keep iff carrying `cite_mark` OR `highlight`.
+ *   - In `cite_paragraph`: keep iff carrying `cite_mark` OR `highlight` —
+ *     or, with "Read mode: keep entire cite" on, every text node of a
+ *     cite that has at least one such run (`keepsWholeParagraph`).
  *   - In `card_body` / `paragraph` / `undertag`: keep iff carrying `highlight`.
  *   - Elsewhere (heading paragraphs etc.): no decoration — block-level
  *     CSS handles whether they show.
@@ -39,6 +41,7 @@ import { undo, redo, undoDepth, redoDepth } from 'prosemirror-history';
 import { changedRange, expandToTopLevel } from './decoration-range.js';
 import { isSyncOrigin } from './sync-origin.js';
 import { NORMALIZER_META } from './normalizer-guard.js';
+import { settings } from './settings.js';
 import {
   toggleReadingMarker,
   isReadingMarkerColor,
@@ -219,6 +222,21 @@ function isReadKept(child: PMNode, markNames: readonly string[]): boolean {
   );
 }
 
+/** "Read mode: keep entire cite" — a cite paragraph with ANY read-aloud
+ *  run shows all of its text (qualifications, source, date), not just the
+ *  marked runs. A cite with nothing marked still collapses, like a body
+ *  paragraph with nothing highlighted, so an unmarked cite never shows as
+ *  a stray line. The setting is read at decoration time; both shells
+ *  rebuild the set when it flips. */
+function keepsWholeParagraph(para: PMNode, markNames: readonly string[]): boolean {
+  if (para.type.name !== 'cite_paragraph' || !settings.get('readModeKeepEntireCite')) return false;
+  let any = false;
+  para.forEach((child) => {
+    if (!any && child.isText && !!child.text && isReadKept(child, markNames)) any = true;
+  });
+  return any;
+}
+
 function computeFullSet(doc: PMNode): DecorationSet {
   return DecorationSet.create(doc, computeDecorationsInRange(doc, 0, doc.content.size));
 }
@@ -245,13 +263,15 @@ function readKeptKind(nodeName: string): readonly string[] | 'heading' | null {
   return null;
 }
 
-/** Whether read mode keeps this inline text node visible in `parentType`.
+/** Whether read mode keeps this inline text node of `parent` visible.
  *  Shared with destructive conversions so their audible-text rule cannot
  *  drift from the display-only mode. */
-export function isReadModeKeptText(child: PMNode, parentType: string): boolean {
+export function isReadModeKeptText(child: PMNode, parent: PMNode): boolean {
   if (!child.isText) return false;
-  const kind = readKeptKind(parentType);
-  return kind === 'heading' || (kind !== null && isReadKept(child, kind));
+  const kind = readKeptKind(parent.type.name);
+  if (kind === 'heading') return true;
+  if (kind === null) return false;
+  return isReadKept(child, kind) || keepsWholeParagraph(parent, kind);
 }
 
 /**
@@ -288,10 +308,12 @@ export function nearestReadKeptPos(doc: PMNode, pos: number): number | null {
       }
       return false;
     }
-    // Body / cite text: only runs actually carrying the read-aloud mark.
+    // Body / cite text: only runs actually carrying the read-aloud mark
+    // (or the whole cite, when the setting keeps it).
+    const whole = keepsWholeParagraph(node, kind);
     node.forEach((child, offset) => {
       if (!child.isText || !child.text) return;
-      if (!isReadKept(child, kind)) return;
+      if (!whole && !isReadKept(child, kind)) return;
       const start = nodePos + 1 + offset;
       const end = start + child.nodeSize;
       consider(Math.max(start, Math.min(clamped, end)));
@@ -325,10 +347,11 @@ export function firstReadKeptPos(doc: PMNode, from: number, to: number): number 
       if (node.content.size > 0) found = Math.max(lo, nodePos + 1);
       return false;
     }
+    const whole = keepsWholeParagraph(node, kind);
     node.forEach((child, offset) => {
       if (found !== null) return;
       if (!child.isText || !child.text) return;
-      if (!isReadKept(child, kind)) return;
+      if (!whole && !isReadKept(child, kind)) return;
       const end = nodePos + 1 + offset + child.nodeSize;
       if (end <= lo) return; // entirely above the scan start
       found = Math.max(lo, nodePos + 1 + offset);
@@ -394,9 +417,10 @@ function decorateParagraph(
 ): void {
   interface Item { pos: number; nodeSize: number; keep: boolean }
   const items: Item[] = [];
+  const whole = keepsWholeParagraph(para, markNames);
   para.forEach((child, offset) => {
     if (!child.isText || !child.text) return;
-    const keep = isReadKept(child, markNames);
+    const keep = whole || isReadKept(child, markNames);
     items.push({ pos: paraPos + 1 + offset, nodeSize: child.nodeSize, keep });
   });
   for (let i = 0; i < items.length; i++) {

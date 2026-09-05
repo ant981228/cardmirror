@@ -34,6 +34,7 @@ import { schema, newHeadingId } from '../schema/index.js';
 import { fromDocxFull, parseNative, serializeNativeAsync, NATIVE_FILE_EXTENSION } from '../index.js';
 import { settings } from './settings.js';
 import { MARK_UNREAD_TOGGLE } from './mark-unread-plugin.js';
+import { PMD_READ_MODE_TOGGLE } from './read-mode-plugin.js';
 import { NUMBERING_REFRESH, numberingDisplaySig } from './numbering-plugin.js';
 import { getHost, getElectronHost, isSameOpenHandle, type OpenedFile } from './host/index.js';
 import { isFileOpenInAnotherWindow } from './window-coordination.js';
@@ -1336,6 +1337,7 @@ function closeOpenStackDropdown(): void {
 /** Last-applied value of the global `markUnreadAfterMarker` toggle, so the
  *  shell only rebuilds pane decorations when it actually flips. */
 let shellLastMarkUnread = settings.get('markUnreadAfterMarker');
+let shellLastKeepEntireCite = settings.get('readModeKeepEntireCite');
 let shellLastNumberingSig = numberingDisplaySig();
 
 class MultiPaneShell {
@@ -1483,6 +1485,19 @@ class MultiPaneShell {
         for (const id of SLOT_IDS) {
           for (const rec of this.slots[id].stack) {
             rec.view.dispatch(rec.view.state.tr.setMeta(MARK_UNREAD_TOGGLE, true));
+          }
+        }
+      }
+      // "Keep entire cite" changes WHICH text read mode keeps, not just
+      // how it's laid out, so every pane currently in read mode rebuilds
+      // its decoration set (re-sending the on-toggle is the rebuild; the
+      // single-doc path does the same through applyReadMode). Diff-gated
+      // like the mark-unread nudge: the rebuild is O(doc).
+      if (s.readModeKeepEntireCite !== shellLastKeepEntireCite) {
+        shellLastKeepEntireCite = s.readModeKeepEntireCite;
+        for (const id of SLOT_IDS) {
+          for (const rec of this.slots[id].stack) {
+            if (rec.readMode) rec.view.dispatch(rec.view.state.tr.setMeta(PMD_READ_MODE_TOGGLE, true));
           }
         }
       }

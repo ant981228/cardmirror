@@ -420,6 +420,31 @@ plugin. Tests drive the decision directly with document positions
 mouse-selection section now documents the gesture, which it had not
 mentioned before.
 
+### Added: "Read mode: keep entire cite"
+
+Read mode keeps, of a cite paragraph, only the runs carrying the cite
+mark or a highlight; the qualifications, source and date between them
+collapse. Some readers want the whole citation on screen at the podium.
+A new General setting next to "Read mode: preserve paragraph
+integrity", off by default, keeps every text node of a cite paragraph
+that has at least one read-aloud run. A cite with nothing marked still
+collapses, the same principle as a body paragraph with nothing
+highlighted under paragraph integrity, so an unmarked cite never shows
+as a stray line.
+
+The rule lives in one place in the read-mode plugin
+(`keepsWholeParagraph`) and is consulted by the decoration builder, the
+two read-mode scroll-anchor searches, and `isReadModeKeptText`, which
+Convert Cards to Read Mode uses, so the destructive conversion cannot
+drift from the display. The setting is read when decorations are
+built: the single-document path already re-sends the read-mode toggle
+whenever a read-mode display setting changes, which rebuilds the set,
+and the multi-pane shell now does the same for every pane currently in
+read mode when this setting flips, diff-gated like its mark-unread
+nudge because the rebuild is O(doc). Tests cover the whole-cite keep,
+the unmarked-cite collapse, the rebuild on a flip and the anchor search,
+plus the conversion command.
+
 ### Fixed: merge-born duplicate heading ids are repaired in a session
 
 The heading-id guard heals local transactions only, deliberately: it

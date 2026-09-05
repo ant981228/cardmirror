@@ -47,6 +47,11 @@ see `DETAILED_CHANGELOG.md`.
   a drag snaps to whole words after a double-click and whole paragraphs
   after a triple-click. Ctrl/Cmd-triple-click used to add just the word
   under the pointer.
+- **Read mode: keep entire cite.** A new setting (General, next to
+  "Read mode: preserve paragraph integrity", off by default) makes read
+  mode show the whole of any cite that has read-aloud text in it,
+  qualifications and all, instead of only its cite-marked and
+  highlighted words. Convert Cards to Read Mode follows it.
 
 ### Fixed
 

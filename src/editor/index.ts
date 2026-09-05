@@ -3757,6 +3757,7 @@ let lastKeyboardMacros = settings.get('keyboardMacros');
 let lastReadMode = settings.get('readMode');
 let lastReadModeBorders = settings.get('hideEmphasisBordersInReadMode');
 let lastReadModeParaIntegrity = settings.get('readModeParagraphIntegrity');
+let lastReadModeKeepCite = settings.get('readModeKeepEntireCite');
 let lastMarkUnread = settings.get('markUnreadAfterMarker');
 let lastNumberingDisplay = numberingDisplaySig();
 
@@ -3820,11 +3821,15 @@ settings.subscribe((s) => {
     !multiDocActive &&
     (s.readMode !== lastReadMode ||
       s.hideEmphasisBordersInReadMode !== lastReadModeBorders ||
-      s.readModeParagraphIntegrity !== lastReadModeParaIntegrity)
+      s.readModeParagraphIntegrity !== lastReadModeParaIntegrity ||
+      s.readModeKeepEntireCite !== lastReadModeKeepCite)
   ) {
     lastReadMode = s.readMode;
     lastReadModeBorders = s.hideEmphasisBordersInReadMode;
     lastReadModeParaIntegrity = s.readModeParagraphIntegrity;
+    lastReadModeKeepCite = s.readModeKeepEntireCite;
+    // (applyReadMode re-sends the toggle, which rebuilds the plugin's
+    // decoration set — how a keep-entire-cite flip reaches the text.)
     applyReadMode(s.readMode);
   }
   // Nudge the mark-unread plugin to rebuild when its toggle flips (diff-gated

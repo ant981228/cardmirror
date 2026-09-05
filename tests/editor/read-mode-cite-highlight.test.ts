@@ -10,13 +10,15 @@
  * un-marked cite filler stays hidden.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
+import type { Node as PMNode } from 'prosemirror-model';
 import { schema, newHeadingId } from '../../src/schema/index.js';
-import { readModePlugin, PMD_READ_MODE_TOGGLE } from '../../src/editor/read-mode-plugin.js';
+import { readModePlugin, PMD_READ_MODE_TOGGLE, firstReadKeptPos } from '../../src/editor/read-mode-plugin.js';
+import { settings } from '../../src/editor/settings.js';
 
-function mkReadModeView(): EditorView {
+function mkReadModeView(extra: PMNode[] = []): EditorView {
   const el = document.createElement('div');
   document.body.appendChild(el);
   const cite = schema.nodes['cite_paragraph']!.create(null, [
@@ -32,6 +34,7 @@ function mkReadModeView(): EditorView {
       schema.nodes['tag']!.create({ id: newHeadingId() }, schema.text('Tag')),
       cite,
       schema.nodes['card_body']!.create(null, schema.text('body words')),
+      ...extra,
     ]),
   ]);
   const view = new EditorView(el, {
@@ -56,6 +59,46 @@ describe('read mode in cite paragraphs', () => {
     expect(classOf(view, 'AuthorName'), 'cite-marked text').toBe('keep');
     expect(classOf(view, 'underlined and highlighted'), 'highlighted text').toBe('keep');
     expect(classOf(view, 'plain filler'), 'unmarked filler').toBe('hide');
+    view.destroy();
+  });
+});
+
+describe('"Read mode: keep entire cite"', () => {
+  const before = settings.get('readModeKeepEntireCite');
+  afterEach(() => settings.set('readModeKeepEntireCite', before));
+
+  it('shows the whole cite once it has any read-aloud run; body text is unaffected', () => {
+    settings.set('readModeKeepEntireCite', true);
+    const view = mkReadModeView();
+    expect(classOf(view, 'AuthorName')).toBe('keep');
+    expect(classOf(view, 'plain filler'), 'the unmarked quals now show').toBe('keep');
+    expect(classOf(view, 'underlined and highlighted')).toBe('keep');
+    expect(classOf(view, 'body words'), 'a body paragraph still keeps only highlights').toBe('hide');
+    view.destroy();
+  });
+
+  it('a cite with nothing marked stays hidden, so an unmarked cite is never a stray line', () => {
+    settings.set('readModeKeepEntireCite', true);
+    const unmarked = schema.nodes['cite_paragraph']!.create(null, schema.text('nobody marked this cite'));
+    const view = mkReadModeView([unmarked]);
+    expect(classOf(view, 'nobody marked')).toBe('hide');
+    view.destroy();
+  });
+
+  it('flipping the setting rebuilds on the next toggle, and the scroll anchor follows the same rule', () => {
+    settings.set('readModeKeepEntireCite', false);
+    const view = mkReadModeView();
+    expect(classOf(view, 'plain filler')).toBe('hide');
+    const citeStart = view.state.doc.child(0).child(0).nodeSize + 1;
+    const fillerPos = citeStart + 1 + 'AuthorName '.length;
+    // Off: the first kept position at or after the filler is the highlighted phrase.
+    expect(firstReadKeptPos(view.state.doc, fillerPos, view.state.doc.content.size)).toBe(
+      fillerPos + 'plain filler the reader skips '.length,
+    );
+    settings.set('readModeKeepEntireCite', true);
+    view.dispatch(view.state.tr.setMeta(PMD_READ_MODE_TOGGLE, true)); // what both shells send on a flip
+    expect(classOf(view, 'plain filler')).toBe('keep');
+    expect(firstReadKeptPos(view.state.doc, fillerPos, view.state.doc.content.size)).toBe(fillerPos);
     view.destroy();
   });
 });

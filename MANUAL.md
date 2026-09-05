@@ -1000,11 +1000,16 @@ view permanent for the selected cards, or the card at the cursor: the
 tag, the cite, an undertag's read words, and the highlighted or
 underlined text stay; everything else is removed. Paragraphs flow
 together or keep their own lines to match the paragraph-integrity
-setting above. Undo restores the cards.
+setting above, and cites keep all their text when *Read mode: keep
+entire cite* is on. Undo restores the cards.
 
 - It hides everything that isn't read aloud: only **Tags, Cites,
   Analytics, and highlighted text** stay visible. Loose paragraphs,
-  undertags, and un-highlighted body text disappear.
+  undertags, and un-highlighted body text disappear. Of a cite, only
+  its cite-marked and highlighted words show unless you turn on
+  *Read mode: keep entire cite* (Settings → General), which shows the
+  whole citation.
+
 - It **locks the keyboard**, so a stray key or trackpad twitch at the
   podium can't edit your file.
 
@@ -2208,6 +2213,11 @@ headers shown inside each tab.
   lines. Off by default. Display-only, like the rest of read mode — the
   document isn't touched (that's what
   [Condense](#condense-pilcrows-and-case) does).
+- **Read mode: keep entire cite** — when on, read mode shows the whole of
+  any cite that has read-aloud text in it — qualifications, source, date
+  and all — instead of only its cite-marked and highlighted words. A cite
+  with nothing marked stays hidden. Off by default. Display-only, and
+  Convert Cards to Read Mode follows it too.
 
 **Word counts**
 

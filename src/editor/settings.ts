@@ -894,6 +894,12 @@ export interface Settings {
    *  one only changes what read mode draws. Off by default: the single
    *  continuous flow is what most people want at the podium. */
   readModeParagraphIntegrity: boolean;
+  /** When true, read mode shows the WHOLE of any cite paragraph that has
+   *  read-aloud text in it — qualifications, source, date and all —
+   *  instead of only its cite-marked and highlighted runs. Display-only;
+   *  Convert Cards to Read Mode follows it. Off by default: the marked
+   *  runs are what most people read at the podium. */
+  readModeKeepEntireCite: boolean;
   /** When true, tint every run of card body text that falls AFTER a
    *  reading-position marker red, a visual record of what you didn't reach
    *  in a round. Bounded per-card; display-only (a decoration, never a doc
@@ -1721,6 +1727,7 @@ const DEFAULTS: Settings = {
   readMode: false,
   hideEmphasisBordersInReadMode: false,
   readModeParagraphIntegrity: false,
+  readModeKeepEntireCite: false,
   markUnreadAfterMarker: false,
   defaultZoomPct: 100,
   chromeScalePct: 100,
@@ -2178,6 +2185,16 @@ export const SETTING_METADATA: SettingMeta[] = [
     category: 'general',
     section: 'Editor behavior',
     aliases: ['paragraph breaks', 'paragraph integrity', 'separate lines', 'read mode paragraphs'],
+  },
+  {
+    key: 'readModeKeepEntireCite',
+    label: 'Read mode: keep entire cite',
+    description:
+      'When on, read mode shows the whole of any cite that has read-aloud text in it — qualifications, source, date and all — instead of only its cite-marked and highlighted words. A cite with nothing marked stays hidden. Off by default. Display-only, like the rest of read mode; Convert Cards to Read Mode follows it too.',
+    kind: 'toggle',
+    category: 'general',
+    section: 'Editor behavior',
+    aliases: ['whole cite', 'full cite', 'entire cite', 'read mode cite', 'quals'],
   },
   // ─── General ────────────────────────────────────────────────────
   {
@@ -4350,6 +4367,7 @@ function sanitize(s: Settings): Settings {
     readMode: !!s.readMode,
     hideEmphasisBordersInReadMode: !!s.hideEmphasisBordersInReadMode,
     readModeParagraphIntegrity: !!s.readModeParagraphIntegrity,
+    readModeKeepEntireCite: !!s.readModeKeepEntireCite,
     markUnreadAfterMarker: !!s.markUnreadAfterMarker,
     // A legacy persisted `zoomPct` is deliberately ignored — live body
     // zoom is transient; documents open at this default.

@@ -3,7 +3,8 @@
  *
  * Every rule here is read mode's own: which text is audible comes from
  * the read-mode plugin (`isReadModeKeptText` — highlights, cites, the
- * reading-marker color, whatever the settings say), and the paragraph
+ * reading-marker color, the whole cite under "Read mode: keep entire
+ * cite" — whatever the settings say), and the paragraph
  * shape follows the "Read mode: preserve paragraph integrity" setting —
  * off, a card's body paragraphs flow together into one; on, each source
  * paragraph with audible text keeps its own line and empty ones collapse.
@@ -27,7 +28,7 @@ class AudibleInlineBuilder {
   addTextblock(node: PMNode): void {
     node.forEach((child) => {
       if (!child.isText || !child.text) return;
-      if (!isReadModeKeptText(child, node.type.name)) {
+      if (!isReadModeKeptText(child, node)) {
         this.breakRun();
         return;
       }
