@@ -1340,7 +1340,11 @@ describe.skipIf(!ENABLED)('real-relay CHAOS fuzz (local relay + chaos proxy)', (
             const sigs = views.map(([, m]) => sig(m));
             if (new Set(sigs).size > 1) {
               report.ok = false;
-              report.problems.push(`COMMENTS diverged across peers: ${views.map(([l, m]) => `${l}=${m.size} threads`).join(' ')}`);
+              // The CRDT side: equal maps + different panes = a pull miss
+              // (the pane lags the room), not a merge divergence.
+              const maps = peers.map((x) => JSON.stringify(x.session.loroDoc.getMap('comments').toJSON()));
+              const crdtAgrees = new Set(maps).size === 1;
+              report.problems.push(`COMMENTS ${crdtAgrees ? 'PANE STALE (Loro maps agree; a pull miss)' : 'DIVERGED in the CRDT'}: ${views.map(([l], i) => `${l}=${sigs[i]}`).join('\n      ')}`);
             }
             const m0 = views[0]![1];
             const missing = [...oracle.threads.keys()].filter((id) => !m0.has(id));
