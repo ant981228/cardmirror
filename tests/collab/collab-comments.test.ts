@@ -123,6 +123,46 @@ describe('collab comment-thread sync', () => {
     b.destroy();
   });
 
+  it('a resolve toggle that LOSES a concurrent race still renders the room value (no stale pane)', async () => {
+    const [a, b] = await commentPeers();
+    // B creates the thread, so A's pane got it through a PULL (a peer never
+    // pulls its own writes) — the pulled signature is the unresolved state.
+    b.view.dispatch(b.view.state.tr.setMeta(commentsKey, addThreadMeta(thread('9', 'race me'))));
+    await settle();
+    await syncAll([a, b]);
+    await settle();
+    // The thread has been resolved and reopened before (an EXPLICIT
+    // resolved:false in the room, which A has pulled) — a fresh thread's
+    // comment carries no resolved key at all, so its signature can never
+    // match a later explicit false.
+    b.view.dispatch(b.view.state.tr.setMeta(commentsKey, setResolvedMeta('9', true)));
+    b.view.dispatch(b.view.state.tr.setMeta(commentsKey, setResolvedMeta('9', false)));
+    await settle();
+    await syncAll([a, b]);
+    await settle();
+    expect(threadsOf(a).get('9')?.comments[0]?.resolved).toBe(false);
+    // A resolves; B, concurrently, toggles resolved back and forth several
+    // times, ending on "false" — the extra writes run B's Lamport clock
+    // ahead, so B's LAST write wins the last-write-wins race, and nothing
+    // else about the thread changes. The room settles on "false": exactly
+    // the state A pulled before its own write.
+    a.view.dispatch(a.view.state.tr.setMeta(commentsKey, setResolvedMeta('9', true)));
+    for (let i = 0; i < 3; i++) {
+      b.view.dispatch(b.view.state.tr.setMeta(commentsKey, setResolvedMeta('9', true)));
+      b.view.dispatch(b.view.state.tr.setMeta(commentsKey, setResolvedMeta('9', false)));
+    }
+    await settle();
+    await syncAll([a, b]);
+    await settle();
+    const roomValue = (a.ldoc.getMap('comments').toJSON() as Record<string, Record<string, { resolved?: boolean }>>)['9']!['9']!.resolved === true;
+    expect(roomValue, "B's last write won").toBe(false);
+    for (const peer of [a, b]) {
+      expect(threadsOf(peer).get('9')?.comments[0]?.resolved === true, 'pane shows the room value').toBe(roomValue);
+    }
+    a.destroy();
+    b.destroy();
+  });
+
   it('resolve propagates to the partner and back', async () => {
     const [a, b] = await commentPeers();
     a.view.dispatch(a.view.state.tr.setMeta(commentsKey, addThreadMeta(thread('4', 'check me'))));

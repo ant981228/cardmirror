@@ -111,6 +111,10 @@ see `DETAILED_CHANGELOG.md`.
   generic error over "Session ended". Switching to three-pane or
   quitting now flushes version history as well as the recovery copy,
   and hiding the tab flushes unsent edits immediately.
+- **Co-editing: a resolved/reopened comment no longer shows stale on the
+  peer that lost the race.** If two people toggled a comment's resolved
+  state at the same moment, the loser's own screen kept its value while
+  everyone else showed the winner's, until the next comment change.
 - **Co-editing: comments and Recover Previous Version do less work.** A
   partner resolving a comment no longer re-renders every thread on
   every peer; a comment edit the room silently dropped is now counted;

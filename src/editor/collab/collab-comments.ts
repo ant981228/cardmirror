@@ -114,6 +114,16 @@ export function installCommentsSync(
   const root = rootMap(doc);
   let disposed = false;
   let pullQueued = false;
+  // Last derived thread set this view was handed: a remote comments
+  // event that changes nothing derivable (a same-value LWW rewrite)
+  // used to rebuild every thread AND dispatch a transaction into the
+  // editor anyway (2026-09-01 review, PH-A12). Reset by every LOCAL
+  // write: the pane has moved past the last pull on its own, and if the
+  // room settles back to exactly that earlier state — this peer's
+  // "resolved" toggle lost a last-write-wins race with a partner's — the
+  // next pull must render it, or the pane keeps the losing value while
+  // every map agrees on the other (chaos rig, 2026-09-05).
+  let lastPulledSig = '';
 
   const mirror = (meta: CommentsMeta): void => {
     switch (meta.type) {
@@ -169,14 +179,10 @@ export function installCommentsSync(
       default:
         return; // gc / sync-load / set-visible stay local
     }
+    lastPulledSig = '';
     doc.commit({ origin: COMMENTS_COMMIT_ORIGIN });
   };
 
-  // Last derived thread set this view was handed: a remote comments
-  // event that changes nothing derivable (a same-value LWW rewrite)
-  // used to rebuild every thread AND dispatch a transaction into the
-  // editor anyway (2026-09-01 review, PH-A12).
-  let lastPulledSig = '';
   const pull = (): void => {
     if (disposed) return;
     const view = getView();

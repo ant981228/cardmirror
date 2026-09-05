@@ -409,6 +409,21 @@ and re-mints every bearer after the first in document order, the
 guard's own fallback rule and identical on every peer once documents
 converge, so followers agree with the fix that arrives.
 
+### Fixed: a comments pane could keep a lost resolved toggle on screen
+
+The comment sync's pull skips its editor dispatch when the room's thread
+set has the same signature as the last one it pulled, so a same-value
+last-write-wins rewrite on a partner's side does not re-render every
+thread on every peer. A local write, though, moves the pane past that
+last pull without touching the signature. When this peer's "resolved"
+toggle lost a last-write-wins race with a partner's toggle of the same
+thread, the room settled back to exactly the state this peer had pulled
+before its write; the next pull matched the old signature and skipped,
+and the pane kept the losing value while every peer's map agreed on the
+other (the chaos rig's comments oracle, 2026-09-05; never a CRDT
+divergence, and any later comment change or a reload cleared it). Every
+local write now resets the pulled signature, so the next pull renders.
+
 ### Fixed: web tab return and tab close (web-build audit)
 
 The web build and the desktop build are one bundle; the differences are
