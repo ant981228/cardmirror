@@ -1505,43 +1505,57 @@ body:not(.pmd-multi-doc):not(.pmd-multi-window) #speech-stack { display: none; }
 html:not(.pmd-doc-name-chip-on) #doc-name-chip { display: none !important; }
 .pmd-doc-name-chip[hidden] { display: none; }
 
-/* Cloud badge (disk-conflict.ts): one per window, beside the filename
-   chip, same weight as the autosave chip. Shown only for a document in
-   a cloud-synced folder; amber while the file has changed on disk under
-   the editor. No transitions — a state change must not draw the eye
-   during a speech. */
-.pmd-disk-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin-left: 0.35rem;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid var(--pmd-c-border-soft);
-  border-radius: 999px;
-  background: var(--pmd-c-surface);
-  color: var(--pmd-c-text-secondary);
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1;
-  white-space: nowrap;
+/* Cloud pill (disk-conflict.ts): one per window, in its own tray at the
+   editor's bottom-RIGHT corner — the mirror of `.pmd-pill-tray` (Send /
+   Receive / Dropzone, bottom-left) and the same pill family. Shown only
+   for a document in a cloud-synced folder; amber while the file has
+   changed on disk under the editor. No transitions — a state change
+   must not draw the eye during a speech. */
+.pmd-pill-tray-right {
+  position: fixed;
+  bottom: calc(var(--status-bar-height) + 0.5rem);
+  right: 0.5rem;
+  z-index: 220;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+.pmd-pill-tray-right > * {
+  pointer-events: auto;
+}
+/* Same two-bar clearance as the left tray in the multi-pane workspace. */
+body.pmd-multi-doc .pmd-pill-tray-right {
+  bottom: calc(var(--status-bar-height) + var(--pmd-pane-footer-height) + 0.5rem);
+}
+.pmd-disk-bar {
   cursor: pointer;
 }
-.pmd-disk-badge[hidden] { display: none; }
-.pmd-disk-badge[data-state='changed'] {
+.pmd-disk-badge[data-state='changed'] .pmd-pill-bar {
   color: #8a5a00;
   border-color: #e0b24a;
   background: #fff6dc;
 }
-.pmd-disk-badge[data-state='kept-copy'] {
+.pmd-disk-badge[data-state='changed'] .pmd-pill-icon { color: #8a5a00; }
+.pmd-disk-badge[data-state='kept-copy'] .pmd-pill-bar {
   color: #5a4a8a;
   border-color: #b8a6e6;
   background: #f1ecfb;
 }
+.pmd-disk-badge[data-state='kept-copy'] .pmd-pill-icon { color: #5a4a8a; }
 @media (prefers-color-scheme: dark) {
-  .pmd-disk-badge[data-state='changed'] { color: #f0c66a; border-color: #8a6a1a; background: #3a2e0e; }
-  .pmd-disk-badge[data-state='kept-copy'] { color: #c9b8f5; border-color: #5f4c9a; background: #2a2340; }
+  .pmd-disk-badge[data-state='changed'] .pmd-pill-bar { color: #f0c66a; border-color: #8a6a1a; background: #3a2e0e; }
+  .pmd-disk-badge[data-state='changed'] .pmd-pill-icon { color: #f0c66a; }
+  .pmd-disk-badge[data-state='kept-copy'] .pmd-pill-bar { color: #c9b8f5; border-color: #5f4c9a; background: #2a2340; }
+  .pmd-disk-badge[data-state='kept-copy'] .pmd-pill-icon { color: #c9b8f5; }
 }
-.pmd-multi-doc .pmd-disk-badge { margin-left: 0; }
+/* The pill overlaps the editor's bottom-right corner: give the last
+   lines the same runway the left tray gets (single-doc; panes scroll
+   independently and the pill covers only a corner of the rightmost). */
+html.pmd-disk-pill-active body:not(.pmd-multi-doc) #editor .ProseMirror {
+  padding-bottom: 4.5rem;
+}
 body.pmd-multi-doc #doc-name-chip { display: none; }
 
 /* Speech-doc banner. Shown in single-doc multi-window mode when THIS

@@ -21,21 +21,24 @@ import { settings } from '../../src/editor/settings.js';
 const A = '/Dropbox/Aff.cmir';
 
 function badge(over: Partial<DiskBadgeDeps> & { handle?: string | null; suppressed?: () => boolean } = {}) {
-  const anchor = document.createElement('div');
-  document.body.appendChild(anchor);
+  const parent = document.createElement('div');
+  document.body.appendChild(parent);
   let handle: string | null = over.handle ?? A;
-  installDiskBadge(anchor, {
-    getActive: () => ({ handle, name: 'Aff.cmir' }),
-    isSuppressed: over.suppressed ?? (() => false),
-    isSessionHost: () => false,
-    reveal: () => {},
-    reloadFromDisk: async () => {},
-    keepMineAsCopy: async () => {},
-    overwrite: async () => {},
-    openOriginal: async () => {},
-    ...over,
-  });
-  const el = anchor.nextElementSibling as HTMLButtonElement;
+  installDiskBadge(
+    {
+      getActive: () => ({ handle, name: 'Aff.cmir' }),
+      isSuppressed: over.suppressed ?? (() => false),
+      isSessionHost: () => false,
+      reveal: () => {},
+      reloadFromDisk: async () => {},
+      keepMineAsCopy: async () => {},
+      overwrite: async () => {},
+      openOriginal: async () => {},
+      ...over,
+    },
+    { parent },
+  );
+  const el = document.querySelector('.pmd-disk-badge') as HTMLElement;
   return { el, setHandle: (h: string | null) => (handle = h) };
 }
 
@@ -98,25 +101,37 @@ describe('user name for the copy filename', () => {
 });
 
 describe('badge', () => {
-  it('hidden for a local file, cloud glyph when synced, amber text when changed, kept-copy label', () => {
+  it('is a pill in its own bottom-right tray, styled as the Send/Receive family', () => {
+    const { el } = badge();
+    expect(el.parentElement?.className).toBe('pmd-pill-tray-right');
+    expect(el.classList.contains('pmd-pill')).toBe(true);
+    expect(el.querySelector('.pmd-pill-bar .pmd-pill-icon svg')).not.toBeNull();
+    expect(el.querySelector('.pmd-pill-bar .pmd-pill-label')).not.toBeNull();
+  });
+
+  it('hidden for a local file, provider label when synced, amber text when changed, kept-copy label', () => {
     const { el } = badge();
     noteDocRegistered(A, 'fresh', 'dropbox');
     expect(el.hidden).toBe(false);
     expect(el.getAttribute('data-state')).toBe('synced');
+    expect(el.textContent).toContain('Dropbox');
     expect(el.title).toContain('as of last sync');
+    expect(document.documentElement.classList.contains('pmd-disk-pill-active')).toBe(true);
     noteDiskChanged(A, Date.now() - 120_000);
     expect(el.getAttribute('data-state')).toBe('changed');
-    expect(el.textContent).toContain('changed on disk 2m ago');
+    expect(el.textContent).toContain('Changed on disk 2m ago');
     const copy = '/Dropbox/copy.cmir';
     noteKeptCopy(copy, A);
     const { setHandle } = badge({ handle: copy });
     setHandle(copy);
     refreshDiskBadge();
     expect(el.getAttribute('data-state')).toBe('kept-copy');
+    expect(el.textContent).toContain('Conflicted copy');
     noteDocRegistered('/local/x.cmir', 'fresh', null);
     setHandle('/local/x.cmir');
     refreshDiskBadge();
     expect(el.hidden).toBe(true);
+    expect(document.documentElement.classList.contains('pmd-disk-pill-active')).toBe(false);
   });
 
   it('is frozen while suppressed (read mode / timer pop-out) and catches up afterwards', () => {

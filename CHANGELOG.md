@@ -9,11 +9,12 @@ see `DETAILED_CHANGELOG.md`.
 
 ### Added
 
-- **Cloud badge and conflicted copies for shared folders.** A document
+- **Cloud pill and conflicted copies for shared folders.** A document
   in a Dropbox, OneDrive, Google Drive or iCloud folder now shows a
-  small cloud badge beside its name. When the file changes on disk
-  under you, because a teammate saved it on another machine, the badge
-  turns amber with the time, quietly, with no pop-up. Saving then never
+  cloud pill in the bottom-right corner of the editor, the mirror of
+  the Send and Receive pills. When the file changes on disk under you,
+  because a teammate saved it on another machine, the pill turns amber
+  with the time, quietly, with no pop-up. Saving then never
   overwrites their version: your document is written beside it as a
   conflicted copy, named the way Dropbox names its own, the window
   switches to the copy, and a notice in the status bar says so. Click

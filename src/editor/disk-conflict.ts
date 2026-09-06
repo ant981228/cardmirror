@@ -3,13 +3,15 @@
  *
  * Per open document (keyed by its on-disk handle) this tracks whether
  * the file lives in a cloud-synced folder and whether main's stat-only
- * poller has seen it change under the editor. One badge per window
- * shows the ACTIVE document's state, anchored beside the filename chip
- * in the ribbon:
+ * poller has seen it change under the editor. One pill per window
+ * shows the ACTIVE document's state, in its own tray at the editor's
+ * bottom-right corner (the mirror of the Send / Receive / Dropzone
+ * tray at the bottom-left, same pill styling):
  *
  *   local      — not rendered (no cloud provider);
- *   synced     — neutral cloud glyph, "as of last sync" (we know the
- *                local disk, not the cloud); click reveals the file;
+ *   synced     — cloud glyph + the provider's name, "as of last sync"
+ *                (we know the local disk, not the cloud); click reveals
+ *                the file;
  *   changed    — amber + relative time; click opens the decision
  *                dialog (Reload / Keep mine as a copy / Overwrite);
  *   kept-copy  — the window is editing a conflicted copy; click
@@ -151,12 +153,16 @@ export function relativeTime(ms: number, now: number = Date.now()): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-// ── Badge ───────────────────────────────────────────────────────────
+// ── Pill ────────────────────────────────────────────────────────────
+// One per window, in its own fixed tray at the editor's bottom-RIGHT
+// corner — the mirror of the Send / Receive / Dropzone tray at the
+// bottom-left, and styled as the same family of pills (design call
+// 2026-09-06). Shows the ACTIVE document's state.
 
 export interface DiskBadgeDeps {
   /** The active document's handle + display name (either layout). */
   getActive: () => { handle: string | null; name: string | null };
-  /** Read mode or the timer pop-out is active: freeze the badge. */
+  /** Read mode or the timer pop-out is active: freeze the pill. */
   isSuppressed: () => boolean;
   /** The active document hosts a live co-editing session — Reload is
    *  withheld (it would replace the shared document under everyone). */
@@ -165,69 +171,101 @@ export interface DiskBadgeDeps {
   /** Confirms unsaved edits itself, then replaces the doc from disk. */
   reloadFromDisk: (handle: string) => Promise<void>;
   keepMineAsCopy: (handle: string) => Promise<void>;
-  /** Already double-confirmed by the badge; force-writes the disk. */
+  /** Already double-confirmed by the pill; force-writes the disk. */
   overwrite: (handle: string) => Promise<void>;
   openOriginal: (originalHandle: string) => Promise<void>;
 }
 
-let badgeEl: HTMLButtonElement | null = null;
+let trayEl: HTMLElement | null = null;
+let badgeEl: HTMLElement | null = null;
+let labelEl: HTMLElement | null = null;
+let barEl: HTMLElement | null = null;
 let badgeDeps: DiskBadgeDeps | null = null;
 let clockTimer: number | null = null;
 
+/** Cloud outline, drawn like the Send pill's paper plane (stroke icon). */
 const CLOUD_SVG =
-  '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">' +
-  '<path fill="currentColor" d="M19.4 10.1A7 7 0 0 0 5.6 8.8 5 5 0 0 0 6 18.5h12.5a4.2 4.2 0 0 0 .9-8.4zM18.5 17H6a3.5 3.5 0 0 1-.3-7l.9-.1.2-.9a5.5 5.5 0 0 1 10.8 1.1v.9h1a2.7 2.7 0 0 1-.1 5.4z"/></svg>';
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M7 18.5h11a4 4 0 0 0 .6-7.95A6.5 6.5 0 0 0 6.2 9.3 4.6 4.6 0 0 0 7 18.5z"/></svg>';
 
-/** Create the badge next to `anchor` (the filename chip) once. */
-export function installDiskBadge(anchor: HTMLElement, deps: DiskBadgeDeps): void {
+/** Create the tray + pill once (in `opts.parent`, default the body). */
+export function installDiskBadge(deps: DiskBadgeDeps, opts?: { parent?: HTMLElement }): void {
   badgeDeps = deps;
   if (badgeEl) return;
-  const el = document.createElement('button');
-  el.type = 'button';
-  el.className = 'pmd-disk-badge';
-  el.hidden = true;
-  el.setAttribute('aria-live', 'off');
-  el.addEventListener('mousedown', (e) => e.preventDefault()); // keep the editor's focus
-  el.addEventListener('click', () => void onBadgeClick());
-  anchor.insertAdjacentElement('afterend', el);
-  badgeEl = el;
+  const parent = opts?.parent ?? document.body;
+  trayEl = document.createElement('div');
+  trayEl.className = 'pmd-pill-tray-right';
+  const root = document.createElement('div');
+  root.className = 'pmd-pill pmd-disk-pill pmd-disk-badge';
+  root.hidden = true;
+  const bar = document.createElement('div');
+  bar.className = 'pmd-pill-bar pmd-disk-bar';
+  bar.setAttribute('role', 'button');
+  bar.tabIndex = 0;
+  const icon = document.createElement('span');
+  icon.className = 'pmd-pill-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.innerHTML = CLOUD_SVG;
+  bar.appendChild(icon);
+  const label = document.createElement('span');
+  label.className = 'pmd-pill-label';
+  bar.appendChild(label);
+  root.appendChild(bar);
+  bar.addEventListener('mousedown', (e) => e.preventDefault()); // keep the editor's focus
+  bar.addEventListener('click', () => void onBadgeClick());
+  bar.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void onBadgeClick();
+    }
+  });
+  trayEl.appendChild(root);
+  parent.appendChild(trayEl);
+  badgeEl = root;
+  barEl = bar;
+  labelEl = label;
   refreshDiskBadge();
 }
 
 function render(): void {
-  if (!badgeEl || !badgeDeps) return;
+  if (!badgeEl || !barEl || !labelEl || !badgeDeps) return;
   const { handle, name } = badgeDeps.getActive();
   const info = handle ? byHandle.get(handle) : null;
   if (!info || info.state === 'local') {
     badgeEl.hidden = true;
     badgeEl.removeAttribute('data-state');
+    document.documentElement.classList.remove('pmd-disk-pill-active');
     stopClock();
     return;
   }
   const provider = info.provider ? PROVIDER_LABEL[info.provider] : 'a synced folder';
   badgeEl.hidden = false;
   badgeEl.setAttribute('data-state', info.state);
+  document.documentElement.classList.add('pmd-disk-pill-active');
   let label = '';
   let title = '';
   if (info.state === 'synced') {
+    label = info.provider ? PROVIDER_LABEL[info.provider] : 'Synced';
     title = `In ${provider} · as of last sync. Click to reveal the file.`;
   } else if (info.state === 'changed') {
     const when = info.changedAt ? relativeTime(info.changedAt) : '';
-    label = when ? `changed on disk ${when}` : 'changed on disk';
+    label = when ? `Changed on disk ${when}` : 'Changed on disk';
     title = `"${name ?? 'This document'}" changed on disk ${when} — another device or program wrote it. Click to decide.`;
   } else {
-    label = 'conflicted copy';
+    label = 'Conflicted copy';
     title = `You are editing a conflicted copy of "${info.copyOf ? baseName(info.copyOf) : name ?? 'the original'}". Click for the original.`;
   }
-  badgeEl.innerHTML = `${CLOUD_SVG}${label ? `<span class="pmd-disk-badge-text">${escapeHtml(label)}</span>` : ''}`;
+  labelEl.textContent = label;
   badgeEl.title = title;
-  badgeEl.setAttribute('aria-label', title);
+  barEl.title = title;
+  barEl.setAttribute('aria-label', title);
   if (info.state === 'changed') startClock();
   else stopClock();
 }
 
 /** Re-render for the active document — unless suppressed (read mode /
- *  timer pop-out), in which case the badge keeps its last rendering
+ *  timer pop-out), in which case the pill keeps its last rendering
  *  and catches up on the next refresh after the suppression clears. */
 export function refreshDiskBadge(): void {
   if (!badgeEl || !badgeDeps) return;
@@ -248,9 +286,6 @@ function stopClock(): void {
 function baseName(p: string): string {
   const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
   return i >= 0 ? p.slice(i + 1) : p;
-}
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/gu, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 async function onBadgeClick(): Promise<void> {
@@ -323,7 +358,11 @@ async function onBadgeClick(): Promise<void> {
 export function __resetDiskConflictForTests(): void {
   byHandle.clear();
   stopClock();
-  badgeEl?.remove();
+  trayEl?.remove();
+  trayEl = null;
   badgeEl = null;
+  barEl = null;
+  labelEl = null;
   badgeDeps = null;
+  document.documentElement.classList.remove('pmd-disk-pill-active');
 }

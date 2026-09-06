@@ -45,10 +45,15 @@ online-only placeholder on Windows forces hydration, the stall from the
 August support case. A sync client touching a timestamp therefore shows
 as a change; the save-time byte comparison corrects it.
 
-The badge sits beside the filename chip, one per window, showing the
-active document's state (three-pane switches it with focus). Neutral
-cloud glyph when synced, amber with a relative time when changed, a
-"conflicted copy" label when the window is editing one. No toast,
+The badge is a pill in its own fixed tray at the editor's bottom-right
+corner, the mirror of the Send / Receive / Dropzone tray at the
+bottom-left and styled as the same family (it started beside the
+filename chip in the ribbon, which is opt-in and off by default, so it
+floated beside nothing and was easy to miss; moved on review). One per
+window, showing the active document's state (three-pane switches it
+with focus). Cloud glyph plus the provider's name when synced, amber
+with a relative time when changed, a "Conflicted copy" label when the
+window is editing one. No toast,
 modal or animation on a transition; the badge is frozen while read
 mode or the timer pop-out is active and catches up afterwards. Clicking
 the amber badge opens the route-style decision: Reload from disk

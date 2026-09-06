@@ -8159,14 +8159,15 @@ async function reloadActiveFromDisk(handle: string): Promise<void> {
 }
 
 let diskBadgeInstalled = false;
-/** Create the badge beside the filename chip once the ribbon exists and
- *  wire main's disk-changed pushes. Idempotent. */
+/** Create the cloud pill (bottom-right tray, the mirror of the Send /
+ *  Receive tray) and wire main's disk-changed pushes. Idempotent. Waits
+ *  for the left tray to exist: it is created at boot for every layout
+ *  except mobile, which has no pills at all. */
 function ensureDiskBadge(): void {
   if (diskBadgeInstalled) return;
-  const chip = document.getElementById('doc-name-chip');
-  if (!chip) return;
+  if (!document.querySelector('.pmd-pill-tray')) return;
   diskBadgeInstalled = true;
-  installDiskBadge(chip, {
+  installDiskBadge({
     getActive: () => {
       const f = activeFile();
       return { handle: typeof f.handle === 'string' ? f.handle : null, name: f.filename };
