@@ -52,6 +52,12 @@ interface SessionOpts {
 }
 
 export function openLearnSession(scope: Scope, opts: SessionOpts = {}): void {
+  // One session at a time. The buttons that open a session keep keyboard
+  // focus behind the overlay, and Space on a focused button is a click —
+  // without this guard (and the focus move below) every Space stacked
+  // another session over the "Nothing due right now" panel (field
+  // report 2026-09-06).
+  if (document.querySelector('.pmd-learn-session-overlay')) return;
   const today = localToday();
   const queue = learnStore.queue(scope, today); // cardIds, due-ordered
   // Working queue we mutate as we retry forgotten cards.
@@ -66,10 +72,14 @@ export function openLearnSession(scope: Scope, opts: SessionOpts = {}): void {
   overlay.appendChild(panel);
 
   const overlayToken = pushOverlay();
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const cleanup = (): void => {
     overlay.remove();
     document.removeEventListener('keydown', onKey, true);
     popOverlay(overlayToken);
+    // Hand focus back to whatever opened us (the Review button, the
+    // manager) so keyboard users land where they were.
+    if (opener && opener.isConnected) opener.focus();
   };
 
   const onKey = (e: KeyboardEvent): void => {
@@ -103,6 +113,14 @@ export function openLearnSession(scope: Scope, opts: SessionOpts = {}): void {
         e.preventDefault();
         showContext();
       }
+      return;
+    }
+    // done: Space / Enter = the Done button. preventDefault matters even
+    // with focus inside the panel — a key the panel doesn't own must not
+    // fall through to the page as a scroll or a button activation.
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      cleanup();
     }
   };
 
@@ -279,6 +297,11 @@ export function openLearnSession(scope: Scope, opts: SessionOpts = {}): void {
 
   document.addEventListener('keydown', onKey, true);
   document.body.appendChild(overlay);
+  // Take keyboard focus off the opener: the panel is the modal surface.
+  panel.tabIndex = -1;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.focus();
   if (work.length === 0) {
     state = 'done';
     renderDone();

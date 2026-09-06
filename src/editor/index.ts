@@ -9484,11 +9484,52 @@ function positionDropzone(): void {
   // as the left (it's left-anchored, so without this it grows toward
   // the window edge).
   root.style.maxWidth = `${Math.max(160, Math.round(r.width - 16))}px`;
+  positionRightTray();
   // The scroll runway (so the last content clears the tray) is pure CSS: a
   // `padding-bottom` on the editable, gated on the pill-hidden class. Single-doc
   // pads `#editor .ProseMirror`; multi-pane pads only the anchored pane's editor
   // (tagged `.pmd-pane-pill-anchored` above) — no measurement needed here.
 }
+/** The cloud pill's tray (bottom-RIGHT, disk-conflict.ts) — anchored to
+ *  the editor's bottom-right the way `positionDropzone` anchors the left
+ *  tray, but measured against the SCROLLER's client box so the pill
+ *  clears the vertical scrollbar at whatever width the OS draws it
+ *  (field report 2026-09-06: the pill sat on top of the scrollbar). A
+ *  fixed `right` from the window edge can't know that width. Overlay
+ *  scrollbars (macOS default) report zero, so a 16px inset leaves room
+ *  for the transient thumb. Single-doc: the scroller enclosing #editor;
+ *  multi-pane: the rightmost visible pane's body. */
+function positionRightTray(): void {
+  const tray = document.querySelector<HTMLElement>('.pmd-pill-tray-right');
+  if (!tray) return;
+  let scroller: HTMLElement | null = null;
+  if (document.body.classList.contains('pmd-multi-doc')) {
+    const bodies = document.querySelectorAll<HTMLElement>('.pmd-pane:not([hidden]) .pmd-pane-body');
+    scroller = bodies[bodies.length - 1] ?? null;
+  } else {
+    let el: HTMLElement | null = document.getElementById('editor');
+    while (el && el !== document.body) {
+      const oy = getComputedStyle(el).overflowY;
+      if (oy === 'auto' || oy === 'scroll') {
+        scroller = el;
+        break;
+      }
+      el = el.parentElement;
+    }
+    scroller ??= document.getElementById('app');
+  }
+  const r = scroller?.getBoundingClientRect();
+  if (!scroller || !r || r.width === 0 || r.height === 0) {
+    tray.style.removeProperty('right');
+    tray.style.removeProperty('bottom');
+    return;
+  }
+  const scrollbar = Math.max(0, Math.round(r.width - scroller.clientWidth));
+  const inset = scrollbar > 0 ? scrollbar + 8 : 16;
+  tray.style.right = `${Math.max(4, Math.round(window.innerWidth - r.right + inset))}px`;
+  tray.style.bottom = `${Math.max(4, Math.round(window.innerHeight - r.bottom + 8))}px`;
+}
+
 // Load the per-user Learn annotation store (flashcards / schedules /
 // anchors) so review counts + the comments column have it available.
 void loadLearnStore();

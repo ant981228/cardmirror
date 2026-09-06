@@ -77,6 +77,32 @@ guard, the journaled baseline, the pre-rename recheck, copy naming, the
 cloud classifier, the poller and the badge state machine. The web build
 is out of scope: it has no equivalent guard and cannot poll a folder.
 
+### Fixed: Space stacked the "Nothing due right now" review panel
+
+The review session's capture-phase key handler swallowed propagation
+but, in the finished state, never called preventDefault, and the
+session never moved keyboard focus off the button that opened it. So
+with nothing due, a Space keydown reached the still-focused Review
+button as an activation, which opened another session, each with its
+own overlay and its own darker backdrop, on every press until a click
+moved focus. Three changes: the session panel takes focus on open (a
+focusable dialog surface) and hands it back to the opener on close;
+Space and Enter in the finished state act as the Done button with the
+default prevented; and a second session cannot open while one is up
+whatever path asks for it. A jsdom test emulates the button's Space
+activation and asserts one overlay, then none.
+
+### Fixed: the cloud pill cleared the editor's scrollbar
+
+The bottom-right tray was pinned a fixed distance from the window
+edge, so on a machine that draws a persistent scrollbar the pill sat
+on top of it. The tray is now positioned by the same pass that anchors
+the left tray, measured against the editor's scroll container: its
+client width excludes the vertical scrollbar at whatever width the OS
+draws it, so the pill clears the bar by 8px, and overlay scrollbars
+(which report no width) get a 16px inset for the transient thumb.
+Three-pane measures the rightmost visible pane.
+
 ### Fixed: flashcards lost between windows (single-owner learn store)
 
 The flashcard store (cards, schedules, anchors, notes, AI threads,

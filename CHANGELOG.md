@@ -23,6 +23,12 @@ see `DETAILED_CHANGELOG.md`.
 
 ### Fixed
 
+- **Space no longer stacks the "Nothing due right now" panel.** With no
+  flashcards due, pressing Space after Review all due opened another
+  copy of the panel on every press, because the button behind it kept
+  the keyboard. The session now takes the keyboard when it opens, Space
+  or Enter on that panel means Done, and a second session cannot open
+  over a first.
 - **Saving over a teammate's edits in a shared folder.** Opening the
   quick-card palette, a second window, or a speech document that pulled
   from a file could quietly convince CardMirror that the file's newer
