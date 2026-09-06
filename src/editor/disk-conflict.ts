@@ -308,7 +308,6 @@ async function onBadgeClick(): Promise<void> {
   // changed — three ways out, no secondary confirmations (design call
   // 2026-09-06): keep theirs (reload), keep mine (overwrite), keep both.
   const host = badgeDeps.isSessionHost(handle);
-  const when = info.changedAt ? relativeTime(info.changedAt) : 'recently';
   const dirty = badgeDeps.isDirty?.() ?? false;
   const choices: Array<{ value: 'theirs' | 'mine' | 'both'; label: string; description: string }> = [];
   if (!host) {
@@ -329,10 +328,12 @@ async function onBadgeClick(): Promise<void> {
     description: 'Saves a conflicted copy in the same folder.',
   });
   const choice = await promptForRouteChoice<'theirs' | 'mine' | 'both'>({
-    message: `"${name ?? 'This document'}" changed on disk ${when}.`,
-    detail:
-      `Another device or program wrote the file while you were editing it${info.provider ? ` (it is in ${PROVIDER_LABEL[info.provider]})` : ''}.` +
-      (host ? '\nKeeping their changes is unavailable while you host a co-editing session — end the session first.' : ''),
+    message:
+      `"${name ?? 'This document'}" was changed by another device or program while you were editing it` +
+      `${info.provider ? ` (it is in ${PROVIDER_LABEL[info.provider]})` : ''}.`,
+    ...(host
+      ? { detail: 'Keeping their changes is unavailable while you host a co-editing session — end the session first.' }
+      : {}),
     choices,
   });
   if (choice === 'theirs') await badgeDeps.reloadFromDisk(handle);
