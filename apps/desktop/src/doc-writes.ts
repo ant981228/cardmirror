@@ -13,15 +13,24 @@
  *     and the renderer's "file location not found → Save As" rescue
  *     flow takes over.
  *
- *  2. CHANGED-ON-DISK GUARD (in-place saves only): we remember each
- *     document's on-disk mtime+size after every read and write. If the
- *     file changed underneath us — another machine editing through a
- *     synced Dropbox folder is the field case; Dropbox will NOT mint a
- *     "conflicted copy" when the remote version already synced down
+ *  2. CHANGED-ON-DISK GUARD (in-place saves only): the window that
+ *     OWNS a document holds a baseline of its on-disk mtime+size (+
+ *     content hash), taken when the window registered the document
+ *     after reading it and refreshed by that window's own writes. If
+ *     the file changed underneath it — another machine editing through
+ *     a synced Dropbox folder is the field case; Dropbox will NOT mint
+ *     a "conflicted copy" when the remote version already synced down
  *     before our write — the save is refused with an EMODIFIED-marked
- *     error so the renderer can ask overwrite / Save As / cancel.
- *     Unknown paths (nothing recorded) skip the check: a doc restored
- *     from a journal after a restart behaves exactly as before.
+ *     error and the renderer keeps both (a conflicted copy beside the
+ *     original). A path with NO baseline for the saving window is
+ *     refused the same way: "unknown" is not a bypass (it used to be —
+ *     a doc restored from a journal skipped the check; journals now
+ *     carry the baseline). Reads by other features — the quick-card
+ *     warm pass, transclusion resolution, a second window's open —
+ *     record only a CANDIDATE that a window promotes when it registers
+ *     the path; they can never re-arm an open document's baseline
+ *     (field report 2026-09-06: that re-arming was how partners
+ *     silently overwrote each other).
  *
  *  3. ATOMIC WRITES + PER-PATH SERIALIZATION (all doc writes): bytes
  *     stage into a hidden sibling `.cmtmp` file, then rename over the
@@ -37,12 +46,12 @@
  *     in flight can't interleave (see the kernel-race note above
  *     `host:write-journal` in main.ts).
  *
- * The state map is keyed by resolved path and shared across windows —
- * which matches the cross-window duplicate-open guard's invariant that
- * a document is open in at most one window. It deliberately tracks
- * "what CardMirror last saw on disk", not per-editing-session identity:
- * an in-app write to a path (send-doc export, bulk convert) refreshes
- * the entry, so only writes by OTHER programs trip the guard.
+ * Both maps are keyed by resolved path. Baselines carry the owning
+ * window's id, matching the cross-window duplicate-open guard's
+ * invariant that a document is open in at most one window; an in-app
+ * rewrite of a path by main itself (docx anchor stamp, bulk compress)
+ * refreshes the owner's baseline through `refreshOwnedBaseline`, so
+ * only writes by OTHER programs trip the guard.
  */
 
 import { createHash } from 'node:crypto';
@@ -80,7 +89,7 @@ function isTransientRenameCode(err: unknown): boolean {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-interface DiskState {
+export interface DiskState {
   mtimeMs: number;
   size: number;
   /** sha256 of the bytes CardMirror last read from / wrote to the
@@ -98,11 +107,20 @@ function hashOf(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-/** Last-seen on-disk identity per resolved path. Populated by
- *  `recordDiskStateFromDisk` (after document reads) and by the two
- *  writers below (after their writes). Entries are refreshed on every
- *  read, so going stale is harmless — the next open overwrites them. */
-const knownDiskState = new Map<string, DiskState>();
+/** CANDIDATE baselines: what CardMirror last read from / wrote to a
+ *  path, whoever asked. Consulted only when a window registers the
+ *  path as its open document (`claimBaseline`), never by a save. */
+const lastReadState = new Map<string, DiskState>();
+
+/** The guard's source of truth: per open document, the owning window
+ *  and the on-disk state it may overwrite. Set by `claimBaseline`
+ *  (registration) and by the owner's own writes; cleared on release. */
+const baselines = new Map<string, { owner: number; state: DiskState }>();
+
+/** How a registration obtained its baseline. `changed` = the journaled
+ *  baseline was adopted but the file on disk already differs from it
+ *  (the badge starts amber; the first save keeps both). */
+export type ClaimResult = 'fresh' | 'journaled' | 'changed' | 'unknown';
 
 /** Per-path write tails — same serialization pattern as main.ts's
  *  `journalWriteTails`, for the same reason: two overlapping writes to
@@ -136,17 +154,18 @@ export function chainDocWrite<T>(filePath: string, task: () => Promise<T>): Prom
 
 /** Remember `filePath`'s current on-disk mtime+size — plus a content
  *  hash when the caller passes the bytes it just read/wrote, which
- *  arms the guard's metadata-churn rescue (see DiskState.contentHash).
- *  Best-effort: a stat failure (file vanished between read and stat)
- *  just leaves no entry, which disables the changed-on-disk guard for
- *  that path — never breaks the read that called us. */
+ *  arms the guard's metadata-churn rescue (see DiskState.contentHash)
+ *  — as a CANDIDATE baseline. It becomes a window's baseline only when
+ *  that window registers the path (`claimBaseline`). Best-effort: a
+ *  stat failure (file vanished between read and stat) just leaves no
+ *  candidate — never breaks the read that called us. */
 export async function recordDiskStateFromDisk(
   filePath: string,
   contentBytes?: Buffer,
 ): Promise<void> {
   try {
     const st = await fs.stat(filePath);
-    knownDiskState.set(keyFor(filePath), {
+    lastReadState.set(keyFor(filePath), {
       mtimeMs: st.mtimeMs,
       size: st.size,
       ...(contentBytes !== undefined ? { contentHash: hashOf(contentBytes) } : {}),
@@ -154,6 +173,76 @@ export async function recordDiskStateFromDisk(
   } catch {
     /* best-effort */
   }
+}
+
+/** A window registered `filePath` as its open document. The baseline
+ *  is the candidate from the read that preceded the mount ('fresh');
+ *  with no candidate (a crash-recovered doc mounts from journal bytes
+ *  without reading the file) the journal's carried baseline is
+ *  adopted — 'journaled' when the file still matches it, 'changed'
+ *  when it doesn't; with neither there is no baseline ('unknown') and
+ *  the window's first save keeps both. Always re-claims, so a Reload
+ *  from disk (read, then re-register) takes the fresh candidate. */
+export async function claimBaseline(
+  filePath: string,
+  ownerId: number,
+  journaled?: DiskState | null,
+): Promise<ClaimResult> {
+  const key = keyFor(filePath);
+  const candidate = lastReadState.get(key);
+  if (candidate) {
+    baselines.set(key, { owner: ownerId, state: candidate });
+    return 'fresh';
+  }
+  if (journaled && typeof journaled.mtimeMs === 'number' && typeof journaled.size === 'number') {
+    baselines.set(key, { owner: ownerId, state: { ...journaled } });
+    try {
+      const st = await fs.stat(filePath);
+      return st.mtimeMs === journaled.mtimeMs && st.size === journaled.size ? 'journaled' : 'changed';
+    } catch {
+      return 'journaled'; // gone / unreadable — the save's stat reports it
+    }
+  }
+  baselines.delete(key);
+  return 'unknown';
+}
+
+/** The window released the path (close, replace, Save-As away). */
+export function releaseBaseline(filePath: string, ownerId: number): void {
+  const key = keyFor(filePath);
+  if (baselines.get(key)?.owner === ownerId) baselines.delete(key);
+}
+
+/** Window gone (closed, crashed): drop everything it owned. */
+export function releaseBaselinesForWindow(ownerId: number): void {
+  for (const [key, b] of baselines) if (b.owner === ownerId) baselines.delete(key);
+}
+
+export function baselineFor(filePath: string): { owner: number; state: DiskState } | undefined {
+  return baselines.get(keyFor(filePath));
+}
+
+/** Every owned baseline — the disk poller's watch list. */
+export function ownedBaselines(): Array<{ path: string; owner: number; state: DiskState }> {
+  return [...baselines.entries()].map(([path, b]) => ({ path, owner: b.owner, state: b.state }));
+}
+
+/** An in-app rewrite of `filePath` by main itself (docx anchor stamp,
+ *  bulk compress): refresh the candidate and, if a window owns the
+ *  path, its baseline too, so that window's next save is not refused. */
+export async function refreshOwnedBaseline(filePath: string, contentBytes: Buffer): Promise<void> {
+  await recordDiskStateFromDisk(filePath, contentBytes);
+  const key = keyFor(filePath);
+  const candidate = lastReadState.get(key);
+  const b = baselines.get(key);
+  if (candidate && b) baselines.set(key, { owner: b.owner, state: candidate });
+}
+
+function changedOnDiskError(filePath: string, why: string): Error {
+  return new Error(
+    `${CHANGED_ON_DISK_MARKER}: "${path.basename(filePath)}" ${why} — another program, ` +
+      `device, or sync service may have written it.`,
+  );
 }
 
 /** Stage-then-rename write. The tmp file is dot-prefixed (hidden in
@@ -172,10 +261,27 @@ export async function recordDiskStateFromDisk(
  *  even the overwrite fails is the save reported failed, with the
  *  ELOCKED-marked message. Non-transient rename errors clean the tmp
  *  and propagate unchanged. */
-async function writeAtomic(filePath: string, buf: Buffer, mode?: number): Promise<void> {
+async function writeAtomic(
+  filePath: string,
+  buf: Buffer,
+  mode?: number,
+  beforeRename?: () => Promise<void>,
+): Promise<void> {
   const dir = path.dirname(filePath);
   const tmpPath = path.join(dir, `.${path.basename(filePath)}.cmtmp`);
   await fs.writeFile(tmpPath, buf, mode !== undefined ? { mode } : {});
+  // Second look before the rename: writing the tmp file takes real time
+  // on a big document, and a synced-down remote version landing in that
+  // gap would be replaced by the rename with the guard none the wiser.
+  // A stat here shrinks the window to the rename itself.
+  if (beforeRename) {
+    try {
+      await beforeRename();
+    } catch (err) {
+      await fs.unlink(tmpPath).catch(() => {});
+      throw err;
+    }
+  }
   try {
     // Retry transient sharing violations (see RENAME_RETRY_DELAYS_MS);
     // anything else — and anything that outlives the backoff — throws.
@@ -218,53 +324,75 @@ async function writeAtomic(filePath: string, buf: Buffer, mode?: number): Promis
   }
 }
 
-/** In-place save to a file that must already exist on disk.
+/** In-place save to a file that must already exist on disk, by the
+ *  window `opts.ownerId` (omit only in tests / callers without a
+ *  window, which then use whatever baseline exists).
  *
  *  Throws ENOENT (from the stat) when the file was renamed/deleted —
  *  the renderer's `isFileGoneError` → Save-As rescue path. Throws an
- *  EMODIFIED-marked error when the file changed on disk since we last
- *  read or wrote it, unless `opts.force` (the renderer's explicit
- *  "Overwrite" choice) is set. */
+ *  EMODIFIED-marked error when the file changed on disk since the
+ *  owner's baseline, when the saving window holds NO baseline for the
+ *  path, or when the file moved during the write — unless `opts.force`
+ *  (the renderer's explicit, double-confirmed "Overwrite"). Resolves
+ *  with the post-write state, which also becomes the owner's baseline. */
 export function saveExistingDoc(
   filePath: string,
   buf: Buffer,
-  opts?: { force?: boolean },
-): Promise<void> {
+  opts?: { force?: boolean; ownerId?: number },
+): Promise<DiskState> {
   return chainDocWrite(filePath, async () => {
     // Existence check — a bare writeFile would silently recreate a
     // renamed/deleted file at the stale path.
     const st = await fs.stat(filePath);
-    const known = knownDiskState.get(keyFor(filePath));
-    if (
-      !opts?.force &&
-      known &&
-      (known.mtimeMs !== st.mtimeMs || known.size !== st.size)
-    ) {
-      // Metadata-churn rescue: when we know what the content SHOULD
-      // be, a stat mismatch with identical bytes is a sync layer
-      // rewriting timestamps (rclone upload finalization, Dropbox
-      // touch) — not an edit. Read and compare before refusing; any
-      // read failure falls through to the refusal.
-      let identicalContent = false;
-      if (known.contentHash) {
-        try {
-          identicalContent = hashOf(await fs.readFile(filePath)) === known.contentHash;
-        } catch {
-          /* unreadable — treat as changed */
-        }
-      }
-      if (!identicalContent) {
-        throw new Error(
-          `${CHANGED_ON_DISK_MARKER}: "${path.basename(filePath)}" changed on disk ` +
-            `after CardMirror last read or wrote it — another program, device, or ` +
-            `sync service may have written it.`,
+    const key = keyFor(filePath);
+    const base = baselines.get(key);
+    const owned = base !== undefined && (opts?.ownerId === undefined || base.owner === opts.ownerId);
+    if (!opts?.force) {
+      if (!owned) {
+        throw changedOnDiskError(
+          filePath,
+          'has no baseline in this window (it was not read here, or was restored without one)',
         );
+      }
+      const known = base.state;
+      if (known.mtimeMs !== st.mtimeMs || known.size !== st.size) {
+        // Metadata-churn rescue: when we know what the content SHOULD
+        // be, a stat mismatch with identical bytes is a sync layer
+        // rewriting timestamps (rclone upload finalization, Dropbox
+        // touch) — not an edit. Read and compare before refusing; any
+        // read failure falls through to the refusal. (This read can
+        // hydrate an online-only placeholder; the save watchdog covers
+        // that stall — the poller deliberately never reads.)
+        let identicalContent = false;
+        if (known.contentHash) {
+          try {
+            identicalContent = hashOf(await fs.readFile(filePath)) === known.contentHash;
+          } catch {
+            /* unreadable — treat as changed */
+          }
+        }
+        if (!identicalContent) {
+          throw changedOnDiskError(filePath, 'changed on disk after CardMirror last read or wrote it');
+        }
       }
     }
     // Preserve the existing file's permission bits across the
     // tmp+rename (a plain in-place write would have kept them).
-    await writeAtomic(filePath, buf, st.mode & 0o777);
+    await writeAtomic(filePath, buf, st.mode & 0o777, async () => {
+      if (opts?.force) return;
+      const again = await fs.stat(filePath);
+      if (again.mtimeMs !== st.mtimeMs || again.size !== st.size) {
+        throw changedOnDiskError(filePath, 'changed on disk while CardMirror was writing it');
+      }
+    });
     await recordDiskStateFromDisk(filePath, buf);
+    const after = lastReadState.get(key) ?? { mtimeMs: st.mtimeMs, size: st.size, contentHash: hashOf(buf) };
+    // The owner's own write is the new baseline (a forced overwrite by
+    // the owner too; a baseline-less forced save leaves none).
+    if (base && (opts?.ownerId === undefined || base.owner === opts.ownerId)) {
+      baselines.set(key, { owner: base.owner, state: after });
+    }
+    return after;
   });
 }
 
@@ -296,7 +424,7 @@ export function saveNewDoc(
   filePath: string,
   buf: Buffer,
   opts?: { mkdir?: boolean; failIfExists?: boolean },
-): Promise<void> {
+): Promise<DiskState> {
   return chainDocWrite(filePath, async () => {
     if (opts?.failIfExists) {
       const occupied = await fs.access(filePath).then(
@@ -307,8 +435,42 @@ export function saveNewDoc(
     }
     if (opts?.mkdir) await fs.mkdir(path.dirname(filePath), { recursive: true });
     await writeAtomic(filePath, buf);
+    // Candidate only: the window that adopts this file (Save As, a
+    // conflicted copy) registers the path next and promotes it.
     await recordDiskStateFromDisk(filePath, buf);
+    return lastReadState.get(keyFor(filePath)) ?? { mtimeMs: 0, size: buf.length, contentHash: hashOf(buf) };
   });
+}
+
+/** Sanitize a display name for use inside a filename. */
+export function fileNameSafe(name: string): string {
+  return name.replace(/[\\/:*?"<>|\u0000-\u001f]/gu, '').replace(/\s+/gu, ' ').trim();
+}
+
+/** The path for a conflicted copy of `originalPath`, beside the
+ *  original, named the way Dropbox names its own so the file reads as
+ *  the convention users already know:
+ *  `<name> (<user>'s conflicted copy <YYYY-MM-DD>).<ext>`, with
+ *  ` (2)`, ` (3)` … appended when that name is taken. Date only — no
+ *  colons (Windows) — and never overwrites an existing copy. */
+export async function conflictedCopyPath(
+  originalPath: string,
+  userName: string,
+  day: string,
+): Promise<string> {
+  const dir = path.dirname(originalPath);
+  const ext = path.extname(originalPath);
+  const stem = path.basename(originalPath, ext);
+  const user = fileNameSafe(userName) || 'user';
+  const suffix = `(${user}'s conflicted copy ${day})`;
+  for (let n = 1; ; n++) {
+    const candidate = path.join(dir, `${stem} ${suffix}${n > 1 ? ` (${n})` : ''}${ext}`);
+    const taken = await fs.access(candidate).then(
+      () => true,
+      () => false,
+    );
+    if (!taken) return candidate;
+  }
 }
 
 /** The deepest existing DIRECTORY on `fromPath`'s ancestor chain —
@@ -334,8 +496,9 @@ export async function nearestExistingDir(fromPath: string): Promise<string | nul
   }
 }
 
-/** Test seam — clears both maps so vitest cases start cold. */
+/** Test seam — clears every map so vitest cases start cold. */
 export function resetDocWritesForTests(): void {
-  knownDiskState.clear();
+  lastReadState.clear();
+  baselines.clear();
   writeTails.clear();
 }

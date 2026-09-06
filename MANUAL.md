@@ -744,6 +744,29 @@ Mouse selection mirrors Word too:
   paragraph, and Ctrl/Cmd-drag adds exactly what you drag over (snapped to
   whole words after a double-click, whole paragraphs after a triple-click).
 
+### Files in Dropbox and other shared folders
+
+A document that lives in a Dropbox, OneDrive, Google Drive or iCloud
+folder shows a small **cloud badge** beside its name in the ribbon. It
+means CardMirror is watching the file on disk, as of the last sync. If
+the file changes underneath you, because a teammate saved it on another
+machine, the badge turns amber and shows how long ago. Nothing pops up,
+so a conflict never interrupts a speech; the badge waits until read
+mode and the timer pop-out are off.
+
+Saving then never destroys the other version. Your document is written
+beside it as a conflicted copy, named the way Dropbox names its own
+(`Aff (Anthony's conflicted copy 2026-09-06).cmir`), the window switches
+to the copy, and a notice in the status bar tells you. The two files
+sit side by side in the folder, and the copy syncs to your teammate
+like any other file, so reconciling is a matter of opening both.
+Autosave does the same. Click the amber badge to choose instead:
+**Reload from disk** takes the other version (you are asked first if
+you have unsaved edits), **Keep mine as a copy** does what a save would,
+and **Overwrite** replaces the file after a second confirmation. Reload
+is unavailable while you host a co-editing session; end the session
+first.
+
 ### Converting blocks
 
 Pressing a structural key (F4–F7, Mod-F7, Mod-F8) converts the current

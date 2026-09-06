@@ -29,6 +29,8 @@ interface JournalEntry {
    *  draft. Passed through opaquely. */
   recoveredFromSavedAt?: string;
   bytes: Uint8Array;
+  /** Journal-carried on-disk baseline (main fills it on write). */
+  diskBase?: { mtimeMs: number; size: number; contentHash?: string };
 }
 
 interface QuickCardIpc {
@@ -508,8 +510,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('host:open-path-check', path) as Promise<{
       takenByOther: boolean;
     }>,
-  openPathRegister: (path: string) =>
-    ipcRenderer.invoke('host:open-path-register', path),
+  /** Cloud-sync provider for a path (null = local folder). */
+  cloudProvider: (path: string) =>
+    ipcRenderer.invoke('host:cloud-provider', path) as Promise<
+      'dropbox' | 'onedrive' | 'gdrive' | 'icloud' | 'other' | null
+    >,
+  /** Main's poller saw the owning window's file change on disk. */
+  onDiskChanged: (handler: (payload: { path: string; mtimeMs: number; size: number }) => void): (() => void) => {
+    const listener = (_evt: unknown, payload: { path: string; mtimeMs: number; size: number }): void => handler(payload);
+    ipcRenderer.on('host:disk-changed', listener);
+    return () => ipcRenderer.removeListener('host:disk-changed', listener);
+  },
+  /** Keep both: write bytes as a conflicted copy beside `handle`. */
+  saveConflictedCopy: (handle: string, bytes: Uint8Array, userName: string | null) =>
+    ipcRenderer.invoke('host:save-conflicted-copy', handle, bytes, userName) as Promise<{
+      name: string;
+      handle: string;
+    }>,
+  openPathRegister: (path: string, opts?: { journaledBase?: { mtimeMs: number; size: number; contentHash?: string } | null }) =>
+    ipcRenderer.invoke('host:open-path-register', path, opts) as Promise<{
+      claim: 'fresh' | 'journaled' | 'changed' | 'unknown';
+      provider: 'dropbox' | 'onedrive' | 'gdrive' | 'icloud' | 'other' | null;
+    } | null>,
   openPathRelease: (path: string) =>
     ipcRenderer.invoke('host:open-path-release', path),
   /** "Show in context": if another window already has `path` open, focus

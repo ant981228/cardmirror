@@ -55,8 +55,20 @@ import {
   saveNewDoc,
   DocExistsError,
   recordDiskStateFromDisk,
+  refreshOwnedBaseline,
+  claimBaseline,
+  releaseBaseline,
+  releaseBaselinesForWindow,
+  baselineFor,
+  ownedBaselines,
+  conflictedCopyPath,
   nearestExistingDir,
+  type DiskState,
+  type ClaimResult,
 } from './doc-writes.js';
+import { detectCloudProvider, type CloudProvider } from './cloud-roots.js';
+import { createDiskWatch } from './disk-watch.js';
+import * as os from 'node:os';
 import {
   inspectFromGithub,
   fetchPluginDirectory,
@@ -206,6 +218,9 @@ interface InitialDocPayload {
    *  the original journal savedAt for the stale-overwrite guard. Passed
    *  through opaquely. */
   recoveredFromSavedAt?: string;
+  /** Journal-carried on-disk baseline of a recovered doc (see
+   *  doc-writes.ts `claimBaseline`). Passed through opaquely. */
+  diskBase?: DiskState;
   /** "Show in context": spawned window scrolls + selects this anchor
    *  after mounting. Passed through opaquely (stored + returned via
    *  get-initial-doc); the renderer resolves it. */
@@ -1116,9 +1131,10 @@ ipcMain.handle(
         await fh.close();
       }
       await fs.rename(tmpPath, real);
-      // In-app write — refresh the changed-on-disk baseline so a doc
-      // that has this file open doesn't get a false conflict prompt.
-      await recordDiskStateFromDisk(real, buf);
+      // In-app write — refresh the owning window's changed-on-disk
+      // baseline so a doc that has this file open isn't refused its
+      // next save.
+      await refreshOwnedBaseline(real, buf);
       return { ok: true, name: path.basename(real) };
     } catch {
       try {
@@ -1269,9 +1285,9 @@ ipcMain.handle(
         // Restore the original mtime so recency sorting isn't disturbed.
         await fs.utimes(file, st.atime, st.mtime).catch(() => {});
         // In-app rewrite (mtime restored but SIZE changed) — refresh the
-        // changed-on-disk baseline so an open doc in this folder doesn't
-        // get a false conflict prompt on its next save.
-        await recordDiskStateFromDisk(file, gz);
+        // owning window's changed-on-disk baseline so an open doc in this
+        // folder isn't refused its next save.
+        await refreshOwnedBaseline(file, gz);
         summary.compressed++;
         summary.bytesAfter += gz.length;
       } catch (err) {
@@ -1410,18 +1426,59 @@ ipcMain.handle(
 
 ipcMain.handle(
   'host:save-existing',
-  async (_event, handle: string, bytes: unknown, opts?: { force?: boolean }) => {
+  async (event, handle: string, bytes: unknown, opts?: { force?: boolean }) => {
     if (typeof handle !== 'string' || handle.length === 0) {
       throw new Error('host:save-existing: handle must be a non-empty path string.');
     }
     // Throws ENOENT when the file was renamed/deleted out from under
     // us (→ the renderer's Save-As rescue) and an EMODIFIED-marked
-    // error when it changed on disk since we last read/wrote it
-    // (→ the renderer's overwrite / Save As / cancel prompt, whose
-    // "Overwrite" choice retries with force). See doc-writes.ts.
-    await saveExistingDoc(handle, bytesToBuffer(bytes), { force: opts?.force === true });
+    // error when it changed on disk since THIS window's baseline, or
+    // when this window holds no baseline for the path (→ the renderer
+    // keeps both as a conflicted copy; its double-confirmed "Overwrite"
+    // retries with force). See doc-writes.ts.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    await saveExistingDoc(handle, bytesToBuffer(bytes), {
+      force: opts?.force === true,
+      ...(win ? { ownerId: win.id } : {}),
+    });
   },
 );
+
+/** Keep both: write the caller's bytes as a conflicted copy beside the
+ *  original (Dropbox-style name, never overwriting an existing copy).
+ *  The renderer switches the window to the copy and registers it, which
+ *  promotes the candidate baseline this write records. `userName` is the
+ *  renderer's pick (co-editing display name, else comment author name);
+ *  empty → the computer account username. */
+ipcMain.handle(
+  'host:save-conflicted-copy',
+  async (_event, handle: string, bytes: unknown, userName: unknown) => {
+    if (typeof handle !== 'string' || handle.length === 0) {
+      throw new Error('host:save-conflicted-copy: handle must be a non-empty path string.');
+    }
+    let user = typeof userName === 'string' ? userName.trim() : '';
+    if (!user) {
+      try {
+        user = os.userInfo().username;
+      } catch {
+        user = 'user';
+      }
+    }
+    const d = new Date();
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const target = await conflictedCopyPath(handle, user, day);
+    await saveNewDoc(target, bytesToBuffer(bytes));
+    grantReadPath(target);
+    return { name: path.basename(target), handle: target };
+  },
+);
+
+/** Cloud-sync provider for a path (null = local) — the badge's
+ *  `synced` state. Cached per canonical path by the poller wiring. */
+ipcMain.handle('host:cloud-provider', async (_event, p: unknown): Promise<CloudProvider | null> => {
+  if (typeof p !== 'string' || !p) return null;
+  return cloudProviderFor(canonicalOpenPath(p));
+});
 
 // ─── Crash-recovery journals ───────────────────────────────────────
 // Each open doc gets one journal file at
@@ -1441,6 +1498,10 @@ interface JournalEntryIpc {
    *  not-yet-manually-saved draft — the stale-overwrite guard's baseline.
    *  Passed through opaquely. */
   recoveredFromSavedAt?: string;
+  /** On-disk baseline of the doc's file at journal time (main fills it
+   *  from the owning window's baseline; the renderer passes it back when
+   *  it registers the recovered doc, see doc-writes.ts). */
+  diskBase?: DiskState;
   bytes: unknown;
 }
 
@@ -1471,10 +1532,15 @@ async function ensureJournalsDir(): Promise<void> {
 // the previous one's settle keeps the on-disk file always valid.
 const journalWriteTails = new Map<string, Promise<void>>();
 
-ipcMain.handle('host:write-journal', (_event, entry: JournalEntryIpc) => {
+ipcMain.handle('host:write-journal', (event, entry: JournalEntryIpc) => {
   if (!entry || typeof entry.uid !== 'string' || !entry.uid) {
     throw new Error('host:write-journal: entry.uid is required.');
   }
+  // Carry the owning window's on-disk baseline so a recovered doc
+  // knows whether its file moved while the app was down.
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const base = typeof entry.handle === 'string' && entry.handle ? baselineFor(entry.handle) : undefined;
+  const diskBase = base && win && base.owner === win.id ? base.state : undefined;
   const previous = journalWriteTails.get(entry.uid) ?? Promise.resolve();
   const next = previous.catch(() => {}).then(async () => {
     await ensureJournalsDir();
@@ -1492,6 +1558,7 @@ ipcMain.handle('host:write-journal', (_event, entry: JournalEntryIpc) => {
       ...(typeof entry.recoveredFromSavedAt === 'string'
         ? { recoveredFromSavedAt: entry.recoveredFromSavedAt }
         : {}),
+      ...(diskBase ? { diskBase } : {}),
       bytesB64: buf.toString('base64'),
     };
     // Atomic write: stage into a sibling .tmp file then rename
@@ -1542,6 +1609,9 @@ ipcMain.handle('host:read-journals', async () => {
         savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : new Date(0).toISOString(),
         ...(typeof parsed.recoveredFromSavedAt === 'string'
           ? { recoveredFromSavedAt: parsed.recoveredFromSavedAt }
+          : {}),
+        ...(parsed.diskBase && typeof parsed.diskBase.mtimeMs === 'number' && typeof parsed.diskBase.size === 'number'
+          ? { diskBase: parsed.diskBase as DiskState }
           : {}),
         bytes: new Uint8Array(Buffer.from(parsed.bytesB64, 'base64')),
       });
@@ -2412,28 +2482,71 @@ ipcMain.handle(
   },
 );
 
-// Register `p` as owned by the caller's window. Idempotent — if
-// the caller already owns it, no-op. If another window owns it,
-// we overwrite (the caller's pre-load check should have caught
-// the conflict; this is best-effort for paths picked up via
-// Save-As / recovery where no check happened).
-ipcMain.handle('host:open-path-register', async (event, p: string) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win || typeof p !== 'string' || !p) return;
-  const norm = canonicalOpenPath(p);
-  const prevOwner = openPathOwners.get(norm);
-  if (prevOwner === win.id) return;
-  if (prevOwner !== undefined) {
-    windowOpenPaths.get(prevOwner)?.delete(norm);
-  }
-  openPathOwners.set(norm, win.id);
-  let set = windowOpenPaths.get(win.id);
-  if (!set) {
-    set = new Set();
-    windowOpenPaths.set(win.id, set);
-  }
-  set.add(norm);
+// ─── Cloud badge + poller ───────────────────────────────────────────
+// Which registered documents live in a cloud-synced folder (provider
+// per canonical path, null = local), and the single stat-only timer
+// that watches those for changes made on another machine. Starts with
+// the first cloud registration; a change is pushed to the OWNING
+// window as `host:disk-changed`.
+const cloudProviders = new Map<string, CloudProvider | null>();
+async function cloudProviderFor(norm: string): Promise<CloudProvider | null> {
+  const cached = cloudProviders.get(norm);
+  if (cached !== undefined) return cached;
+  const provider = await detectCloudProvider(norm);
+  cloudProviders.set(norm, provider);
+  return provider;
+}
+const diskWatch = createDiskWatch({
+  list: () =>
+    ownedBaselines()
+      .filter((b) => !!cloudProviders.get(b.path))
+      .map((b) => ({ path: b.path, owner: b.owner, state: { mtimeMs: b.state.mtimeMs, size: b.state.size } })),
+  onChanged: (change) => {
+    const win = BrowserWindow.fromId(change.owner);
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send('host:disk-changed', { path: change.path, mtimeMs: change.mtimeMs, size: change.size });
+  },
 });
+
+// Register `p` as owned by the caller's window and claim the
+// changed-on-disk BASELINE for it (see doc-writes.ts `claimBaseline`):
+// the candidate from the read that preceded the mount, else the
+// journal-carried baseline of a recovered doc, else none. Ownership is
+// idempotent; the baseline claim always runs, so a Reload from disk
+// (read, then re-register) takes the fresh read. If another window
+// owns the path we overwrite (the caller's pre-load check should have
+// caught the conflict; best-effort for Save-As / recovery paths).
+// Resolves with how the baseline was obtained + the cloud provider, for
+// the renderer's badge.
+ipcMain.handle(
+  'host:open-path-register',
+  async (
+    event,
+    p: string,
+    opts?: { journaledBase?: DiskState | null },
+  ): Promise<{ claim: ClaimResult; provider: CloudProvider | null } | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || typeof p !== 'string' || !p) return null;
+    const norm = canonicalOpenPath(p);
+    const prevOwner = openPathOwners.get(norm);
+    if (prevOwner !== win.id) {
+      if (prevOwner !== undefined) {
+        windowOpenPaths.get(prevOwner)?.delete(norm);
+      }
+      openPathOwners.set(norm, win.id);
+      let set = windowOpenPaths.get(win.id);
+      if (!set) {
+        set = new Set();
+        windowOpenPaths.set(win.id, set);
+      }
+      set.add(norm);
+    }
+    const claim = await claimBaseline(norm, win.id, opts?.journaledBase ?? null);
+    const provider = await cloudProviderFor(norm);
+    if (provider) diskWatch.start();
+    return { claim, provider };
+  },
+);
 
 // Release a previously-registered path. No-op if the caller
 // doesn't own it (defensive — shouldn't happen in normal flow).
@@ -2445,6 +2558,7 @@ ipcMain.handle('host:open-path-release', async (event, p: string) => {
   if (owner !== win.id) return;
   openPathOwners.delete(norm);
   windowOpenPaths.get(win.id)?.delete(norm);
+  releaseBaseline(norm, win.id);
 });
 
 // Voice recognition service (SPEC-voice.md §12 item 2): session
@@ -2558,6 +2672,7 @@ app.on('browser-window-created', (_event, win) => {
       for (const p of paths) openPathOwners.delete(p);
       windowOpenPaths.delete(win.id);
     }
+    releaseBaselinesForWindow(win.id);
     // Last window gone → let the next created window claim
     // first-window status (and with it the startup-recovery UI).
     // While other windows remain, firstness stays retired — a

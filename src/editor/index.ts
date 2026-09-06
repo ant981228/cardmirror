@@ -278,6 +278,19 @@ import {
   clearRecoveredDraftMark,
   autosaveBlockedForRecoveredDraft,
 } from './journal-staleness.js';
+import {
+  installDiskBadge,
+  refreshDiskBadge,
+  noteDocRegistered,
+  noteDiskChanged,
+  noteSavedInPlace,
+  noteKeptCopy,
+  noteReloaded,
+  noteDocReleased,
+  conflictedCopyUserName,
+  announceKeptCopy,
+} from './disk-conflict.js';
+import type { DiskBase } from './host/types.js';
 import { makeBlankDoc } from './blank-doc.js';
 import { opensAsBlank, blankDocumentBytes } from './empty-open.js';
 import { indentParagraph, outdentParagraph } from './indent-keymap.js';
@@ -3817,6 +3830,7 @@ settings.subscribe((s) => {
   // decorations while the pane element keeps `pmd-read-mode`, i.e. read
   // mode showing every word of every card. The shell's own subscriber
   // re-stamps these classes per pane instead.
+  refreshDiskBadge(); // read mode on/off freezes / releases it
   if (
     !multiDocActive &&
     (s.readMode !== lastReadMode ||
@@ -5979,6 +5993,45 @@ function scheduleHeavyUpdate(): void {
   }, HEAVY_UPDATE_DELAY_MS);
 }
 
+/** Journal-carried on-disk baselines for docs about to mount from a
+ *  journal (recovery sidebar, startup recovery, mode-switch respawn),
+ *  keyed by path. The path registration that follows the mount hands
+ *  them to main, which adopts one only when the file still matches it
+ *  (see apps/desktop/src/doc-writes.ts `claimBaseline`) — so a
+ *  recovered document is not "unknown" and its first save does not
+ *  needlessly keep both. */
+const pendingJournaledBases = new Map<string, DiskBase>();
+export function rememberJournaledBase(handle: unknown, base: DiskBase | undefined): void {
+  if (typeof handle === 'string' && handle && base) pendingJournaledBases.set(handle, base);
+}
+function takeJournaledBase(handle: string): DiskBase | null {
+  const b = pendingJournaledBases.get(handle) ?? null;
+  pendingJournaledBases.delete(handle);
+  return b;
+}
+
+/** Register `handle` with main — cross-window ownership AND the
+ *  changed-on-disk baseline — and reflect how the baseline was obtained
+ *  (plus the cloud provider) in the badge. Shared by both layouts;
+ *  always re-claims, so a Reload from disk re-registers to adopt the
+ *  fresh read. */
+export async function registerDocPath(handle: string): Promise<void> {
+  const electron = getElectronHost();
+  if (!electron) return;
+  try {
+    const res = await electron.openPathRegister(handle, { journaledBase: takeJournaledBase(handle) });
+    if (res) noteDocRegistered(handle, res.claim, res.provider);
+  } catch (err) {
+    console.warn('Path registration failed:', err);
+  }
+}
+export function releaseDocPath(handle: string): void {
+  const electron = getElectronHost();
+  if (!electron) return;
+  void electron.openPathRelease(handle);
+  noteDocReleased(handle);
+}
+
 /** Remembers the file the user imported, so Save As can default to
  *  its name. Set on import, updated on Save / Save-As. */
 let currentDocFilename: string | null = null;
@@ -5999,14 +6052,8 @@ function setCurrentDocHandle(next: unknown | null): void {
   // Keep the transclusion refresh resolver's view→docPath map current.
   if (view) setViewDocPath(view, typeof next === 'string' ? next : null);
   if (prev === next) return;
-  const electron = getElectronHost();
-  if (!electron) return;
-  if (typeof prev === 'string' && prev) {
-    void electron.openPathRelease(prev);
-  }
-  if (typeof next === 'string' && next) {
-    void electron.openPathRegister(next);
-  }
+  if (typeof prev === 'string' && prev) releaseDocPath(prev);
+  if (typeof next === 'string' && next) void registerDocPath(next);
 }
 /** On-disk format of the current single-doc file. Drives whether
  *  "Save" routes through `toDocx` or `serializeNative`. `null` for
@@ -7435,6 +7482,9 @@ function updateWindowTitle(): void {
     chip.setAttribute('title', focused.filename ?? '');
     chip.toggleAttribute('hidden', !focused.filename);
   }
+  // The cloud badge follows the active document (one per window).
+  ensureDiskBadge();
+  refreshDiskBadge();
 }
 
 /** 1–2 letter initials from a display name, for a baked-in comment's
@@ -7971,17 +8021,166 @@ export async function runSaveFlow(): Promise<boolean> {
  *  autosave conflict path. A compact promptForChoice rather than the
  *  route-style dialog: this is a small pick-one, not a Save/Don't
  *  Save-family confirmation (user call, 2026-08-17). */
-function promptDiskConflict(filename: string | null): Promise<'overwrite' | 'saveAs' | null> {
-  return promptForChoice<'overwrite' | 'saveAs'>({
-    message:
-      `"${filename ?? 'This document'}" has changed on disk since it was ` +
-      `opened — it may have been edited by another program, on another ` +
-      `device, or through a sync service. Replace the on-disk version?`,
-    choices: [
-      { value: 'overwrite', label: 'Overwrite', primary: true },
-      { value: 'saveAs', label: 'Save As…' },
-    ],
+// ─── Disk conflicts: keep both, badge, reload ───────────────────────
+// (Design brief 2026-09-06.) A save refused because the file changed on
+// disk — or because this window holds no baseline for it — never
+// destroys the on-disk version: the in-memory document is written as a
+// conflicted copy beside the original, the window switches to the copy,
+// and the status-bar chip says so. No dialog at save time; the badge's
+// click is where the user decides anything.
+
+/** Write `bytes` as a conflicted copy beside `file.handle`, switch the
+ *  active document to the copy, announce it. False when the copy could
+ *  not be written (then the caller reports a failed save). */
+async function keepBothForActiveFile(
+  file: { handle: string; filename: string | null; format: 'cmir' | 'docx' },
+  bytes: Uint8Array,
+): Promise<boolean> {
+  const electron = getElectronHost();
+  if (!electron) return false;
+  try {
+    const copy = await electron.saveConflictedCopy(file.handle, bytes, conflictedCopyUserName());
+    // Mark the copy BEFORE the identity switch registers it, so the
+    // registration keeps the kept-copy state.
+    noteKeptCopy(copy.handle, file.handle);
+    commitSaveResult(copy.name, copy.handle, file.format);
+    announceKeptCopy(copy.name, file.filename ?? 'this document');
+    return true;
+  } catch (err) {
+    console.error('Conflicted-copy save failed:', err);
+    void alertDialog(`Couldn't save a conflicted copy: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+/** Serialize the active document the way Save does. */
+async function serializeActiveForSave(format: 'cmir' | 'docx', docId: string | null): Promise<Uint8Array> {
+  return serializeForSave(
+    format,
+    { includeComments: true, includeAnalytics: true, includeUndertags: true, readMode: false },
+    docId ?? undefined,
+  );
+}
+
+/** Badge action: "Keep mine as a copy" without a prior refused save. */
+async function saveActiveAsConflictedCopy(): Promise<void> {
+  const file = activeFile();
+  if (typeof file.handle !== 'string' || !file.handle || !file.format) return;
+  const docId = ensureActiveDocId();
+  const commitClean = captureActiveDocCleanToken();
+  const bytes = await serializeActiveForSave(file.format, docId);
+  if (!(await keepBothForActiveFile({ handle: file.handle, filename: file.filename, format: file.format }, bytes))) return;
+  commitClean();
+  flashSaveSuccess();
+  reportAutosaveSuccess();
+}
+
+/** Badge action: the double-confirmed Overwrite. */
+async function saveActiveForcingDisk(): Promise<void> {
+  const file = activeFile();
+  if (typeof file.handle !== 'string' || !file.handle || !file.format) return;
+  const docId = ensureActiveDocId();
+  const commitClean = captureActiveDocCleanToken();
+  const bytes = await serializeActiveForSave(file.format, docId);
+  try {
+    await awaitWithSaveWatchdog(getHost().saveExisting(file.handle, bytes, { force: true }), file.filename, {
+      escalate: true,
+    });
+  } catch (err) {
+    void alertDialog(`Save failed: ${fileLockedMessage(err) ?? (err instanceof Error ? err.message : String(err))}`);
+    return;
+  }
+  noteSavedInPlace(file.handle);
+  commitClean();
+  flashSaveSuccess();
+  reportAutosaveSuccess();
+}
+
+/** Badge action: replace the in-memory document with the file on disk.
+ *  Confirms when there are unsaved edits (this discards them). */
+let multiDocReloadFromDisk: ((handle: string) => Promise<void>) | null = null;
+export function setMultiDocReloadFromDisk(fn: ((handle: string) => Promise<void>) | null): void {
+  multiDocReloadFromDisk = fn;
+}
+async function reloadActiveFromDisk(handle: string): Promise<void> {
+  if (multiDocActive) {
+    await multiDocReloadFromDisk?.(handle);
+    return;
+  }
+  const electron = getElectronHost();
+  if (!electron) return;
+  if (currentDocDirty) {
+    const ok = await promptForRouteChoice<'reload'>({
+      message: 'Reload from disk and discard your unsaved edits?',
+      detail: 'The version on disk replaces what is in this window. Keep mine as a copy first if you want both.',
+      choices: [{ value: 'reload', label: 'Reload', description: 'Discard unsaved edits here and take the file on disk.' }],
+    });
+    if (ok !== 'reload') return;
+  }
+  const file = await electron.readFileAtPath(handle);
+  if (!file) {
+    showToast('Couldn\'t reload — the file is no longer readable at its location.');
+    return;
+  }
+  try {
+    const openBytes = await maybeDecryptForOpen(file.bytes, file.name);
+    let docNode: PMNode;
+    let docThreads: Thread[] | undefined;
+    let docId: string | null;
+    if (!bytesLookLikeDocx(openBytes)) {
+      const parsed = parseNative(openBytes);
+      docNode = parsed.doc;
+      docThreads = parsed.threads.length > 0 ? parsed.threads : undefined;
+      docId = parsed.docId;
+    } else {
+      const result = await fromDocxFull(openBytes);
+      docNode = result.doc;
+      docThreads = result.threads;
+      docId = result.docId;
+    }
+    mountOpenedSingleDoc({
+      docNode,
+      docThreads,
+      docId,
+      name: file.name,
+      handle: file.handle,
+      format: file.format,
+      dirty: false,
+      recordAsRecent: false,
+    });
+    // Same handle as before, so the mount did not re-register: claim the
+    // fresh read as the baseline explicitly.
+    await registerDocPath(file.handle);
+    noteReloaded(file.handle);
+  } catch (err) {
+    if (err instanceof OpenCancelledError) return;
+    void alertDialog(`Reload failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+let diskBadgeInstalled = false;
+/** Create the badge beside the filename chip once the ribbon exists and
+ *  wire main's disk-changed pushes. Idempotent. */
+function ensureDiskBadge(): void {
+  if (diskBadgeInstalled) return;
+  const chip = document.getElementById('doc-name-chip');
+  if (!chip) return;
+  diskBadgeInstalled = true;
+  installDiskBadge(chip, {
+    getActive: () => {
+      const f = activeFile();
+      return { handle: typeof f.handle === 'string' ? f.handle : null, name: f.filename };
+    },
+    isSuppressed: () => readModeStateForActive() || getTimerStateNow().poppedOut,
+    isSessionHost: () => collabCopresenceFor(activeDocIdentity().sessionUid)?.role === 'host',
+    reveal: (handle) => void getElectronHost()?.showItemInFolder?.(handle),
+    reloadFromDisk: reloadActiveFromDisk,
+    keepMineAsCopy: () => saveActiveAsConflictedCopy(),
+    overwrite: () => saveActiveForcingDisk(),
+    openOriginal: (original) => openFileByPath(original, original.split(/[\\/]/u).pop() ?? original),
   });
+  getElectronHost()?.onDiskChanged(({ path }) => noteDiskChanged(path));
+  subscribeTimer(() => refreshDiskBadge());
 }
 
 async function runSaveFlowInner(): Promise<boolean> {
@@ -8060,34 +8259,31 @@ async function runSaveFlowInner(): Promise<boolean> {
       ) {
         return runSaveAsFlow();
       }
+      noteSavedInPlace(typeof file.handle === 'string' ? file.handle : '');
     } catch (err) {
-      // The file changed on disk since we last read/wrote it — another
+      // The file changed on disk since this window's baseline — another
       // program, device, or sync service (Dropbox syncing down another
       // machine's edit is the field case) wrote the path while this doc
-      // was open. Blindly writing would destroy that version WITHOUT
-      // even producing a Dropbox conflicted copy, so ask first.
-      if (!isFileChangedOnDiskError(err)) throw err;
-      const choice = await promptDiskConflict(file.filename);
-      if (choice === 'saveAs') return runSaveAsFlow();
-      if (choice !== 'overwrite') return false;
-      if (
-        (await awaitWithSaveWatchdog(
-          getHost().saveExisting(file.handle, bytes, { force: true }),
-          file.filename,
-          { escalate: true },
-        )) === 'saveAs'
-      ) {
-        return runSaveAsFlow();
+      // was open — or this window holds no baseline for it. Blindly
+      // writing would destroy that version WITHOUT even producing a
+      // Dropbox conflicted copy, so keep both: the in-memory document
+      // becomes a conflicted copy beside the original and this window
+      // switches to the copy. No dialog; the chip + badge say so.
+      if (!isFileChangedOnDiskError(err) || typeof file.handle !== 'string') throw err;
+      if (!(await keepBothForActiveFile({ handle: file.handle, filename: file.filename, format: file.format }, bytes))) {
+        return false;
       }
     }
     // Written to its file — no longer a stale-recovery-overwrite candidate.
     clearRecoveredDraftMark(activeUid);
     if (docId) {
+      // The active file may now be the conflicted copy — register that.
+      const saved = activeFile();
       learnStore.registerDoc({
         docId,
-        path: typeof file.handle === 'string' ? file.handle : null,
-        name: file.filename ?? 'Untitled',
-        format: file.format,
+        path: typeof saved.handle === 'string' ? saved.handle : null,
+        name: saved.filename ?? 'Untitled',
+        format: saved.format ?? file.format,
       });
     }
     flashSaveSuccess();
@@ -8377,16 +8573,25 @@ async function runAutosaveAttempt(): Promise<void> {
     maybeSnapshotVersion(activeSavedDocId(), bytes, 'auto');
     // Watchdog without the dialog — never a modal mid-typing; the
     // 10s warning chip still converts a hung autosave into feedback.
-    await awaitWithSaveWatchdog(getHost().saveExisting(file.handle, bytes), file.filename, {
-      escalate: false,
-    });
+    try {
+      await awaitWithSaveWatchdog(getHost().saveExisting(file.handle, bytes), file.filename, {
+        escalate: false,
+      });
+      noteSavedInPlace(typeof file.handle === 'string' ? file.handle : '');
+    } catch (err) {
+      // Changed on disk under us: keep both, same as a manual save — the
+      // write is non-destructive now, and a paused autosave would leave
+      // edits unsaved for as long as the user failed to notice.
+      if (!isFileChangedOnDiskError(err) || typeof file.handle !== 'string') throw err;
+      if (!(await keepBothForActiveFile({ handle: file.handle, filename: file.filename, format: 'cmir' }, bytes))) {
+        throw err;
+      }
+    }
     flashSaveSuccess();
     commitClean();
     reportAutosaveSuccess();
   } catch (err) {
-    reportAutosaveFailure(file.filename ?? 'Untitled', err, {
-      promptConflict: () => void runSaveFlow(),
-    });
+    reportAutosaveFailure(file.filename ?? 'Untitled', err);
   }
 }
 
@@ -9603,6 +9808,7 @@ async function mountFromSpawnPayload(
     }
     mountView(docNode, docThreads);
     currentDocFilename = payload.filename;
+    rememberJournaledBase(payload.handle, (payload as { diskBase?: DiskBase }).diskBase);
     setCurrentDocHandle(payload.handle);
     currentDocFormat = format;
     currentDocUid = payload.uid ?? newSessionDocUid();
@@ -9966,6 +10172,7 @@ async function runStartupRecoveryInner(): Promise<void> {
       // recovered-from provenance when it has one — a draft recovered, edited,
       // and re-crashed keeps its original timestamp.
       markRecoveredDraft(entry.uid, journalStalenessBaseline(entry));
+      rememberJournaledBase(entry.handle, entry.diskBase);
       // Multi-doc opens into a slot; single-doc replaces the
       // current view.
       if (multiDocActive && multiDocOnRecoveredDoc) {
@@ -10078,7 +10285,23 @@ async function saveRecoveryEntry(entry: JournalEntry): Promise<boolean> {
     if (inPlace) {
       try {
         const bytes = await reserializeJournalAs(entry, entry.format);
-        await host.saveExisting(entry.handle, bytes);
+        // Nothing has this file mounted, so this window holds no
+        // baseline for it: claim the journal's (main adopts it only if
+        // the file still matches), save, release.
+        const electron = getElectronHost();
+        if (electron) {
+          await electron.openPathRegister(entry.handle, { journaledBase: entry.diskBase ?? null }).catch(() => null);
+        }
+        try {
+          await host.saveExisting(entry.handle, bytes);
+        } catch (err) {
+          if (!isFileChangedOnDiskError(err) || !electron) throw err;
+          // The file moved since the journal: keep both.
+          const copy = await electron.saveConflictedCopy(entry.handle, bytes, conflictedCopyUserName());
+          announceKeptCopy(copy.name, entry.filename);
+        } finally {
+          if (electron) void electron.openPathRelease(entry.handle);
+        }
         await host.deleteJournal(entry.uid).catch(() => {
           /* best-effort */
         });
@@ -10200,6 +10423,7 @@ async function autoRecoverAll(
         if (entry.recoveredFromSavedAt) {
           markRecoveredDraft(entry.uid, entry.recoveredFromSavedAt);
         }
+        rememberJournaledBase(entry.handle, entry.diskBase);
         const parsed = parseNative(entry.bytes);
         await multiDocOnRecoveredDoc({
           uid: entry.uid,
@@ -10261,6 +10485,7 @@ async function autoRecoverAll(
         ...(entry.recoveredFromSavedAt
           ? { recoveredFromSavedAt: entry.recoveredFromSavedAt }
           : {}),
+        ...(entry.diskBase ? { diskBase: entry.diskBase } : {}),
       });
       await dropIfClean(entry.uid);
       console.log(`[cardmirror] modeswitch: spawned a window for "${entry.filename}"`);
@@ -10290,6 +10515,9 @@ async function applyRecovery(
   }
   mountView(parsed.doc, parsed.threads.length > 0 ? parsed.threads : undefined);
   currentDocFilename = entry.filename;
+  // The journal's on-disk baseline rides into the path registration so
+  // main can tell whether the file moved while the app was down.
+  rememberJournaledBase(entry.handle, entry.diskBase);
   setCurrentDocHandle(entry.handle);
   currentDocFormat = entry.format;
   // Reuse the original uid so a re-crash overwrites the same

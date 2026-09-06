@@ -9,6 +9,8 @@
  */
 
 import type { LearnOp } from '../learn-store.js';
+import type { DiskBase, CloudProvider } from './types.js';
+export type ClaimResult = 'fresh' | 'journaled' | 'changed' | 'unknown';
 import type {
   FileFilter,
   HistoryEnvelope,
@@ -403,8 +405,14 @@ interface ElectronAPI {
     }>
   >;
   openPathCheck(path: string): Promise<{ takenByOther: boolean }>;
-  openPathRegister(path: string): Promise<void>;
+  openPathRegister(
+    path: string,
+    opts?: { journaledBase?: DiskBase | null },
+  ): Promise<{ claim: ClaimResult; provider: CloudProvider | null } | null>;
   openPathRelease(path: string): Promise<void>;
+  cloudProvider(path: string): Promise<CloudProvider | null>;
+  onDiskChanged(handler: (payload: { path: string; mtimeMs: number; size: number }) => void): () => void;
+  saveConflictedCopy(handle: string, bytes: Uint8Array, userName: string | null): Promise<{ name: string; handle: string }>;
   /** "Show in context": if another window owns `path`, focus it and send
    *  it the anchor to scroll to. `delivered: false` ⇒ spawn a window. */
   focusAnchorInWindow(
@@ -1224,8 +1232,30 @@ export class ElectronHost implements Host {
     return await api().openPathCheck(path);
   }
 
-  async openPathRegister(path: string): Promise<void> {
-    await api().openPathRegister(path);
+  async openPathRegister(
+    path: string,
+    opts?: { journaledBase?: DiskBase | null },
+  ): Promise<{ claim: ClaimResult; provider: CloudProvider | null } | null> {
+    const fn = api().openPathRegister;
+    return (await fn(path, opts)) ?? null;
+  }
+
+  /** Cloud-sync provider for a path (null = local). Older mains without
+   *  the handler resolve null. */
+  async cloudProvider(path: string): Promise<CloudProvider | null> {
+    const fn = api().cloudProvider;
+    return typeof fn === 'function' ? await fn(path) : null;
+  }
+
+  /** Main's stat-only poller saw this window's file change on disk. */
+  onDiskChanged(handler: (payload: { path: string; mtimeMs: number; size: number }) => void): () => void {
+    const fn = api().onDiskChanged;
+    return typeof fn === 'function' ? fn(handler) : () => {};
+  }
+
+  /** Keep both: write bytes as a conflicted copy beside `handle`. */
+  saveConflictedCopy(handle: string, bytes: Uint8Array, userName: string | null): Promise<{ name: string; handle: string }> {
+    return api().saveConflictedCopy(handle, bytes, userName);
   }
 
   async openPathRelease(path: string): Promise<void> {

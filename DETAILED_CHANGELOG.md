@@ -7,6 +7,64 @@ in each release, see `CHANGELOG.md`.
 
 ## Unreleased
 
+### Added + Fixed: disk-conflict guard rework and the cloud badge
+
+Users on shared Dropbox folders overwrote each other's `.cmir` edits
+silently. Dropbox creates no conflicted copy when the winning version
+has already synced down before the losing write, so nothing warned
+anyone. The changed-on-disk guard existed, but its baseline was a
+single main-process map keyed by path that EVERY read refreshed: the
+quick-card warm pass (every window boot and every palette open reads
+every pinned file, and every open file is pinned through recents),
+transclusion resolution, the docId stamp, a second window's open. Any
+of those, after a teammate's version had synced down, made that
+version the baseline, and the next save passed the guard. The prompt
+that did fire had Overwrite as the primary button.
+
+The baseline now belongs to the window that owns the document. Reads
+record only a candidate; a window promotes the candidate when it
+registers the path after mounting (the same registration the
+cross-window duplicate-open guard already required), and its own
+writes refresh it. A save by a window that holds no baseline for the
+path is refused the same way as a changed file: unknown is no longer a
+bypass. Crash journals carry the owner's baseline, so a recovered
+document registers with it; main adopts it when the file still
+matches and otherwise reports the file as changed, so the first save
+keeps both instead of overwriting whatever landed while the app was
+down. Just before the rename that replaces the file, the writer stats
+it a second time, which shrinks the check-then-write gap to the rename
+itself.
+
+Cloud detection classifies the resolved path against Dropbox's
+info.json roots, the legacy `~/Dropbox`, macOS File Provider mounts
+under `~/Library/CloudStorage`, iCloud Drive, the OneDrive environment
+roots and Google Drive's letter mounts. For those documents one
+main-process timer stats every open file every four seconds and pushes
+a change to the owning window. It never reads bytes: a byte read of an
+online-only placeholder on Windows forces hydration, the stall from the
+August support case. A sync client touching a timestamp therefore shows
+as a change; the save-time byte comparison corrects it.
+
+The badge sits beside the filename chip, one per window, showing the
+active document's state (three-pane switches it with focus). Neutral
+cloud glyph when synced, amber with a relative time when changed, a
+"conflicted copy" label when the window is editing one. No toast,
+modal or animation on a transition; the badge is frozen while read
+mode or the timer pop-out is active and catches up afterwards. Clicking
+the amber badge opens the route-style decision: Reload from disk
+(withheld while hosting a co-editing session, with a note to end the
+session first), Keep mine as a copy, or Overwrite behind a second
+confirmation. A refused save, manual or autosave, writes the in-memory
+document beside the original as `<name> (<user>'s conflicted copy
+<date>).<ext>` with a numeric suffix on collision, switches the window
+to the copy so a second save cannot mint a second copy, and posts a
+status-bar notice. The user name is the co-editing display name, else
+the comment author name, else the computer account username, never
+anything from the Debate Decoded account. Tests cover the owner-keyed
+guard, the journaled baseline, the pre-rename recheck, copy naming, the
+cloud classifier, the poller and the badge state machine. The web build
+is out of scope: it has no equivalent guard and cannot poll a folder.
+
 ### Fixed: flashcards lost between windows (single-owner learn store)
 
 The flashcard store (cards, schedules, anchors, notes, AI threads,

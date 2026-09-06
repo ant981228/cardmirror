@@ -104,7 +104,20 @@ export interface SaveAsOptions {
  *  serialization — lossless and cheap to (de)serialize. The doc's
  *  *intended* on-disk format and handle are tracked separately so a
  *  recovered `.docx` doc can keep targeting Word on its next save. */
+/** On-disk identity of a document's file — the changed-on-disk guard's
+ *  baseline (see apps/desktop/src/doc-writes.ts). */
+export interface DiskBase {
+  mtimeMs: number;
+  size: number;
+  contentHash?: string;
+}
+
+export type CloudProvider = 'dropbox' | 'onedrive' | 'gdrive' | 'icloud' | 'other';
+
 export interface JournalEntry {
+  /** Journal-carried baseline of the doc's file (desktop fills it on
+   *  write); passed back when the recovered doc registers its path. */
+  diskBase?: DiskBase;
   /** Stable identifier for the doc across the session — multi-doc
    *  uses its DocRecord uid; single-doc tracks one at module level.
    *  Recovery reuses the same uid so a recovered doc that crashes
@@ -323,6 +336,8 @@ export interface Host {
  *  renderer to mount the doc without re-prompting via the file
  *  picker. */
 export interface SpawnWindowPayload {
+  /** Journal-carried baseline of a recovered doc being respawned. */
+  diskBase?: DiskBase;
   filename: string;
   bytes: Uint8Array;
   handle: string | null;

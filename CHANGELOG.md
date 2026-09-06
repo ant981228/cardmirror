@@ -7,8 +7,30 @@ see `DETAILED_CHANGELOG.md`.
 
 ## Unreleased
 
+### Added
+
+- **Cloud badge and conflicted copies for shared folders.** A document
+  in a Dropbox, OneDrive, Google Drive or iCloud folder now shows a
+  small cloud badge beside its name. When the file changes on disk
+  under you, because a teammate saved it on another machine, the badge
+  turns amber with the time, quietly, with no pop-up. Saving then never
+  overwrites their version: your document is written beside it as a
+  conflicted copy, named the way Dropbox names its own, the window
+  switches to the copy, and a notice in the status bar says so. Click
+  the badge to reload from disk, keep yours as a copy, or overwrite
+  after a second confirmation. Autosave keeps both too instead of
+  pausing.
+
 ### Fixed
 
+- **Saving over a teammate's edits in a shared folder.** Opening the
+  quick-card palette, a second window, or a speech document that pulled
+  from a file could quietly convince CardMirror that the file's newer
+  version was its own, so the next save replaced a teammate's work
+  without a warning, and without a Dropbox conflicted copy. The check
+  now belongs to the window editing the document and cannot be reset by
+  anything else, it is re-checked right before the file is replaced, and
+  a document recovered after a crash keeps its check too.
 - **Flashcards no longer vanish when two windows are open.** Each window
   used to save the whole flashcard store, so a window opened before you
   created cards could overwrite them the next time it opened a file.

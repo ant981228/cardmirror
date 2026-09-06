@@ -26,6 +26,7 @@ import {
   DocExistsError,
   chainDocWrite,
   recordDiskStateFromDisk,
+  claimBaseline,
   resetDocWritesForTests,
   nearestExistingDir,
   CHANGED_ON_DISK_MARKER,
@@ -60,6 +61,7 @@ async function openedDoc(content = 'original', name?: string): Promise<string> {
   const p = docPath(name);
   await fs.writeFile(p, content);
   await recordDiskStateFromDisk(p);
+  await claimBaseline(p, 1); // the window registers the doc it just read
   return p;
 }
 
@@ -116,6 +118,7 @@ describe('saveExistingDoc — changed-on-disk guard', () => {
     // refused every second save as changed-on-disk.
     const p = docPath('churn.cmir');
     await saveNewDoc(p, Buffer.from('my own content')); // baselines WITH hash
+    await claimBaseline(p, 1); // the window registers its Save-As
     const st = await fs.stat(p);
     await fs.utimes(p, st.atime, new Date(st.mtimeMs + 5000)); // rclone's touch
     await saveExistingDoc(p, Buffer.from('my own content v2'));
@@ -125,6 +128,7 @@ describe('saveExistingDoc — changed-on-disk guard', () => {
   it('a hashed baseline still refuses a REAL same-size external edit', async () => {
     const p = docPath('real-edit.cmir');
     await saveNewDoc(p, Buffer.from('original'));
+    await claimBaseline(p, 1); // the window registers its Save-As
     await fs.writeFile(p, 'ORIGINAL'); // same length, different bytes
     const st = await fs.stat(p);
     await fs.utimes(p, st.atime, new Date(st.mtimeMs + 5000));
@@ -137,6 +141,7 @@ describe('saveExistingDoc — changed-on-disk guard', () => {
     const p = docPath('read-baseline.cmir');
     await fs.writeFile(p, 'opened contents');
     await recordDiskStateFromDisk(p, Buffer.from('opened contents'));
+    await claimBaseline(p, 1);
     const st = await fs.stat(p);
     await fs.utimes(p, st.atime, new Date(st.mtimeMs + 5000));
     await saveExistingDoc(p, Buffer.from('edited in-app'));
@@ -153,12 +158,12 @@ describe('saveExistingDoc — changed-on-disk guard', () => {
     expect(await read(p)).toBe('v3');
   });
 
-  it('skips the guard for paths with no recorded baseline (journal recovery after restart)', async () => {
+  it('REFUSES a path with no baseline in this window (unknown is not a bypass; journals carry the baseline)', async () => {
     const p = docPath();
-    await fs.writeFile(p, 'pre-crash contents');
-    // No recordDiskStateFromDisk — a fresh process saving a recovered doc.
-    await saveExistingDoc(p, Buffer.from('recovered'));
-    expect(await read(p)).toBe('recovered');
+    await fs.writeFile(p, 'on disk');
+    // No claim — a fresh process saving a recovered doc without a journaled baseline.
+    await expect(saveExistingDoc(p, Buffer.from('recovered'))).rejects.toThrow(CHANGED_ON_DISK_MARKER);
+    expect(await read(p)).toBe('on disk');
   });
 
   it("our own writes don't trip the guard (each save re-baselines)", async () => {
@@ -169,15 +174,12 @@ describe('saveExistingDoc — changed-on-disk guard', () => {
     expect(await read(p)).toBe('v4');
   });
 
-  it('saveNewDoc (Save As) baselines the path for later in-place saves', async () => {
-    const p = docPath('new.cmir');
-    await saveNewDoc(p, Buffer.from('first version'));
-    expect(await read(p)).toBe('first version');
-    // External rewrite after the Save As is caught by the next save…
-    await fs.writeFile(p, 'external edit after save-as!');
-    await expect(saveExistingDoc(p, Buffer.from('v2'))).rejects.toThrow(
-      new RegExp(CHANGED_ON_DISK_MARKER),
-    );
+  it('saveNewDoc (Save As) leaves a candidate the registering window promotes to its baseline', async () => {
+    const p = docPath('saved-as.cmir');
+    await saveNewDoc(p, Buffer.from('first'));
+    expect(await claimBaseline(p, 1), 'the candidate from the write').toBe('fresh');
+    await saveExistingDoc(p, Buffer.from('second'));
+    expect(await read(p)).toBe('second');
   });
 });
 
@@ -317,6 +319,7 @@ describe('rename retry — transiently locked target (Dropbox/antivirus holds)',
     const target = docPath('locked.docx');
     await fs.writeFile(target, 'v1');
     await recordDiskStateFromDisk(target);
+    await claimBaseline(target, 1);
     const realRename = fs.rename;
     let failures = 2;
     let calls = 0;
@@ -347,6 +350,7 @@ describe('rename retry — transiently locked target (Dropbox/antivirus holds)',
     const target = docPath('held.docx');
     await fs.writeFile(target, 'v1');
     await recordDiskStateFromDisk(target);
+    await claimBaseline(target, 1);
     const realRename = fs.rename;
     (fs as { rename: typeof fs.rename }).rename = async () => {
       const err = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
@@ -371,6 +375,7 @@ describe('rename retry — transiently locked target (Dropbox/antivirus holds)',
     const target = docPath('stuck.docx');
     await fs.writeFile(target, 'v1');
     await recordDiskStateFromDisk(target);
+    await claimBaseline(target, 1);
     const realRename = fs.rename;
     const realWrite = fs.writeFile;
     (fs as { rename: typeof fs.rename }).rename = async () => {
@@ -414,6 +419,7 @@ describe('rename retry — transiently locked target (Dropbox/antivirus holds)',
     const target = docPath('hard-fail.docx');
     await fs.writeFile(target, 'v1');
     await recordDiskStateFromDisk(target);
+    await claimBaseline(target, 1);
     const realRename = fs.rename;
     let calls = 0;
     (fs as { rename: typeof fs.rename }).rename = async () => {
