@@ -18,8 +18,7 @@ see `DETAILED_CHANGELOG.md`.
   overwrites their version: your document is written beside it as a
   conflicted copy, named the way Dropbox names its own, and the window
   switches to the copy, with the pill reading "Conflicted copy". Click
-  the pill to reload from disk, keep yours as a copy, or overwrite
-  after a second confirmation. Autosave keeps both too instead of
+  the pill to keep their changes, keep yours, or keep both. Autosave keeps both too instead of
   pausing.
 
 ### Fixed

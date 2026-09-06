@@ -153,17 +153,17 @@ export interface DiskBadgeDeps {
   getActive: () => { handle: string | null; name: string | null };
   /** Read mode or the timer pop-out is active: freeze the pill. */
   isSuppressed: () => boolean;
-  /** The active document has unsaved edits — Reload will confirm first,
-   *  and its description says so; a clean document reloads at once. */
+  /** The active document has unsaved edits — "Keep their changes" says
+   *  it will discard them (no separate confirmation). */
   isDirty?: () => boolean;
   /** The active document hosts a live co-editing session — Reload is
    *  withheld (it would replace the shared document under everyone). */
   isSessionHost: (handle: string) => boolean;
   reveal: (handle: string) => void;
-  /** Confirms unsaved edits itself, then replaces the doc from disk. */
+  /** Replaces the doc from disk, discarding unsaved edits (no prompt). */
   reloadFromDisk: (handle: string) => Promise<void>;
   keepMineAsCopy: (handle: string) => Promise<void>;
-  /** Already double-confirmed by the pill; force-writes the disk. */
+  /** Force-writes the disk (no second confirmation — design call). */
   overwrite: (handle: string) => Promise<void>;
   openOriginal: (originalHandle: string) => Promise<void>;
 }
@@ -305,48 +305,39 @@ async function onBadgeClick(): Promise<void> {
     else if (choice === 'reveal') badgeDeps.reveal(handle);
     return;
   }
-  // changed
+  // changed — three ways out, no secondary confirmations (design call
+  // 2026-09-06): keep theirs (reload), keep mine (overwrite), keep both.
   const host = badgeDeps.isSessionHost(handle);
   const when = info.changedAt ? relativeTime(info.changedAt) : 'recently';
-  const choices: Array<{ value: 'reload' | 'keep' | 'overwrite'; label: string; description: string }> = [];
+  const dirty = badgeDeps.isDirty?.() ?? false;
+  const choices: Array<{ value: 'theirs' | 'mine' | 'both'; label: string; description: string }> = [];
   if (!host) {
-    const dirty = badgeDeps.isDirty?.() ?? false;
     choices.push({
-      value: 'reload',
-      label: 'Reload from disk',
-      description: dirty
-        ? 'Take the other version. Your unsaved edits here will be discarded — you will be asked to confirm first.'
-        : 'Take the other version now. Nothing here is unsaved, so there is nothing to lose.',
+      value: 'theirs',
+      label: 'Keep their changes',
+      description: `Load their changes from disk. ${dirty ? 'Discards your unsaved changes.' : 'You have no unsaved changes.'}`,
     });
   }
   choices.push({
-    value: 'keep',
-    label: 'Keep mine as a copy',
-    description: 'Save your version beside it as a conflicted copy and keep editing the copy.',
+    value: 'mine',
+    label: 'Keep my changes',
+    description: 'Overwrite their changes with your version.',
   });
   choices.push({
-    value: 'overwrite',
-    label: 'Overwrite the file on disk',
-    description: 'Replace the other version with yours. Asks once more.',
+    value: 'both',
+    label: 'Keep both',
+    description: 'Saves a conflicted copy in the same folder.',
   });
-  const choice = await promptForRouteChoice<'reload' | 'keep' | 'overwrite'>({
+  const choice = await promptForRouteChoice<'theirs' | 'mine' | 'both'>({
     message: `"${name ?? 'This document'}" changed on disk ${when}.`,
     detail:
       `Another device or program wrote the file while you were editing it${info.provider ? ` (it is in ${PROVIDER_LABEL[info.provider]})` : ''}.` +
-      (host ? '\nReload is unavailable while you host a co-editing session — end the session first.' : ''),
+      (host ? '\nKeeping their changes is unavailable while you host a co-editing session — end the session first.' : ''),
     choices,
   });
-  if (choice === 'reload') await badgeDeps.reloadFromDisk(handle);
-  else if (choice === 'keep') await badgeDeps.keepMineAsCopy(handle);
-  else if (choice === 'overwrite') {
-    const sure = await promptForRouteChoice<'yes'>({
-      message: `Overwrite "${name ?? 'the file'}" on disk?`,
-      detail: 'The version another device wrote will be lost, and no conflicted copy is kept.',
-      choices: [{ value: 'yes', label: 'Overwrite', description: 'Replace it with the version in this window.' }],
-      cancelLabel: 'Keep both instead',
-    });
-    if (sure === 'yes') await badgeDeps.overwrite(handle);
-  }
+  if (choice === 'theirs') await badgeDeps.reloadFromDisk(handle);
+  else if (choice === 'mine') await badgeDeps.overwrite(handle);
+  else if (choice === 'both') await badgeDeps.keepMineAsCopy(handle);
 }
 
 /** Test seam. */

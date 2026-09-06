@@ -56,10 +56,12 @@ with a relative time when changed, a "Conflicted copy" label when the
 window is editing one. No toast,
 modal or animation on a transition; the badge is frozen while read
 mode or the timer pop-out is active and catches up afterwards. Clicking
-the amber badge opens the route-style decision: Reload from disk
-(withheld while hosting a co-editing session, with a note to end the
-session first), Keep mine as a copy, or Overwrite behind a second
-confirmation. A refused save, manual or autosave, writes the in-memory
+the amber badge opens the route-style decision, in this order: Keep
+their changes (load from disk; withheld while hosting a co-editing
+session, with a note to end the session first; its caption says
+whether unsaved changes are discarded), Keep my changes (overwrite),
+Keep both (a conflicted copy in the same folder). No secondary
+confirmations, by design call on live review. A refused save, manual or autosave, writes the in-memory
 document beside the original as `<name> (<user>'s conflicted copy
 <date>).<ext>` with a numeric suffix on collision, and switches the
 window to the copy so a second save cannot mint a second copy. The

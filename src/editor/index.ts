@@ -8098,8 +8098,9 @@ async function saveActiveForcingDisk(): Promise<void> {
   reportAutosaveSuccess();
 }
 
-/** Badge action: replace the in-memory document with the file on disk.
- *  Confirms when there are unsaved edits (this discards them). */
+/** Pill action "Keep their changes": replace the in-memory document
+ *  with the file on disk, discarding unsaved edits (the option's own
+ *  caption says so; no separate confirmation — design call). */
 let multiDocReloadFromDisk: ((handle: string) => Promise<void>) | null = null;
 export function setMultiDocReloadFromDisk(fn: ((handle: string) => Promise<void>) | null): void {
   multiDocReloadFromDisk = fn;
@@ -8111,14 +8112,6 @@ async function reloadActiveFromDisk(handle: string): Promise<void> {
   }
   const electron = getElectronHost();
   if (!electron) return;
-  if (currentDocDirty) {
-    const ok = await promptForRouteChoice<'reload'>({
-      message: 'Reload from disk and discard your unsaved edits?',
-      detail: 'The version on disk replaces what is in this window. Keep mine as a copy first if you want both.',
-      choices: [{ value: 'reload', label: 'Reload', description: 'Discard unsaved edits here and take the file on disk.' }],
-    });
-    if (ok !== 'reload') return;
-  }
   const file = await electron.readFileAtPath(handle);
   if (!file) {
     showToast('Couldn\'t reload — the file is no longer readable at its location.');

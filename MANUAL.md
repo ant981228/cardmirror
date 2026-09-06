@@ -764,10 +764,11 @@ any other file, so reconciling is a matter of opening both. If someone
 then changes the copy under you, the pill turns amber again and a save
 keeps both again, as the next numbered copy of the original.
 Autosave does the same. Click the amber pill to choose instead:
-**Reload from disk** takes the other version (you are asked first if
-you have unsaved edits), **Keep mine as a copy** does what a save would,
-and **Overwrite** replaces the file after a second confirmation. Reload
-is unavailable while you host a co-editing session; end the session
+**Keep their changes** loads their version from disk (discarding any
+unsaved changes of yours, as the option says), **Keep my changes**
+overwrites their version with yours, and **Keep both** does what a save
+would. There are no second confirmations. Keeping their changes is
+unavailable while you host a co-editing session; end the session
 first.
 
 ### Converting blocks

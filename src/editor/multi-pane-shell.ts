@@ -27,7 +27,6 @@
  */
 
 import { EditorState, Selection, TextSelection } from 'prosemirror-state';
-import { promptForRouteChoice } from './text-prompt.js';
 import { isFileChangedOnDiskError } from './error-surface.js';
 import {
   noteSavedInPlace,
@@ -2432,25 +2431,17 @@ class MultiPaneShell {
     return null;
   }
 
-  /** Badge action "Reload from disk" for the pane holding `handle`:
-   *  replace the record with a fresh read of the file. Confirms when the
-   *  record has unsaved edits (they are discarded). The old record is
-   *  closed clean (releasing its path claim); the new one registers the
-   *  path and so adopts the fresh read as its baseline. */
+  /** Pill action "Keep their changes" for the pane holding `handle`:
+   *  replace the record with a fresh read of the file, discarding unsaved
+   *  edits (the option's caption says so; no separate confirmation). The
+   *  old record is closed clean (releasing its path claim); the new one
+   *  registers the path and so adopts the fresh read as its baseline. */
   async reloadFromDisk(handle: string): Promise<void> {
     const found = this.findRecordByHandle(handle);
     if (!found) return;
     const { slot, record } = found;
     const electron = getElectronHost();
     if (!electron) return;
-    if (record.dirty) {
-      const ok = await promptForRouteChoice<'reload'>({
-        message: `Reload "${record.filename}" from disk and discard your unsaved edits?`,
-        detail: 'The version on disk replaces what is in this pane. Keep mine as a copy first if you want both.',
-        choices: [{ value: 'reload', label: 'Reload', description: 'Discard unsaved edits here and take the file on disk.' }],
-      });
-      if (ok !== 'reload') return;
-    }
     const file = await electron.readFileAtPath(handle);
     if (!file) {
       showToast("Couldn't reload — the file is no longer readable at its location.");
@@ -2465,7 +2456,7 @@ class MultiPaneShell {
       showToast(`Reload failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    record.dirty = false; // confirmed above: close without prompting
+    record.dirty = false; // discarding is the option's stated effect: close without prompting
     await slot.closeRecord(record);
     const fresh = buildDocRecord(file.name, parsed.doc, slot, {
       handle: file.handle,
