@@ -293,8 +293,6 @@ async function onBadgeClick(): Promise<void> {
   if (info.state === 'kept-copy') {
     const choice = await promptForRouteChoice<'original' | 'reveal'>({
       message: `You are editing a conflicted copy of "${info.copyOf ? baseName(info.copyOf) : name ?? 'the original'}".`,
-      detail:
-        'The other version is untouched. Merge by hand when you are ready; the two files are side by side in the folder.',
       choices: [
         { value: 'original', label: 'Open the original', description: 'In another window, alongside this copy.' },
         { value: 'reveal', label: 'Reveal in folder', description: 'Show both files in Finder / Explorer.' },
