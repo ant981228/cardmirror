@@ -460,7 +460,12 @@ export async function conflictedCopyPath(
 ): Promise<string> {
   const dir = path.dirname(originalPath);
   const ext = path.extname(originalPath);
-  const stem = path.basename(originalPath, ext);
+  // A copy of a conflicted copy (the window switched to the copy, then
+  // someone changed THAT file) is the next numbered copy of the
+  // original, not a nested "(… conflicted copy …) (… conflicted copy …)".
+  const stem = path
+    .basename(originalPath, ext)
+    .replace(/ \([^()]*'s conflicted copy \d{4}-\d{2}-\d{2}\)( \(\d+\))?$/u, '');
   const user = fileNameSafe(userName) || 'user';
   const suffix = `(${user}'s conflicted copy ${day})`;
   for (let n = 1; ; n++) {

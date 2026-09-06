@@ -16,9 +16,9 @@ see `DETAILED_CHANGELOG.md`.
   because a teammate saved it on another machine, the pill turns amber
   with the time, quietly, with no pop-up. Saving then never
   overwrites their version: your document is written beside it as a
-  conflicted copy, named the way Dropbox names its own, the window
-  switches to the copy, and a notice in the status bar says so. Click
-  the badge to reload from disk, keep yours as a copy, or overwrite
+  conflicted copy, named the way Dropbox names its own, and the window
+  switches to the copy, with the pill reading "Conflicted copy". Click
+  the pill to reload from disk, keep yours as a copy, or overwrite
   after a second confirmation. Autosave keeps both too instead of
   pausing.
 

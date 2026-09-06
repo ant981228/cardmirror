@@ -223,6 +223,19 @@ describe('conflicted copy naming', () => {
     expect(await read(first), 'never overwrites an earlier copy').toBe('copy 1');
   });
 
+  it('a copy of a conflicted copy is the next numbered copy of the original', async () => {
+    const p = docPath('Aff.cmir');
+    await fs.writeFile(p, 'x');
+    const first = await conflictedCopyPath(p, 'Anthony', '2026-09-06');
+    await saveNewDoc(first, Buffer.from('copy 1'));
+    // The window now edits `first`; someone changes it on disk; keep both again.
+    const second = await conflictedCopyPath(first, 'Anthony', '2026-09-06');
+    expect(path.basename(second)).toBe("Aff (Anthony's conflicted copy 2026-09-06) (2).cmir");
+    await saveNewDoc(second, Buffer.from('copy 2'));
+    const third = await conflictedCopyPath(second, 'Anthony', '2026-09-07');
+    expect(path.basename(third)).toBe("Aff (Anthony's conflicted copy 2026-09-07).cmir");
+  });
+
   it('sanitizes the user name for the filesystem and keeps the extension', async () => {
     const p = docPath('Neg Blocks.docx');
     await fs.writeFile(p, 'x');

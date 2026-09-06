@@ -18,7 +18,9 @@
  *                offers the original.
  *
  * Nothing here ever toasts, steals focus, or animates on a state
- * transition — a conflict must never interrupt a speech. While read
+ * transition — a conflict must never interrupt a speech. A keep-both
+ * save announces itself only through the pill's "Conflicted copy"
+ * state (design call 2026-09-06: no chip / toast on top of it). While read
  * mode or the timer pop-out is active the badge is frozen at its last
  * rendering and catches up when both clear. `changed` is cleared only
  * by a Reload or by an in-place save that main accepted (which means
@@ -26,7 +28,6 @@
  * window to the copy, whose state starts as `kept-copy`.
  */
 import { promptForRouteChoice } from './text-prompt.js';
-import { postNotice } from './status-notices.js';
 import { settings } from './settings.js';
 import type { CloudProvider } from './host/types.js';
 
@@ -131,18 +132,6 @@ export function conflictedCopyUserName(): string | null {
   return null;
 }
 
-/** Post the (non-interrupting) chip entry for a keep-both save. */
-export function announceKeptCopy(copyName: string, originalName: string): void {
-  postNotice({
-    severity: 'warning',
-    title: 'Saved as a conflicted copy',
-    body:
-      `Saved as "${copyName}" — "${originalName}" changed on disk while you were editing it. ` +
-      `You are now editing the copy; the other version is untouched.`,
-    key: `disk-conflict:${originalName}`,
-  });
-}
-
 export function relativeTime(ms: number, now: number = Date.now()): string {
   const s = Math.max(0, Math.round((now - ms) / 1000));
   if (s < 45) return 'just now';
@@ -164,6 +153,9 @@ export interface DiskBadgeDeps {
   getActive: () => { handle: string | null; name: string | null };
   /** Read mode or the timer pop-out is active: freeze the pill. */
   isSuppressed: () => boolean;
+  /** The active document has unsaved edits — Reload will confirm first,
+   *  and its description says so; a clean document reloads at once. */
+  isDirty?: () => boolean;
   /** The active document hosts a live co-editing session — Reload is
    *  withheld (it would replace the shared document under everyone). */
   isSessionHost: (handle: string) => boolean;
@@ -318,10 +310,13 @@ async function onBadgeClick(): Promise<void> {
   const when = info.changedAt ? relativeTime(info.changedAt) : 'recently';
   const choices: Array<{ value: 'reload' | 'keep' | 'overwrite'; label: string; description: string }> = [];
   if (!host) {
+    const dirty = badgeDeps.isDirty?.() ?? false;
     choices.push({
       value: 'reload',
       label: 'Reload from disk',
-      description: 'Take the other version. Your unsaved edits here are discarded (you will be asked).',
+      description: dirty
+        ? 'Take the other version. Your unsaved edits here will be discarded — you will be asked to confirm first.'
+        : 'Take the other version now. Nothing here is unsaved, so there is nothing to lose.',
     });
   }
   choices.push({

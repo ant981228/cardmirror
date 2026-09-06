@@ -61,9 +61,14 @@ the amber badge opens the route-style decision: Reload from disk
 session first), Keep mine as a copy, or Overwrite behind a second
 confirmation. A refused save, manual or autosave, writes the in-memory
 document beside the original as `<name> (<user>'s conflicted copy
-<date>).<ext>` with a numeric suffix on collision, switches the window
-to the copy so a second save cannot mint a second copy, and posts a
-status-bar notice. The user name is the co-editing display name, else
+<date>).<ext>` with a numeric suffix on collision, and switches the
+window to the copy so a second save cannot mint a second copy. The
+pill's "Conflicted copy" state is the only announcement (a status-bar
+notice was tried and dropped on review as redundant); the recovery
+sidebar's Save, which mounts nothing, toasts the copy's name instead.
+A copy of a conflicted copy, when someone changes the copy under the
+window, is named as the next numbered copy of the original rather than
+a nested name. The user name is the co-editing display name, else
 the comment author name, else the computer account username, never
 anything from the Debate Decoded account. Tests cover the owner-keyed
 guard, the journaled baseline, the pre-rename recheck, copy naming, the

@@ -758,9 +758,11 @@ waits until read mode and the timer pop-out are off.
 Saving then never destroys the other version. Your document is written
 beside it as a conflicted copy, named the way Dropbox names its own
 (`Aff (Anthony's conflicted copy 2026-09-06).cmir`), the window switches
-to the copy, and a notice in the status bar tells you. The two files
-sit side by side in the folder, and the copy syncs to your teammate
-like any other file, so reconciling is a matter of opening both.
+to the copy, and the pill reads "Conflicted copy". The two files sit
+side by side in the folder, and the copy syncs to your teammate like
+any other file, so reconciling is a matter of opening both. If someone
+then changes the copy under you, the pill turns amber again and a save
+keeps both again, as the next numbered copy of the original.
 Autosave does the same. Click the amber pill to choose instead:
 **Reload from disk** takes the other version (you are asked first if
 you have unsaved edits), **Keep mine as a copy** does what a save would,

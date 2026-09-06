@@ -33,7 +33,6 @@ import {
   noteSavedInPlace,
   noteKeptCopy,
   noteReloaded,
-  announceKeptCopy,
   conflictedCopyUserName,
 } from './disk-conflict.js';
 import { EditorView } from 'prosemirror-view';
@@ -323,7 +322,7 @@ async function runAutosaveForRecord(record: DocRecord): Promise<void> {
       const copy = await electron.saveConflictedCopy(original, bytes, conflictedCopyUserName());
       noteKeptCopy(copy.handle, original);
       adoptFileForRecord(record, { filename: copy.name, handle: copy.handle, format: 'cmir' });
-      announceKeptCopy(copy.name, record.filename);
+      // No chip or toast: the pill's "Conflicted copy" state is the announcement.
     }
     commitClean();
     reportAutosaveSuccess();
@@ -2274,10 +2273,11 @@ class MultiPaneShell {
     format: DocFormat | null;
     docId: string | null;
     uid: string;
+    dirty: boolean;
   } | null {
     const rec = this.focusedSlot?.visible;
     if (!rec) return null;
-    return { filename: rec.filename, handle: rec.handle, format: rec.format, docId: rec.docId, uid: rec.uid };
+    return { filename: rec.filename, handle: rec.handle, format: rec.format, docId: rec.docId, uid: rec.uid, dirty: rec.dirty };
   }
 
   /** Set the focused doc's Learn id (minted lazily on first save /

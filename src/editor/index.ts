@@ -288,7 +288,6 @@ import {
   noteReloaded,
   noteDocReleased,
   conflictedCopyUserName,
-  announceKeptCopy,
 } from './disk-conflict.js';
 import type { DiskBase } from './host/types.js';
 import { makeBlankDoc } from './blank-doc.js';
@@ -1047,6 +1046,7 @@ let multiDocGetFocusedFile:
       format: 'cmir' | 'docx' | null;
       docId: string | null;
       uid: string;
+      dirty?: boolean;
     } | null)
   | null = null;
 let multiDocSetFocusedFile:
@@ -1133,6 +1133,8 @@ export function enableMultiDocMode(opts: {
     format: 'cmir' | 'docx' | null;
     docId: string | null;
     uid: string;
+    /** Unsaved edits in the focused doc (the cloud pill's Reload wording). */
+    dirty?: boolean;
   } | null;
   setFocusedFile?: (file: { filename: string; handle: unknown | null; format: 'cmir' | 'docx' | null }) => void;
   setFocusedDocId?: (docId: string) => void;
@@ -8044,7 +8046,7 @@ async function keepBothForActiveFile(
     // registration keeps the kept-copy state.
     noteKeptCopy(copy.handle, file.handle);
     commitSaveResult(copy.name, copy.handle, file.format);
-    announceKeptCopy(copy.name, file.filename ?? 'this document');
+    // No chip or toast: the pill's "Conflicted copy" state is the announcement.
     return true;
   } catch (err) {
     console.error('Conflicted-copy save failed:', err);
@@ -8173,6 +8175,7 @@ function ensureDiskBadge(): void {
       return { handle: typeof f.handle === 'string' ? f.handle : null, name: f.filename };
     },
     isSuppressed: () => readModeStateForActive() || getTimerStateNow().poppedOut,
+    isDirty: () => (multiDocActive ? (multiDocGetFocusedFile?.()?.dirty ?? false) : currentDocDirty),
     isSessionHost: () => collabCopresenceFor(activeDocIdentity().sessionUid)?.role === 'host',
     reveal: (handle) => void getElectronHost()?.showItemInFolder?.(handle),
     reloadFromDisk: reloadActiveFromDisk,
@@ -10297,9 +10300,10 @@ async function saveRecoveryEntry(entry: JournalEntry): Promise<boolean> {
           await host.saveExisting(entry.handle, bytes);
         } catch (err) {
           if (!isFileChangedOnDiskError(err) || !electron) throw err;
-          // The file moved since the journal: keep both.
+          // The file moved since the journal: keep both. Nothing is mounted
+          // here, so no pill can show it — a plain toast names the copy.
           const copy = await electron.saveConflictedCopy(entry.handle, bytes, conflictedCopyUserName());
-          announceKeptCopy(copy.name, entry.filename);
+          showToast(`"${entry.filename}" changed on disk since that draft — saved it as "${copy.name}" beside it.`);
         } finally {
           if (electron) void electron.openPathRelease(entry.handle);
         }
