@@ -5,6 +5,39 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Fixed: flashcards lost between windows (single-owner learn store)
+
+The flashcard store (cards, schedules, anchors, notes, AI threads,
+decks, the document registry) was one JSON blob that every window
+loaded once at launch and rewrote in full on any change. Nothing told
+other windows. Because merely opening a file registers it in the store,
+a window that had loaded before another window created cards overwrote
+those cards the next time it opened or saved a file; the first window
+kept showing them until it restarted, so the loss surfaced at the next
+launch, which is often an update. A read that failed for any reason
+other than a missing file also started the app with an empty store and
+let the next change overwrite the file with it.
+
+Windows no longer write the store. A mutation on the window's copy is
+applied locally, so callers can read back synchronously as before, and
+the same call is sent as an operation (method name plus arguments) to
+the single owner of the canonical copy. On desktop the owner is the
+main process: it applies the operation, writes the file (debounced,
+serialized, temp-and-rename), and broadcasts the resulting blob to
+every window; a quit is held until a pending write lands. On the web
+the owner is whichever tab holds a Web Lock for the write; the others
+follow through the storage event. A window adopts a canonical blob only
+while none of its own operations are in flight, so a reply that
+predates a later local change never rolls that change back. The owner
+keeps one backup per local day for two weeks, and a file it cannot read
+or parse is set aside under an `.unreadable-` name before the first
+write instead of being overwritten. The owner is bundled with esbuild
+like the file-index service because it imports the shared store from
+the editor tree, outside the desktop tsconfig's root. A test guards
+that every store method which persists is in the operation list.
+
 ## 1.7.0 — 2026-09-05
 
 ### Added: choose which machine to unlink (seat picker)

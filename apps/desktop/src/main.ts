@@ -1860,34 +1860,41 @@ void app.whenReady().then(() => {
   timer.unref?.();
 });
 
-// ─── Learn store (local annotation layer) — whole-blob KV ──────────
-function learnStorePath(): string {
-  return path.join(app.getPath('userData'), 'learn-store.json');
+// ─── Learn store (local annotation layer) — single owner ───────────
+// Main holds the canonical store: windows send operations, main applies
+// them, writes `{userData}/learn-store.json` (debounced, tmp → rename,
+// a daily backup kept for two weeks, an unreadable file set aside rather
+// than overwritten) and broadcasts the resulting blob to every window.
+// Windows used to write the whole blob themselves — last-writer-wins
+// between two windows silently dropped flashcards. The owner is
+// esbuild-bundled (learn-store-owner.cjs, next to the file-index
+// service) because it imports the shared LearnStore from src/editor,
+// outside this tsconfig's rootDir.
+interface LearnStoreOwnerLike {
+  read(): Promise<string>;
+  apply(op: unknown): Promise<string>;
+  flush(): Promise<void>;
 }
-
-ipcMain.handle('host:read-learn-store', async (): Promise<string | null> => {
-  try {
-    return await fs.readFile(learnStorePath(), 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    console.warn('Failed to read learn-store.json:', err);
-    return null;
+let learnStoreOwner: LearnStoreOwnerLike | null = null;
+function getLearnStoreOwner(): LearnStoreOwnerLike {
+  if (!learnStoreOwner) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require(path.join(__dirname, 'learn-store-owner.cjs')) as {
+      createLearnStoreOwner(opts: { dir: string; onChanged: (json: string) => void }): LearnStoreOwnerLike;
+    };
+    learnStoreOwner = mod.createLearnStoreOwner({
+      dir: app.getPath('userData'),
+      onChanged: (json) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) w.webContents.send('host:learn-store-changed', json);
+        }
+      },
+    });
   }
-});
-
-// Serialize writes (tmp → atomic rename) so quick consecutive saves can't
-// tear the file — same discipline as the journal / quick-cards writers.
-let learnStoreWriteTail: Promise<void> = Promise.resolve();
-ipcMain.handle('host:write-learn-store', (_event, json: string) => {
-  if (typeof json !== 'string') return learnStoreWriteTail;
-  learnStoreWriteTail = learnStoreWriteTail.catch(() => {}).then(async () => {
-    const finalPath = learnStorePath();
-    const tmpPath = `${finalPath}.tmp`;
-    await fs.writeFile(tmpPath, json);
-    await fs.rename(tmpPath, finalPath);
-  });
-  return learnStoreWriteTail;
-});
+  return learnStoreOwner;
+}
+ipcMain.handle('host:read-learn-store', (): Promise<string> => getLearnStoreOwner().read());
+ipcMain.handle('host:learn-op', (_event, op: unknown): Promise<string> => getLearnStoreOwner().apply(op));
 
 // ─── Multi-window: spawn + initial-doc handshake ──────────────────
 // Renderers in "windows mode" (multiDocWorkspace = false on
@@ -3502,7 +3509,23 @@ app.on('before-quit', () => {
 // teardown here instead of in `before-quit` keeps the bridge and
 // both discovery files alive for the rest of the session after a
 // cancelled quit. Stale-file tolerance still covers a hard exit.
-app.on('will-quit', () => {
+let learnStoreFlushed = false;
+app.on('will-quit', (event) => {
+  // The learn store owner debounces its file write; a quit inside that
+  // window would drop the last grade or card. Hold the quit until the
+  // pending write lands, then quit again (this handler then falls
+  // through to the teardown below).
+  if (learnStoreOwner && !learnStoreFlushed) {
+    event.preventDefault();
+    learnStoreOwner
+      .flush()
+      .catch(() => {})
+      .finally(() => {
+        learnStoreFlushed = true;
+        app.quit();
+      });
+    return;
+  }
   void stopFastPasteBridge();
   // Clears only the SESSION half (port/token); the identity file persists
   // so flow-app pickers can still list a closed CardMirror.

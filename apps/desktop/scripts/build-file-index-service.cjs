@@ -23,3 +23,15 @@ buildSync({
   outfile: path.join(__dirname, '..', 'dist', 'file-index-service.cjs'),
   logLevel: 'warning',
 });
+
+// The learn-store owner (main-process side of the flashcard store) is
+// bundled for the same reason: it imports the shared LearnStore from
+// src/editor. main.ts `require`s the bundle at runtime.
+buildSync({
+  entryPoints: [path.join(__dirname, '..', 'src', 'learn-store-owner.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  outfile: path.join(__dirname, '..', 'dist', 'learn-store-owner.cjs'),
+  logLevel: 'warning',
+});

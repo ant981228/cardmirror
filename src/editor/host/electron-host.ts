@@ -8,6 +8,7 @@
  * across IPC, no serialization tricks needed.
  */
 
+import type { LearnOp } from '../learn-store.js';
 import type {
   FileFilter,
   HistoryEnvelope,
@@ -284,7 +285,8 @@ interface ElectronAPI {
   deleteHistory(roomId: string): Promise<void>;
   pickHistoryFile(): Promise<string | null>;
   readLearnStore(): Promise<string | null>;
-  writeLearnStore(json: string): Promise<void>;
+  applyLearnOp(op: LearnOp): Promise<string>;
+  onLearnStoreChanged(handler: (json: string) => void): () => void;
   spawnWindow(payload: SpawnWindowPayload | null): Promise<void>;
   getInitialDoc(): Promise<SpawnWindowPayload | null>;
   isFirstWindow(): Promise<boolean>;
@@ -943,8 +945,12 @@ export class ElectronHost implements Host {
     return api().readLearnStore();
   }
 
-  async writeLearnStore(json: string): Promise<void> {
-    await api().writeLearnStore(json);
+  applyLearnOp(op: LearnOp): Promise<string> {
+    return api().applyLearnOp(op);
+  }
+
+  onLearnStoreChanged(handler: (json: string) => void): () => void {
+    return api().onLearnStoreChanged(handler);
   }
 
   async spawnWindow(payload: SpawnWindowPayload | null): Promise<void> {

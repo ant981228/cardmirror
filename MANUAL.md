@@ -1580,7 +1580,12 @@ you can study your files.
 
 The cards live **only on your machine** and never travel with a shared
 file — your study material stays yours. (The design and the research
-behind it are written up in the project's ARCHITECTURE doc.)
+behind it are written up in the project's ARCHITECTURE doc.) On the
+desktop they are one file, `learn-store.json`, in CardMirror's data
+folder, shared by every window you have open; CardMirror keeps a backup
+of it once a day for two weeks in a `learn-store-backups` folder beside
+it, so a lost card can be recovered from yesterday's copy. In the
+browser they live in the site's local storage.
 
 ### Making a card
 

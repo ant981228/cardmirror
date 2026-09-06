@@ -19,6 +19,8 @@
  * file handles for in-place saves); they're not assumed to be pure.
  */
 
+import type { LearnOp } from '../learn-store.js';
+
 /** File-type filter for native open/save dialogs. Mirrors Electron's
  *  `dialog.FileFilter` shape so the ElectronHost can pass it
  *  through verbatim; BrowserHost uses it to build the `<input
@@ -274,8 +276,15 @@ export interface Host {
    *  decks — the local annotation layer). `null` when none saved yet. */
   readLearnStore(): Promise<string | null>;
 
-  /** Persist the Learn store blob (whole-blob write; caller debounces). */
-  writeLearnStore(json: string): Promise<void>;
+  /** Apply one Learn store mutation at the single OWNER of the canonical
+   *  copy (desktop: the main process; web: this tab, under a Web Lock)
+   *  and return the resulting blob. Windows never write the blob
+   *  themselves — see learn-store-host.ts. */
+  applyLearnOp(op: LearnOp): Promise<string>;
+
+  /** Follow canonical Learn store changes made through ANY window or
+   *  tab. Returns an unsubscribe. */
+  onLearnStoreChanged(handler: (json: string) => void): () => void;
 
   /** Whether journaling actually persists across sessions on this
    *  host. Set to false by hosts that can't (e.g. a hypothetical

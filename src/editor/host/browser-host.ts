@@ -10,6 +10,7 @@
  * to be pending at a time (browsers serialize them anyway).
  */
 
+import { LearnStore, applyLearnOp, type LearnOp } from '../learn-store.js';
 import type {
   FileFilter,
   Host,
@@ -20,6 +21,9 @@ import type {
   SaveResult,
   SpawnWindowPayload,
 } from './types.js';
+
+const LEARN_STORE_KEY = 'pmd-learn-store';
+const LEARN_STORE_LOCK = 'pmd-learn-store';
 
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -545,18 +549,60 @@ export class BrowserHost implements Host {
 
   async readLearnStore(): Promise<string | null> {
     try {
-      return localStorage.getItem('pmd-learn-store');
+      return localStorage.getItem(LEARN_STORE_KEY);
     } catch {
       return null;
     }
   }
 
-  async writeLearnStore(json: string): Promise<void> {
-    try {
-      localStorage.setItem('pmd-learn-store', json);
-    } catch {
-      /* quota / disabled — non-fatal */
+  /** Read → apply → write under a Web Lock, so two tabs can never
+   *  interleave (the lock is origin-wide; tabs share localStorage). The
+   *  tab that wrote adopts the returned blob; the others learn of the
+   *  change through the `storage` event (`onLearnStoreChanged`). */
+  async applyLearnOp(op: LearnOp): Promise<string> {
+    const run = async (): Promise<string> => {
+      let cur: string | null = null;
+      try {
+        cur = localStorage.getItem(LEARN_STORE_KEY);
+      } catch {
+        /* storage blocked — apply against an empty copy */
+      }
+      if (cur !== null) {
+        try {
+          JSON.parse(cur);
+        } catch {
+          // Never overwrite a blob we could not read: set it aside first.
+          try {
+            localStorage.setItem(`${LEARN_STORE_KEY}.unreadable-${Date.now()}`, cur);
+          } catch {
+            /* best effort */
+          }
+          cur = null;
+        }
+      }
+      const s = new LearnStore();
+      s.loadJson(cur);
+      applyLearnOp(s, op);
+      const json = s.toJson();
+      try {
+        localStorage.setItem(LEARN_STORE_KEY, json);
+      } catch (err) {
+        console.warn('Learn store: not persisted (storage quota or disabled):', err);
+      }
+      return json;
+    };
+    if (typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function') {
+      return (await navigator.locks.request(LEARN_STORE_LOCK, run)) as string;
     }
+    return run();
+  }
+
+  onLearnStoreChanged(handler: (json: string) => void): () => void {
+    const listener = (e: StorageEvent): void => {
+      if (e.key === LEARN_STORE_KEY && typeof e.newValue === 'string') handler(e.newValue);
+    };
+    window.addEventListener('storage', listener);
+    return () => window.removeEventListener('storage', listener);
   }
 
   async spawnWindow(payload: SpawnWindowPayload | null): Promise<void> {

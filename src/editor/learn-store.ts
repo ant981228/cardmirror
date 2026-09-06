@@ -556,3 +556,61 @@ export class LearnStore {
     this.changed();
   }
 }
+
+// ── Operations ─────────────────────────────────────────────────────
+/** The store's mutating methods, by name. A window never persists the
+ *  store itself: it applies a mutation to its own copy (so reads stay
+ *  synchronous) and sends the same call, as a `LearnOp`, to the single
+ *  OWNER of the canonical copy — the desktop main process, or the
+ *  browser tab holding the Web Lock — which applies it there, writes
+ *  the file, and hands every window the result. Whole-blob writes from
+ *  each window were last-writer-wins: a window that had loaded before
+ *  another created cards overwrote them the next time it so much as
+ *  registered an opened file (field report 2026-09-05). Guarded by a
+ *  test that every method calling `changed()` is listed here. */
+export const LEARN_MUTATIONS = [
+  'upsertCard',
+  'importCards',
+  'setAnchor',
+  'addAiThread',
+  'appendAiComment',
+  'setAiThreadAnchor',
+  'removeAiThread',
+  'addNote',
+  'appendNoteComment',
+  'editNoteComment',
+  'removeNoteComment',
+  'setNoteAnchor',
+  'removeNote',
+  'grade',
+  'suspend',
+  'setSuspended',
+  'deleteCard',
+  'forgetDoc',
+  'createDeck',
+  'renameDeck',
+  'deleteDeck',
+  'setDeckMembership',
+  'registerDoc',
+  'copyDocAnnotations',
+  'rekeyDoc',
+] as const;
+export type LearnMutation = (typeof LEARN_MUTATIONS)[number];
+
+/** One mutation call, serialized: method name + its arguments (all plain
+ *  data — ids, ISO strings, anchor descriptors, card/note records). */
+export type LearnOp = { [M in LearnMutation]: { m: M; a: Parameters<LearnStore[M]> } }[LearnMutation];
+
+const LEARN_MUTATION_SET: ReadonlySet<string> = new Set(LEARN_MUTATIONS);
+
+/** Shape check for an operation that crossed a process boundary. */
+export function isLearnOp(x: unknown): x is LearnOp {
+  if (!x || typeof x !== 'object') return false;
+  const o = x as { m?: unknown; a?: unknown };
+  return typeof o.m === 'string' && LEARN_MUTATION_SET.has(o.m) && Array.isArray(o.a);
+}
+
+/** Apply `op` to `store` — the same call a window made on its own copy. */
+export function applyLearnOp(store: LearnStore, op: LearnOp): unknown {
+  return (store[op.m] as (...args: unknown[]) => unknown).apply(store, op.a);
+}

@@ -387,10 +387,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickHistoryFile: () =>
     ipcRenderer.invoke('host:pick-history-file') as Promise<string | null>,
 
-  /** Learn store (local annotation layer) — whole-blob KV under
-   *  `app.getPath('userData')/learn-store.json`. */
-  readLearnStore: () => ipcRenderer.invoke('host:read-learn-store') as Promise<string | null>,
-  writeLearnStore: (json: string) => ipcRenderer.invoke('host:write-learn-store', json),
+  /** Learn store (local annotation layer) — main owns the canonical
+   *  copy under `app.getPath('userData')/learn-store.json`; windows send
+   *  operations and receive the resulting blob (their own reply, or a
+   *  broadcast for another window's change). */
+  readLearnStore: () => ipcRenderer.invoke('host:read-learn-store') as Promise<string>,
+  applyLearnOp: (op: unknown) => ipcRenderer.invoke('host:learn-op', op) as Promise<string>,
+  onLearnStoreChanged: (handler: (json: string) => void): (() => void) => {
+    const listener = (_evt: unknown, json: string): void => handler(json);
+    ipcRenderer.on('host:learn-store-changed', listener);
+    return () => ipcRenderer.removeListener('host:learn-store-changed', listener);
+  },
 
   /** Report this window's workspace mode to main at boot (and on the
    *  reload a mode toggle triggers) so the OS "Open with…" path knows

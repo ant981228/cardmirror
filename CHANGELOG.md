@@ -5,6 +5,18 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Fixed
+
+- **Flashcards no longer vanish when two windows are open.** Each window
+  used to save the whole flashcard store, so a window opened before you
+  created cards could overwrite them the next time it opened a file.
+  One owner now applies every change and every window sees it at once,
+  on desktop and on the web. A daily backup of the store is kept for two
+  weeks in the app's data folder, and a store that cannot be read is set
+  aside rather than overwritten.
+
 ## 1.7.0 — 2026-09-05
 
 ### Added
