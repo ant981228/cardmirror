@@ -1,6 +1,6 @@
 {
   "name": "cardmirror",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "CardMirror — ProseMirror-based editor that interoperates with Advanced Verbatim",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Anthony Trufanov",

@@ -5,7 +5,7 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
-## Unreleased
+## 1.8.0 — 2026-09-06
 
 ### Added + Fixed: disk-conflict guard rework and the cloud badge
 
