@@ -116,6 +116,47 @@ Lite and your home machine runs the full app, they read and write the
 same files. Desktop Lite doesn't update itself; install a newer Lite
 build from the releases page when you want one.
 
+
+## Features
+
+### A. Document & files
+
+1. 📝 **Structured outline:** Pockets, hats, blocks, tags, cards, analytics, and undertags as first-class node types; includes footnotes, tables, and live/transcluded zones.
+
+2. 💾 **Lossless `.docx` and `.cmir` round-trip:** Verbatim Word interoperability plus a native gzip save format, including encrypted `.docx` decryption and damaged-file salvage.
+
+3. 🔁 **Bulk conversion and compression:** Automatic style cleanup on import, plus a headless `cardmirror-read` CLI/MCP tool for AI-assistant access to files outside the app.
+
+### B. Cutting & formatting
+
+1. 🏷️ **One-click structural styles:** Pocket, Hat, Block, Tag, Analytic, and Undertag styles, plus citation, underline, and emphasis marks with acronym-aware variants.
+
+2. 🎨 **Color and highlighting controls:** Highlight, shading, and font-color pickers; standardization commands; paintbrush mode; and highlight locking.
+
+3. 🔢 **Editing utilities:** Card numbering, multiple condense modes, shrink/regrow, short citations, live-zone refresh, and heading move/copy/delete controls.
+
+### C. Collaboration & workflow
+
+1. 👥 **Real-time collaboration:** CRDT-backed collaboration via Loro with share codes, invite links, and version recovery.
+
+2. 🎤 **Speech-document targeting:** Mark a document as the live send target, send content at the cursor or document end, and retain a persistent send history.
+
+3. 🌊 **Flow integration:** Send cards or headings directly to a Flow column or cell, or pull content back into the document.
+
+4. 📇 **Card exchange and command search:** Dropzone card exchange, Quick Cards, and a unified command bar that searches cards, commands, settings, and roughly 50 additional site tools.
+
+### D. AI, learning & chrome
+
+1. 🤖 **AI tools:** Ask questions about selected text, generate citations, translate content, and repair text or formatting with AI assistance.
+
+2. 🗂️ **Learning tools:** Flashcards with spaced-repetition review, a card-cutter panel, voice dictation, and reading-marker mode.
+
+3. 🧩 **Customization and extensibility:** Runtime plugin registry, a 12-category menu bar, customizable keybindings, and per-user preferences synced to account settings.
+
+4. 🖥️ **Native desktop and mobile app:** A Tauri wrapper running the same editor experience without browser chrome.
+
+   
+
 ### First launch and the welcome guide
 
 On a fresh install, CardMirror starts with a **guided UI tour**: a
