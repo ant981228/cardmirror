@@ -8,7 +8,9 @@
  * All rules read the RAW selection (rounding one endpoint must not erase the
  * information the other rule needs):
  *
- *   - **End** → round to the nearest top-level boundary.
+ *   - **End** → round to the nearest top-level boundary, except inside a
+ *     heading: any of its text selected includes it (a caret parked at its very
+ *     start — a shift-down onto the next line — does not).
  *   - **Start**, by what the raw `from` sits in:
  *       - card / analytic_unit → round to nearest (include if the caret is past
  *         less than half of it, else exclude — the next node after a card is
@@ -20,9 +22,13 @@
  *         UNLESS the selection covers > 75% of that section's intro text, in
  *         which case grab the heading + the whole intro (so the intro can travel
  *         under a structural lead).
+ *   - A heading that ENDS the range carries its whole section (to the next
+ *     equal-or-shallower heading) — as a bare cursor on it would — so the last
+ *     of several selected headings never arrives empty or goes missing.
  *   - If the endpoints collapse, fall back to the most-overlapped structural
- *     unit. If the result holds no structural unit, return `null` (nothing to
- *     send — e.g. only loose paragraphs were selected).
+ *     unit (a heading again with its section). If the result holds no
+ *     structural unit, return `null` (nothing to send — e.g. only loose
+ *     paragraphs were selected).
  *
  * Loose paragraphs only ever sit at doc-top or right after a heading (the absorb
  * plugin folds any post-card paragraph into the card), so the only problematic
@@ -31,6 +37,7 @@
  */
 
 import { type Node as PMNode } from 'prosemirror-model';
+import { sectionEndFromHeading, TYPE_TO_LEVEL } from './headings.js';
 
 const STRUCTURAL = new Set(['card', 'analytic_unit', 'pocket', 'hat', 'block']);
 const HEADING = new Set(['pocket', 'hat', 'block']);
@@ -111,6 +118,14 @@ function resolveLooseStart(
   return firstStructuralStartAtOrAfter(children, runEnd + 1, docEnd);
 }
 
+/** End of `c`'s range: a heading runs to the end of its section, anything
+ *  else to its own end. */
+function unitEnd(doc: PMNode, c: TopChild): number {
+  const level = TYPE_TO_LEVEL[c.node.type.name];
+  if (!HEADING.has(c.node.type.name) || level === undefined) return c.end;
+  return sectionEndFromHeading(doc, c.index, c.end, level);
+}
+
 function mostOverlappedStructural(
   children: TopChild[],
   from: number,
@@ -139,9 +154,16 @@ export function normalizeSelectionForSend(
   const docEnd = doc.content.size;
 
   // End: round to the nearest top-level boundary (trailing loose paragraphs are
-  // post-heading and travel fine, so no carve-out is needed here).
+  // post-heading and travel fine, so no carve-out is needed here). A heading is
+  // included once any of its text is selected — `to` past its opening position.
   const toChild = childContaining(children, to);
-  const toPrime = toChild ? roundToNearest(toChild, to) : docEnd;
+  let toPrime = !toChild
+    ? docEnd
+    : HEADING.has(toChild.node.type.name)
+      ? to > toChild.start + 1
+        ? toChild.end
+        : toChild.start
+      : roundToNearest(toChild, to);
 
   // Start: branch on what the raw `from` sits in.
   let fromPrime: number;
@@ -162,8 +184,13 @@ export function normalizeSelectionForSend(
   // Collapsed → the most-overlapped structural unit (or nothing to send).
   if (fromPrime >= toPrime) {
     const best = mostOverlappedStructural(children, from, to);
-    return best ? { from: best.start, to: best.end } : null;
+    return best ? { from: best.start, to: unitEnd(doc, best) } : null;
   }
+
+  // A heading ending the range would otherwise arrive bare, its cards left
+  // behind: carry its whole section, as the bare-cursor send does.
+  const last = children.find((c) => c.end === toPrime);
+  if (last && last.start >= fromPrime) toPrime = unitEnd(doc, last);
 
   // The range must hold a whole structural unit, else there's nothing to send.
   const hasStructural = children.some(

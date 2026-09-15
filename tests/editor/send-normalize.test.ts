@@ -109,6 +109,66 @@ describe('normalizeSelectionForSend — headings', () => {
   });
 });
 
+const hat = (t: string) => schema.nodes['hat']!.create({ id: newHeadingId() }, schema.text(t));
+
+describe('normalizeSelectionForSend — several headings selected', () => {
+  const threeBlocks = () =>
+    makeDoc(
+      block('Heading One'), card(tag('T1'), body('one')),
+      block('Heading Two'), card(tag('T2'), body('two')),
+      block('Heading Three'), card(tag('T3'), body('three')),
+    );
+  const texts = (doc: PMNode, from: number, to: number) => {
+    const r = normalizeSelectionForSend(doc, from, to)!;
+    const out: string[] = [];
+    doc.slice(r.from, r.to).content.forEach((n) => out.push(n.textContent));
+    return out;
+  };
+
+  it('drag ending late in the last heading → its cards come too', () => {
+    const doc = threeBlocks();
+    const from = findText(doc, 'Heading One', 1);
+    const to = findText(doc, 'Heading Three', 13);
+    expect(texts(doc, from, to)).toEqual([
+      'Heading One', 'T1one', 'Heading Two', 'T2two', 'Heading Three', 'T3three',
+    ]);
+  });
+
+  it('drag ending early in the last heading → it is still sent, with its cards', () => {
+    const doc = threeBlocks();
+    const from = findText(doc, 'Heading One', 1);
+    const to = findText(doc, 'Heading Three', 3);
+    expect(texts(doc, from, to)).toEqual([
+      'Heading One', 'T1one', 'Heading Two', 'T2two', 'Heading Three', 'T3three',
+    ]);
+  });
+
+  it('selection stopping at the very start of the next heading → that heading stays out', () => {
+    const doc = threeBlocks();
+    const from = findText(doc, 'Heading One', 1);
+    const to = findText(doc, 'Heading Three', 0);
+    expect(texts(doc, from, to)).toEqual(['Heading One', 'T1one', 'Heading Two', 'T2two']);
+  });
+
+  it('the last heading’s section stops at the next equal-or-shallower heading', () => {
+    const doc = makeDoc(
+      block('B1'), card(tag('T1'), body('one')),
+      block('B2'), card(tag('T2'), body('two')),
+      hat('Next Hat'), card(tag('T3'), body('three')),
+    );
+    const from = findText(doc, 'B1', 1);
+    const to = findText(doc, 'B2', 2);
+    expect(texts(doc, from, to)).toEqual(['B1', 'T1one', 'B2', 'T2two']);
+  });
+
+  it('selecting within one heading’s text → the heading and its section', () => {
+    const doc = threeBlocks();
+    const from = findText(doc, 'Heading Two', 1);
+    const to = findText(doc, 'Heading Two', 10);
+    expect(texts(doc, from, to)).toEqual(['Heading Two', 'T2two']);
+  });
+});
+
 describe('normalizeSelectionForSend — leading loose paragraphs (75% intro rule)', () => {
   const docOf = () =>
     makeDoc(block('Heading'), para('intro text here'), card(tag('T'), body('card body')));
