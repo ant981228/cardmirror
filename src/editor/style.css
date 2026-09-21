@@ -3097,6 +3097,18 @@ code {
      any other content (a selection flows through the view natively). Read-only is
      enforced by the content plugin's filterTransaction, not by CSS. */
 }
+.pmd-live-reference-heading {
+  color: var(--pmd-c-text);
+  font-size: 11pt;
+  margin: 0 0 0.2em 2px;
+}
+.pmd-live-reference-heading-bold { font-weight: bold; }
+.pmd-live-reference-heading-italic { font-style: italic; }
+.pmd-live-reference-heading-emphasized { font-style: italic; }
+.pmd-live-reference-heading-underlined { text-decoration: underline; }
+.pmd-live-reference-gray > .pmd-self-ref-body {
+  color: #808080;
+}
 /* The projected cards render real card DOM; suppress their own grey hover rail
    so the window's dotted green rail is the only one (mirrors .pmd-transclusion-
    body). This is the "replace the grey line" the design calls for. */

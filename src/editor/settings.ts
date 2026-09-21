@@ -1355,6 +1355,8 @@ export interface Settings {
    *  in Gray-50% (#808080) instead of black. Heading line stays
    *  black either way. */
   forReferenceUseGray50: boolean;
+  /** Copy an exact-selection live reference instead of a static excerpt. */
+  createReferenceLive: boolean;
   /** When true (default), the Create Reference excerpt starts with
    *  the `<<CITE FOR REFERENCE>>` heading line. Off copies just the
    *  reformatted body paragraphs. */
@@ -1928,6 +1930,7 @@ const DEFAULTS: Settings = {
   standardizeHighlightException: 'yellow',
   standardizeShadingException: 'FFFF00',
   forReferenceUseGray50: false,
+  createReferenceLive: false,
   createReferenceIncludeHeading: true,
   createReferenceDelimiter: '<<',
   createReferenceIncludeCite: true,
@@ -3606,6 +3609,16 @@ export const SETTING_METADATA: SettingMeta[] = [
     section: 'Formatting operations',
   },
   {
+    key: 'createReferenceLive',
+    label: 'Create a live reference',
+    description:
+      'When on, Create Reference copies a live view of the exact selection. Paste it elsewhere in the same document and later text, highlighting, underlining, and formatting changes update automatically. Heading and gray-text settings still apply; source formatting stays live. Pasting into another document remains a static reference.',
+    kind: 'toggle',
+    category: 'editing',
+    section: 'Create Reference',
+    aliases: ['live reference', 'linked reference', 'reference live view'],
+  },
+  {
     key: 'createReferenceIncludeHeading',
     label: 'Include the FOR REFERENCE heading',
     description:
@@ -4911,6 +4924,10 @@ function sanitize(s: Settings): Settings {
       s.forReferenceUseGray50 === undefined
         ? DEFAULTS.forReferenceUseGray50
         : !!s.forReferenceUseGray50,
+    createReferenceLive:
+      s.createReferenceLive === undefined
+        ? DEFAULTS.createReferenceLive
+        : !!s.createReferenceLive,
     createReferenceIncludeHeading:
       s.createReferenceIncludeHeading === undefined
         ? DEFAULTS.createReferenceIncludeHeading

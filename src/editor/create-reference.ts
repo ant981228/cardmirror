@@ -30,11 +30,12 @@
  * into Word) and `text/plain` (fallback) to the clipboard.
  */
 
-import { DOMSerializer, Fragment, type Mark, type Node as PMNode } from 'prosemirror-model';
+import { DOMSerializer, Fragment, Slice, type Mark, type Node as PMNode } from 'prosemirror-model';
 import { withFrozenStyles } from './clipboard-styles.js';
 import { writeClipboardHtml } from './clipboard-write.js';
 import type { Command, EditorState } from 'prosemirror-state';
-import { schema } from '../schema/index.js';
+import type { EditorView } from 'prosemirror-view';
+import { newHeadingId, schema } from '../schema/index.js';
 import { collectCiteText } from './headings.js';
 import { highlightRgbFor } from './color-palette.js';
 import {
@@ -42,6 +43,8 @@ import {
   type CreateReferenceDelimiter,
   type CreateReferenceHighlightMode,
 } from './settings.js';
+import { clearLinkedCopy, rememberLinkedCopy } from './clipboard-link-cache.js';
+import { createLiveReferenceNode } from './self-transclusion.js';
 
 /** Light gray for highlight → shading conversion in references. */
 const REFERENCE_SHADING_HEX = 'C0C0C0';
@@ -296,6 +299,80 @@ export async function createReference(
   // fail one-click-in-N next to Word).
   const ok = await writeClipboardHtml(html, plain);
   return ok ? 'copied' : 'clipboard-failed';
+}
+
+/** Create Reference's live mode: mark the exact source selection, then copy a
+ *  self_ref that is restored only when pasted back into this same document.
+ *  The system clipboard still receives the regular static reference, so an
+ *  external or cross-document paste can never create a dangling link. */
+export async function createLiveReference(
+  view: EditorView,
+  effectivePtForNode: EffectivePtForNode,
+  opts: CreateReferenceOptions,
+): Promise<CreateReferenceResult> {
+  const outNodes = buildReferenceNodes(view.state, effectivePtForNode, opts);
+  if (!outNodes) return 'invalid-selection';
+
+  const output = Fragment.fromArray(outNodes);
+  const serializer = withFrozenStyles(DOMSerializer.fromSchema(schema));
+  const container = document.createElement('div');
+  container.appendChild(serializer.serializeFragment(output));
+
+  const anchorId = newHeadingId();
+  const anchorType = view.state.schema.marks['live_reference_source']!;
+  const { from, to } = view.state.selection;
+  const tr = view.state.tr;
+  view.state.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isInline) return true;
+    const start = Math.max(from, pos);
+    const end = Math.min(to, pos + node.nodeSize);
+    if (start >= end) return false;
+    const existing = node.marks.find((mark) => mark.type === anchorType);
+    const ids = new Set(String(existing?.attrs['ids'] ?? '').split(' ').filter(Boolean));
+    ids.add(anchorId);
+    tr.removeMark(start, end, anchorType);
+    tr.addMark(start, end, anchorType.create({ ids: [...ids].join(' ') }));
+    return false;
+  });
+  view.dispatch(tr);
+
+  const heading = opts.includeHeading ? outNodes[0]?.textContent ?? '' : '';
+  const liveNode = createLiveReferenceNode(view.state.schema, anchorId, heading, {
+    gray: opts.useGray50,
+    bold: opts.headingBold,
+    italic: opts.headingItalic,
+    emphasized: opts.headingEmphasized,
+    underlined: !opts.headingEmphasized && opts.headingUnderlined,
+  });
+  const clipboardSlice = new Slice(output, 0, 0);
+  const ok = await writeClipboardHtml(
+    container.innerHTML,
+    outNodes.map((node) => node.textContent).join('\n\n'),
+  );
+  if (!ok) {
+    clearLinkedCopy();
+    const cleanup = view.state.tr;
+    view.state.doc.descendants((node, pos) => {
+      if (!node.isInline) return true;
+      const anchor = node.marks.find((mark) => mark.type === anchorType);
+      const ids = String(anchor?.attrs['ids'] ?? '').split(' ').filter(Boolean);
+      if (!ids.includes(anchorId)) return false;
+      cleanup.removeMark(pos, pos + node.nodeSize, anchorType);
+      const remaining = ids.filter((id) => id !== anchorId);
+      if (remaining.length) {
+        cleanup.addMark(
+          pos,
+          pos + node.nodeSize,
+          anchorType.create({ ids: remaining.join(' ') }),
+        );
+      }
+      return false;
+    });
+    if (cleanup.docChanged) view.dispatch(cleanup);
+    return 'clipboard-failed';
+  }
+  rememberLinkedCopy(new Slice(Fragment.from(liveNode), 0, 0), view, clipboardSlice);
+  return 'copied';
 }
 
 /** The [before, after] range of the nearest enclosing card / analytic_unit

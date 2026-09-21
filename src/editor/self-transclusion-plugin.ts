@@ -29,7 +29,11 @@
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { Transaction, EditorState } from 'prosemirror-state';
 import type { Node as PMNode, Fragment } from 'prosemirror-model';
-import { isSelfRef, makeProjectionResolver } from './self-transclusion.js';
+import {
+  isSelfRef,
+  makeProjectionResolver,
+  resolveLiveReferenceProjection,
+} from './self-transclusion.js';
 import { rewriteHeadingIdsInFragment } from './transclusion.js';
 
 export const selfRefPluginKey = new PluginKey('selfRefContent');
@@ -89,8 +93,12 @@ function rederiveTransaction(state: EditorState): Transaction | null {
   const edits: { from: number; to: number; content: Fragment }[] = [];
   doc.descendants((node, pos) => {
     if (!isSelfRef(node)) return true;
+    const anchorId = String(node.attrs['source_anchor_id'] ?? '');
     const target = rewriteHeadingIdsInFragment(
-      resolve(String(node.attrs['source_heading_id'] ?? '')).content,
+      (anchorId
+        ? resolveLiveReferenceProjection(doc, anchorId)
+        : resolve(String(node.attrs['source_heading_id'] ?? ''))
+      ).content,
       () => '',
     );
     if (!node.content.eq(target)) edits.push({ from: pos + 1, to: pos + node.nodeSize - 1, content: target });

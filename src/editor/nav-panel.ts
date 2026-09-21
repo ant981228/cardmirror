@@ -28,7 +28,7 @@ import {
 import { registerOpenContextMenu, clearOpenContextMenu } from './context-menu-registry.js';
 import { dragController, type DragItem, type DragSurface } from './drag-controller.js';
 import { isTransclusionNode, zoneIdentity } from './transclusion.js';
-import { isSelfRef, resolveSelfProjection } from './self-transclusion.js';
+import { isSelfRef, resolveSelfRefProjection } from './self-transclusion.js';
 import { transclusionDivergenceKey } from './transclusion-divergence-plugin.js';
 
 /** Outline entries including the content projected by intra-doc live windows
@@ -41,7 +41,7 @@ function collectOutlineWithWindows(doc: PMNode): HeadingEntry[] {
   const projected: HeadingEntry[] = [];
   doc.descendants((node, pos) => {
     if (!isSelfRef(node)) return true;
-    const proj = resolveSelfProjection(doc, String(node.attrs['source_heading_id'] ?? ''));
+    const proj = resolveSelfRefProjection(doc, node);
     if (proj.missing || proj.content.size === 0) return false;
     const wrapped = doc.type.create(null, proj.content);
     for (const e of collectHeadings(wrapped)) {
@@ -2531,4 +2531,3 @@ function maybeCloseContextMenu(e: MouseEvent | KeyboardEvent): void {
 }
 
 /** Minimal CSS.escape polyfill for jsdom-style environments. */
-

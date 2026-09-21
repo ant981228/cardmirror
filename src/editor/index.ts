@@ -50,7 +50,7 @@ import {
 import { promptForChoice, promptForText, promptForRouteChoice, alertDialog, confirmDialog, installModalKeys, armDialogFocus } from './text-prompt.js';
 import { pushOverlay, popOverlay, isTopOverlay } from './overlay-stack.js';
 import { openDocMenu } from './doc-menu-ui.js';
-import { createReference } from './create-reference.js';
+import { createLiveReference, createReference } from './create-reference.js';
 import { showToast } from './toast.js';
 import { maybeDecryptForOpen, OpenCancelledError, UnsupportedEncryptionError } from './open-encrypted.js';
 import { CLIPBOARD_BUSY_MESSAGE, writeClipboardHtml } from './clipboard-write.js';
@@ -1669,7 +1669,7 @@ const ribbonContext: RibbonContext = {
   },
   runCreateReference: () => {
     if (!view) return;
-    void createReference(view.state, effectivePtForNode, {
+    const options = {
       includeHeading: settings.get('createReferenceIncludeHeading'),
       delimiter: settings.get('createReferenceDelimiter'),
       includeCite: settings.get('createReferenceIncludeCite'),
@@ -1682,7 +1682,11 @@ const ribbonContext: RibbonContext = {
       shrinkPt: settings.get('createReferenceShrinkPt'),
       highlightMode: settings.get('createReferenceHighlightMode'),
       useGray50: settings.get('forReferenceUseGray50'),
-    }).then((result) => {
+    };
+    const result = settings.get('createReferenceLive')
+      ? createLiveReference(view, effectivePtForNode, options)
+      : createReference(view.state, effectivePtForNode, options);
+    void result.then((result) => {
       // Every outcome gets surfaced — the silent-failure version of
       // this taught a user that the button "needs five clicks".
       if (result === 'copied') showToast('Copied!');

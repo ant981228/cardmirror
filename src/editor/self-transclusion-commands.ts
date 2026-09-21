@@ -23,7 +23,8 @@ import {
   SELF_REF_NODE,
   isSelfRef,
   createSelfRefNode,
-  resolveSelfProjection,
+  liveReferenceSourceRange,
+  resolveSelfRefProjection,
 } from './self-transclusion.js';
 
 /** If the current selection is a whole-node selection ON a live view (`self_ref`
@@ -118,7 +119,20 @@ export function repointSelfRef(view: EditorView, pos: number, headingId: string)
 }
 
 /** Scroll to (and place the cursor at) the mirrored source heading. */
-export function jumpToSelfRefSource(view: EditorView, headingId: string): boolean {
+export function jumpToSelfRefSource(
+  view: EditorView,
+  headingId: string,
+  anchorId = '',
+): boolean {
+  if (anchorId) {
+    const range = liveReferenceSourceRange(view.state.doc, anchorId);
+    if (!range) return false;
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, range.from, range.to)).scrollIntoView(),
+    );
+    view.focus();
+    return true;
+  }
   const entry = collectHeadings(view.state.doc, { skipCite: true }).find((h) => h.id === headingId);
   if (!entry) return false;
   try {
@@ -150,8 +164,7 @@ export function jumpToSelfRefSource(view: EditorView, headingId: string): boolea
 export function unlinkSelfRef(view: EditorView, pos: number): boolean {
   const node = view.state.doc.nodeAt(pos);
   if (!node || !isSelfRef(node)) return false;
-  const headingId = String(node.attrs['source_heading_id'] ?? '');
-  const projection = resolveSelfProjection(view.state.doc, headingId);
+  const projection = resolveSelfRefProjection(view.state.doc, node);
   const content = rewriteHeadingIdsInFragment(projection.content, newHeadingId);
   const tr = content.size
     ? view.state.tr.replaceWith(pos, pos + node.nodeSize, content)
