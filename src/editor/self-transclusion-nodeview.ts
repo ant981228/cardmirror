@@ -11,7 +11,7 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { icon, type IconName } from './icons.js';
-import { resolveSelfProjection } from './self-transclusion.js';
+import { resolveSelfRefProjection } from './self-transclusion.js';
 import {
   jumpToSelfRefSource,
   openRepickSelfRef,
@@ -24,6 +24,7 @@ class SelfRefView implements NodeView {
   readonly contentDOM: HTMLElement;
   private readonly glyphBtn: HTMLButtonElement;
   private readonly note: HTMLElement;
+  private readonly referenceHeading: HTMLElement;
   private node: PMNode;
   private readonly view: EditorView;
   private readonly getPos: () => number | undefined;
@@ -36,6 +37,8 @@ class SelfRefView implements NodeView {
 
     this.dom = document.createElement('div');
     this.dom.className = 'pmd-self-ref';
+    this.dom.classList.toggle('pmd-live-reference', !!node.attrs['source_anchor_id']);
+    this.dom.classList.toggle('pmd-live-reference-gray', node.attrs['reference_gray'] === true);
 
     this.glyphBtn = document.createElement('button');
     this.glyphBtn.type = 'button';
@@ -58,6 +61,13 @@ class SelfRefView implements NodeView {
     this.contentDOM = document.createElement('div');
     this.contentDOM.className = 'pmd-self-ref-body';
 
+    this.referenceHeading = document.createElement('div');
+    this.referenceHeading.className = 'pmd-live-reference-heading';
+    this.referenceHeading.setAttribute('contenteditable', 'false');
+    this.referenceHeading.textContent = String(node.attrs['reference_heading'] ?? '');
+    this.refreshReferenceHeadingStyle();
+    this.referenceHeading.hidden = !this.referenceHeading.textContent;
+
     // "Source not found" note (chrome — shown only when the source is missing).
     this.note = document.createElement('div');
     this.note.className = 'pmd-self-ref-note';
@@ -65,6 +75,7 @@ class SelfRefView implements NodeView {
     this.note.textContent = 'Source section not found in this document.';
 
     this.dom.appendChild(this.glyphBtn);
+    this.dom.appendChild(this.referenceHeading);
     this.dom.appendChild(this.contentDOM);
     this.dom.appendChild(this.note);
     this.refreshNote();
@@ -80,7 +91,7 @@ class SelfRefView implements NodeView {
     let missing = false;
     let cycle = false;
     try {
-      const p = resolveSelfProjection(this.view.state.doc, this.headingId());
+      const p = resolveSelfRefProjection(this.view.state.doc, this.node);
       missing = p.missing;
       cycle = p.cycle;
     } catch {
@@ -93,6 +104,13 @@ class SelfRefView implements NodeView {
 
   private sectionLabel(): string {
     return String(this.node.attrs['source_label'] ?? '').replace(/^↳\s*/, '') || 'Section';
+  }
+
+  private refreshReferenceHeadingStyle(): void {
+    this.referenceHeading.classList.toggle('pmd-live-reference-heading-bold', this.node.attrs['reference_heading_bold'] === true);
+    this.referenceHeading.classList.toggle('pmd-live-reference-heading-italic', this.node.attrs['reference_heading_italic'] === true);
+    this.referenceHeading.classList.toggle('pmd-live-reference-heading-emphasized', this.node.attrs['reference_heading_emphasized'] === true);
+    this.referenceHeading.classList.toggle('pmd-live-reference-heading-underlined', this.node.attrs['reference_heading_underlined'] === true);
   }
 
   private toggleMenu(): void {
@@ -130,18 +148,24 @@ class SelfRefView implements NodeView {
     menu.appendChild(sep);
 
     menu.appendChild(
-      this.menuItem('bookmark', 'Go to source section', () => {
+      this.menuItem('bookmark', 'Go to source', () => {
         this.closeMenu();
-        jumpToSelfRefSource(this.view, this.headingId());
+        jumpToSelfRefSource(
+          this.view,
+          this.headingId(),
+          String(this.node.attrs['source_anchor_id'] ?? ''),
+        );
       }),
     );
-    menu.appendChild(
-      this.menuItem('search', 'Re-pick source…', () => {
-        this.closeMenu();
-        const pos = this.getPos();
-        if (pos != null) openRepickSelfRef(this.view, pos);
-      }),
-    );
+    if (!this.node.attrs['source_anchor_id']) {
+      menu.appendChild(
+        this.menuItem('search', 'Re-pick source…', () => {
+          this.closeMenu();
+          const pos = this.getPos();
+          if (pos != null) openRepickSelfRef(this.view, pos);
+        }),
+      );
+    }
     menu.appendChild(
       this.menuItem('edit', 'Unlink (keep a copy)', () => {
         this.closeMenu();
@@ -209,6 +233,11 @@ class SelfRefView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    this.dom.classList.toggle('pmd-live-reference', !!node.attrs['source_anchor_id']);
+    this.dom.classList.toggle('pmd-live-reference-gray', node.attrs['reference_gray'] === true);
+    this.referenceHeading.textContent = String(node.attrs['reference_heading'] ?? '');
+    this.refreshReferenceHeadingStyle();
+    this.referenceHeading.hidden = !this.referenceHeading.textContent;
     // PM updates the children in `contentDOM` itself; we only refresh the chrome.
     this.refreshNote();
     return true;

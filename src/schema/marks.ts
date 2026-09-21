@@ -553,4 +553,26 @@ export const marks: { [name: string]: MarkSpec } = {
     ],
   },
 
+  /** Invisible source anchor for an exact-selection live reference. Multiple
+   *  reference ids share one mark so overlapping live references remain valid. */
+  live_reference_source: {
+    // Keep replacement text and typing at the excerpt edge inside the live
+    // reference; otherwise replacing the whole selection would orphan it.
+    inclusive: true,
+    attrs: {
+      ids: {
+        default: '',
+        validate: (v: unknown) => typeof v === 'string',
+      },
+      /** JSON map of reference id to the run's effective source size in points. */
+      sizes: {
+        default: '{}',
+        validate: (v: unknown) => typeof v === 'string',
+      },
+    },
+    // Render as an unlabelled span so normal copy/paste strips the private
+    // anchor instead of duplicating a live reference's source elsewhere.
+    toDOM: () => ['span', 0],
+  },
+
 };

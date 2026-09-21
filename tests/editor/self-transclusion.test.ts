@@ -5,6 +5,7 @@ import {
   isSelfRef,
   createSelfRefNode,
   resolveSelfProjection,
+  resolveLiveReferenceProjection,
   flattenSelfRefs,
   flattenSelfRefsInSlice,
   fragmentHasSelfRef,
@@ -145,6 +146,34 @@ describe('resolveSelfProjection', () => {
     const p = resolveSelfProjection(d, 'a');
     expect(p.cycle).toBe(true);
     expect(bodies(p.content)).toEqual(['c-ev']); // B's back-ref to A dropped; C kept
+  });
+});
+
+describe('resolveLiveReferenceProjection', () => {
+  it('projects only anchored text and reflects later formatting changes', () => {
+    const anchor = schema.marks['live_reference_source']!.create({ ids: 'ref-1' });
+    const highlighted = schema.marks['highlight']!.create({ color: 'yellow' });
+    const source = (marks: readonly import('prosemirror-model').Mark[]) =>
+      doc([
+        schema.nodes['card']!.createChecked(null, [
+          schema.nodes['tag']!.create({ id: 'card-1' }, schema.text('Tag')),
+          schema.nodes['card_body']!.create(null, [
+            schema.text('before '),
+            schema.text('selected', marks),
+            schema.text(' after'),
+          ]),
+        ]),
+      ]);
+
+    const first = resolveLiveReferenceProjection(source([anchor]), 'ref-1');
+    expect(first.missing).toBe(false);
+    expect(first.content.textBetween(0, first.content.size)).toBe('selected');
+    expect(first.content.firstChild!.firstChild!.marks).toHaveLength(0);
+
+    const updated = resolveLiveReferenceProjection(source([anchor, highlighted]), 'ref-1');
+    expect(updated.content.firstChild!.firstChild!.marks.map((m) => m.type.name)).toEqual([
+      'highlight',
+    ]);
   });
 });
 

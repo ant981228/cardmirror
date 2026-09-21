@@ -529,6 +529,49 @@ export const nodes: { [name: string]: NodeSpec } = {
         default: '',
         validate: (v: unknown) => typeof v === 'string',
       },
+      /** Exact-selection source. Empty means the regular heading-based view. */
+      source_anchor_id: {
+        default: '',
+        validate: (v: unknown) => typeof v === 'string',
+      },
+      /** Non-empty only for a Create Live Reference view. */
+      reference_heading: {
+        default: '',
+        validate: (v: unknown) => typeof v === 'string',
+      },
+      reference_gray: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_heading_bold: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_heading_italic: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_heading_emphasized: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_heading_underlined: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_shrink: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_shrink_pt: {
+        default: 3,
+        validate: (v: unknown) => typeof v === 'number' && Number.isFinite(v),
+      },
+      reference_highlight_mode: {
+        default: 'shading',
+        validate: (v: unknown) =>
+          v === 'shading' || v === 'convert' || v === 'keep' || v === 'remove',
+      },
     },
     parseDOM: [
       {
@@ -536,6 +579,16 @@ export const nodes: { [name: string]: NodeSpec } = {
         getAttrs: (dom: HTMLElement) => ({
           source_heading_id: dom.getAttribute('data-source-heading-id') ?? '',
           source_label: dom.getAttribute('data-source-label') ?? '',
+          source_anchor_id: dom.getAttribute('data-source-anchor-id') ?? '',
+          reference_heading: dom.getAttribute('data-reference-heading') ?? '',
+          reference_gray: dom.getAttribute('data-reference-gray') === 'true',
+          reference_heading_bold: dom.getAttribute('data-reference-heading-bold') === 'true',
+          reference_heading_italic: dom.getAttribute('data-reference-heading-italic') === 'true',
+          reference_heading_emphasized: dom.getAttribute('data-reference-heading-emphasized') === 'true',
+          reference_heading_underlined: dom.getAttribute('data-reference-heading-underlined') === 'true',
+          reference_shrink: dom.getAttribute('data-reference-shrink') === 'true',
+          reference_shrink_pt: Number(dom.getAttribute('data-reference-shrink-pt') ?? '3'),
+          reference_highlight_mode: dom.getAttribute('data-reference-highlight-mode') ?? 'shading',
         }),
       },
     ],
@@ -545,6 +598,16 @@ export const nodes: { [name: string]: NodeSpec } = {
         class: 'pmd-self-ref',
         'data-source-heading-id': String(node.attrs['source_heading_id'] ?? ''),
         'data-source-label': String(node.attrs['source_label'] ?? ''),
+        'data-source-anchor-id': String(node.attrs['source_anchor_id'] ?? ''),
+        'data-reference-heading': String(node.attrs['reference_heading'] ?? ''),
+        'data-reference-gray': String(node.attrs['reference_gray'] === true),
+        'data-reference-heading-bold': String(node.attrs['reference_heading_bold'] === true),
+        'data-reference-heading-italic': String(node.attrs['reference_heading_italic'] === true),
+        'data-reference-heading-emphasized': String(node.attrs['reference_heading_emphasized'] === true),
+        'data-reference-heading-underlined': String(node.attrs['reference_heading_underlined'] === true),
+        'data-reference-shrink': String(node.attrs['reference_shrink'] === true),
+        'data-reference-shrink-pt': String(node.attrs['reference_shrink_pt'] ?? 3),
+        'data-reference-highlight-mode': String(node.attrs['reference_highlight_mode'] ?? 'shading'),
       },
       0,
     ],

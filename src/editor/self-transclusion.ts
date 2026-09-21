@@ -14,8 +14,13 @@
  * by-value prototype needed exists here.
  */
 
-import { Fragment, Slice, type Node as PMNode, type Schema } from 'prosemirror-model';
+import { Fragment, Slice, type Mark, type Node as PMNode, type Schema } from 'prosemirror-model';
 import { extractSection, rewriteHeadingIdsInFragment, isTransclusionNode } from './transclusion.js';
+import {
+  styleReferenceText,
+  type ReferenceBodyStyle,
+} from './reference-style.js';
+import type { CreateReferenceHighlightMode } from './settings.js';
 
 export const SELF_REF_NODE = 'self_ref';
 
@@ -32,6 +37,39 @@ export function createSelfRefNode(
   const type = schema.nodes[SELF_REF_NODE];
   if (!type) throw new Error('self_ref not registered in schema');
   return type.create({ source_heading_id: headingId, source_label: label });
+}
+
+/** Build a live view of an exact body-text selection marked in the source. */
+export function createLiveReferenceNode(
+  schema: Schema,
+  anchorId: string,
+  heading: string,
+  style: {
+    gray: boolean;
+    bold: boolean;
+    italic: boolean;
+    emphasized: boolean;
+    underlined: boolean;
+    shrink: boolean;
+    shrinkPt: number;
+    highlightMode: CreateReferenceHighlightMode;
+  },
+): PMNode {
+  const type = schema.nodes[SELF_REF_NODE];
+  if (!type) throw new Error('self_ref not registered in schema');
+  return type.create({
+    source_anchor_id: anchorId,
+    source_label: 'Live reference',
+    reference_heading: heading,
+    reference_gray: style.gray,
+    reference_heading_bold: style.bold,
+    reference_heading_italic: style.italic,
+    reference_heading_emphasized: style.emphasized,
+    reference_heading_underlined: style.underlined,
+    reference_shrink: style.shrink,
+    reference_shrink_pt: style.shrinkPt,
+    reference_highlight_mode: style.highlightMode,
+  });
 }
 
 export interface Projection {
@@ -61,6 +99,105 @@ export function resolveSelfProjection(
   // linear. Cycles are broken by `onStack` (headings currently on the resolution
   // path); `visited` seeds it so an explicit ancestor set is still honored.
   return resolveMemo(doc, headingId, new Set(visited), new Map());
+}
+
+/** Resolve an exact-selection source anchor into body paragraphs. */
+export function resolveLiveReferenceProjection(
+  doc: PMNode,
+  anchorId: string,
+  style?: ReferenceBodyStyle,
+): Projection {
+  if (!anchorId) return { content: Fragment.empty, missing: true, cycle: false };
+  const anchorType = doc.type.schema.marks['live_reference_source'];
+  if (!anchorType) return { content: Fragment.empty, missing: true, cycle: false };
+  const paragraphs: PMNode[] = [];
+  doc.descendants((node) => {
+    if (node.type.name !== 'card_body') return true;
+    const children: PMNode[] = [];
+    node.forEach((child) => {
+      const anchor = child.marks.find(
+        (mark) =>
+          mark.type === anchorType &&
+          String(mark.attrs['ids'] ?? '').split(' ').includes(anchorId),
+      );
+      if (anchor) {
+        const source = child.mark(child.marks.filter((mark) => mark !== anchor));
+        let effectivePt = 11;
+        try {
+          const sizes = JSON.parse(String(anchor.attrs['sizes'] ?? '{}')) as Record<string, unknown>;
+          const stored = Number(sizes[anchorId]);
+          if (Number.isFinite(stored) && stored > 0) effectivePt = stored;
+        } catch {
+          /* malformed private metadata falls back to Normal size */
+        }
+        children.push(style ? styleReferenceText(source, effectivePt, style) : source);
+      }
+    });
+    if (children.length) paragraphs.push(node.type.create(node.attrs, children));
+    return false;
+  });
+  return {
+    content: Fragment.fromArray(paragraphs),
+    missing: paragraphs.length === 0,
+    cycle: false,
+  };
+}
+
+export function liveReferenceSourceRange(
+  doc: PMNode,
+  anchorId: string,
+): { from: number; to: number } | null {
+  const anchorType = doc.type.schema.marks['live_reference_source'];
+  if (!anchorType || !anchorId) return null;
+  let from = Infinity;
+  let to = -Infinity;
+  doc.descendants((node, pos) => {
+    if (
+      node.isInline &&
+      node.marks.some(
+        (mark) =>
+          mark.type === anchorType &&
+          String(mark.attrs['ids'] ?? '').split(' ').includes(anchorId),
+      )
+    ) {
+      from = Math.min(from, pos);
+      to = Math.max(to, pos + node.nodeSize);
+    }
+    return true;
+  });
+  return Number.isFinite(from) ? { from, to } : null;
+}
+
+/** Resolve either flavor of self_ref without duplicating the attrs branch. */
+export function resolveSelfRefProjection(doc: PMNode, node: PMNode): Projection {
+  const anchorId = String(node.attrs['source_anchor_id'] ?? '');
+  return anchorId
+    ? resolveLiveReferenceProjection(doc, anchorId, liveReferenceBodyStyle(node))
+    : resolveSelfProjection(doc, String(node.attrs['source_heading_id'] ?? ''));
+}
+
+export function liveReferenceBodyStyle(node: PMNode): ReferenceBodyStyle {
+  return {
+    shrink: node.attrs['reference_shrink'] === true,
+    shrinkPt: Number(node.attrs['reference_shrink_pt'] ?? 3),
+    highlightMode: String(node.attrs['reference_highlight_mode'] ?? 'shading') as CreateReferenceHighlightMode,
+    useGray50: node.attrs['reference_gray'] === true,
+  };
+}
+
+/** Add the reference heading when a live reference becomes ordinary content. */
+export function materializeSelfRefProjection(node: PMNode, projection: Projection): Fragment {
+  if (!node.attrs['source_anchor_id']) return projection.content;
+  const heading = String(node.attrs['reference_heading'] ?? '');
+  if (!heading) return projection.content;
+  const marks: Mark[] = [];
+  const schema = node.type.schema;
+  if (node.attrs['reference_heading_bold']) marks.push(schema.marks['bold']!.create());
+  if (node.attrs['reference_heading_italic']) marks.push(schema.marks['italic']!.create());
+  if (node.attrs['reference_heading_emphasized']) marks.push(schema.marks['emphasis_mark']!.create());
+  else if (node.attrs['reference_heading_underlined']) marks.push(schema.marks['underline_mark']!.create());
+  return Fragment.from(schema.nodes['paragraph']!.create(null, schema.text(heading, marks)))
+    .append(projection.content);
 }
 
 /**
@@ -163,19 +300,28 @@ export function flattenSelfRefsInFragment(
   if (!fragmentHasSelfRef(frag)) return frag;
   // One resolver for the whole fragment so N self_refs share the memo (linear,
   // not O(N × chain)).
-  return flattenWithResolver(frag, makeProjectionResolver(sourceDoc), freshId);
+  return flattenWithResolver(frag, sourceDoc, makeProjectionResolver(sourceDoc), freshId);
 }
 
-function flattenWithResolver(frag: Fragment, resolve: ProjectionResolver, freshId: () => string): Fragment {
+function flattenWithResolver(
+  frag: Fragment,
+  sourceDoc: PMNode,
+  resolve: ProjectionResolver,
+  freshId: () => string,
+): Fragment {
   const out: PMNode[] = [];
   frag.forEach((node) => {
     if (isSelfRef(node)) {
-      const proj = resolve(String(node.attrs['source_heading_id'] ?? ''));
-      rewriteHeadingIdsInFragment(proj.content, freshId).forEach((n) => out.push(n));
+      const anchorId = String(node.attrs['source_anchor_id'] ?? '');
+      const proj = anchorId
+        ? resolveLiveReferenceProjection(sourceDoc, anchorId, liveReferenceBodyStyle(node))
+        : resolve(String(node.attrs['source_heading_id'] ?? ''));
+      rewriteHeadingIdsInFragment(materializeSelfRefProjection(node, proj), freshId)
+        .forEach((n) => out.push(n));
       return;
     }
     if (node.content.size) {
-      out.push(node.type.create(node.attrs, flattenWithResolver(node.content, resolve, freshId), node.marks));
+      out.push(node.type.create(node.attrs, flattenWithResolver(node.content, sourceDoc, resolve, freshId), node.marks));
       return;
     }
     out.push(node);
@@ -205,11 +351,14 @@ function inlineNestedRefs(
   const out: PMNode[] = [];
   frag.forEach((node) => {
     if (isSelfRef(node)) {
-      const child = resolveMemo(doc, String(node.attrs['source_heading_id'] ?? ''), onStack, memo);
+      const anchorId = String(node.attrs['source_anchor_id'] ?? '');
+      const child = anchorId
+        ? resolveLiveReferenceProjection(doc, anchorId, liveReferenceBodyStyle(node))
+        : resolveMemo(doc, String(node.attrs['source_heading_id'] ?? ''), onStack, memo);
       if (child.cycle) state.cycle = true;
       // A missing nested source contributes nothing (its own window elsewhere
       // shows "source not found"); a resolved one inlines its content.
-      child.content.forEach((n) => out.push(n));
+      materializeSelfRefProjection(node, child).forEach((n) => out.push(n));
       return;
     }
     if (isTransclusionNode(node)) {
