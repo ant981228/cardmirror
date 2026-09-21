@@ -24,6 +24,7 @@ import {
   isSelfRef,
   createSelfRefNode,
   liveReferenceSourceRange,
+  materializeSelfRefProjection,
   resolveSelfRefProjection,
 } from './self-transclusion.js';
 
@@ -165,7 +166,10 @@ export function unlinkSelfRef(view: EditorView, pos: number): boolean {
   const node = view.state.doc.nodeAt(pos);
   if (!node || !isSelfRef(node)) return false;
   const projection = resolveSelfRefProjection(view.state.doc, node);
-  const content = rewriteHeadingIdsInFragment(projection.content, newHeadingId);
+  const content = rewriteHeadingIdsInFragment(
+    materializeSelfRefProjection(node, projection),
+    newHeadingId,
+  );
   const tr = content.size
     ? view.state.tr.replaceWith(pos, pos + node.nodeSize, content)
     : view.state.tr.delete(pos, pos + node.nodeSize); // empty/missing source → just remove

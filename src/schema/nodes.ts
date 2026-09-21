@@ -559,6 +559,19 @@ export const nodes: { [name: string]: NodeSpec } = {
         default: false,
         validate: (v: unknown) => typeof v === 'boolean',
       },
+      reference_shrink: {
+        default: false,
+        validate: (v: unknown) => typeof v === 'boolean',
+      },
+      reference_shrink_pt: {
+        default: 3,
+        validate: (v: unknown) => typeof v === 'number' && Number.isFinite(v),
+      },
+      reference_highlight_mode: {
+        default: 'shading',
+        validate: (v: unknown) =>
+          v === 'shading' || v === 'convert' || v === 'keep' || v === 'remove',
+      },
     },
     parseDOM: [
       {
@@ -573,6 +586,9 @@ export const nodes: { [name: string]: NodeSpec } = {
           reference_heading_italic: dom.getAttribute('data-reference-heading-italic') === 'true',
           reference_heading_emphasized: dom.getAttribute('data-reference-heading-emphasized') === 'true',
           reference_heading_underlined: dom.getAttribute('data-reference-heading-underlined') === 'true',
+          reference_shrink: dom.getAttribute('data-reference-shrink') === 'true',
+          reference_shrink_pt: Number(dom.getAttribute('data-reference-shrink-pt') ?? '3'),
+          reference_highlight_mode: dom.getAttribute('data-reference-highlight-mode') ?? 'shading',
         }),
       },
     ],
@@ -589,6 +605,9 @@ export const nodes: { [name: string]: NodeSpec } = {
         'data-reference-heading-italic': String(node.attrs['reference_heading_italic'] === true),
         'data-reference-heading-emphasized': String(node.attrs['reference_heading_emphasized'] === true),
         'data-reference-heading-underlined': String(node.attrs['reference_heading_underlined'] === true),
+        'data-reference-shrink': String(node.attrs['reference_shrink'] === true),
+        'data-reference-shrink-pt': String(node.attrs['reference_shrink_pt'] ?? 3),
+        'data-reference-highlight-mode': String(node.attrs['reference_highlight_mode'] ?? 'shading'),
       },
       0,
     ],

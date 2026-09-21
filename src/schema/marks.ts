@@ -564,6 +564,11 @@ export const marks: { [name: string]: MarkSpec } = {
         default: '',
         validate: (v: unknown) => typeof v === 'string',
       },
+      /** JSON map of reference id to the run's effective source size in points. */
+      sizes: {
+        default: '{}',
+        validate: (v: unknown) => typeof v === 'string',
+      },
     },
     // Render as an unlabelled span so normal copy/paste strips the private
     // anchor instead of duplicating a live reference's source elsewhere.

@@ -1,16 +1,20 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DOMParser as PMDOMParser } from 'prosemirror-model';
+import { DOMParser as PMDOMParser, Fragment } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
-import { schema } from '../../src/schema/index.js';
+import { newHeadingId, schema } from '../../src/schema/index.js';
 import {
   buildReferenceNodes,
   createLiveReference,
   type CreateReferenceOptions,
 } from '../../src/editor/create-reference.js';
 import { clearLinkedCopy, recallLinkedCopy } from '../../src/editor/clipboard-link-cache.js';
-import { isSelfRef, resolveSelfRefProjection } from '../../src/editor/self-transclusion.js';
+import {
+  flattenSelfRefsInFragment,
+  isSelfRef,
+  resolveSelfRefProjection,
+} from '../../src/editor/self-transclusion.js';
 
 const writeClipboardHtml = vi.fn(async (_html: string, _text: string) => true);
 vi.mock('../../src/editor/clipboard-write.js', () => ({
@@ -26,9 +30,9 @@ const options: CreateReferenceOptions = {
   headingItalic: false,
   headingEmphasized: false,
   headingUnderlined: false,
-  shrink: false,
+  shrink: true,
   shrinkPt: 3,
-  highlightMode: 'keep',
+  highlightMode: 'shading',
   useGray50: true,
 };
 
@@ -39,7 +43,11 @@ afterEach(() => {
 
 describe('Create Reference live mode', () => {
   it('anchors the exact selection and restores a live self_ref on same-doc paste', async () => {
-    const body = schema.nodes['card_body']!.create(null, schema.text('before selected after'));
+    const body = schema.nodes['card_body']!.create(null, [
+      schema.text('before '),
+      schema.text('selected', [schema.marks['highlight']!.create({ color: 'yellow' })]),
+      schema.text(' after'),
+    ]);
     const doc = schema.nodes['doc']!.create(null, [
       schema.nodes['card']!.createChecked(null, [
         schema.nodes['tag']!.create({ id: 'card-1' }, schema.text('Tag')),
@@ -70,13 +78,28 @@ describe('Create Reference live mode', () => {
     expect(isSelfRef(live)).toBe(true);
     expect(live.attrs['reference_heading']).toBe('<<FOR REFERENCE>>');
     expect(live.attrs['reference_gray']).toBe(true);
-    expect(resolveSelfRefProjection(view.state.doc, live).content.firstChild!.textContent).toBe(
-      'selected',
+    expect(live.attrs['reference_shrink']).toBe(true);
+    expect(live.attrs['reference_highlight_mode']).toBe('shading');
+    const projected = resolveSelfRefProjection(view.state.doc, live).content.firstChild!;
+    expect(projected.textContent).toBe('selected');
+    const marks = projected.firstChild!.marks;
+    expect(marks.find((mark) => mark.type.name === 'font_size')?.attrs['halfPoints']).toBe(16);
+    expect(marks.find((mark) => mark.type.name === 'font_color')?.attrs['color']).toBe('808080');
+    expect(marks.find((mark) => mark.type.name === 'highlight')).toBeUndefined();
+    expect(marks.find((mark) => mark.type.name === 'shading')?.attrs['color']).toBe('C0C0C0');
+    const flattened = flattenSelfRefsInFragment(Fragment.from(live), view.state.doc, newHeadingId);
+    expect(flattened.firstChild!.textContent).toBe('<<FOR REFERENCE>>');
+    expect(flattened.lastChild!.firstChild!.marks.some((mark) => mark.type.name === 'shading')).toBe(true);
+    view.dispatch(
+      view.state.tr
+        .insertText('updated', from, from + 'selected'.length)
+        .removeMark(from, from + 'updated'.length, schema.marks['highlight']!)
+        .addMark(from, from + 'updated'.length, schema.marks['underline_mark']!.create()),
     );
-    view.dispatch(view.state.tr.insertText('updated', from, from + 'selected'.length));
-    expect(resolveSelfRefProjection(view.state.doc, live).content.firstChild!.textContent).toBe(
-      'updated',
-    );
+    const updated = resolveSelfRefProjection(view.state.doc, live).content.firstChild!;
+    expect(updated.textContent).toBe('updated');
+    expect(updated.firstChild!.marks.some((mark) => mark.type.name === 'underline_mark')).toBe(true);
+    expect(updated.firstChild!.marks.some((mark) => mark.type.name === 'shading')).toBe(false);
     view.destroy();
   });
 });

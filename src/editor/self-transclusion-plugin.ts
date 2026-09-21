@@ -31,6 +31,7 @@ import type { Transaction, EditorState } from 'prosemirror-state';
 import type { Node as PMNode, Fragment } from 'prosemirror-model';
 import {
   isSelfRef,
+  liveReferenceBodyStyle,
   makeProjectionResolver,
   resolveLiveReferenceProjection,
 } from './self-transclusion.js';
@@ -96,7 +97,7 @@ function rederiveTransaction(state: EditorState): Transaction | null {
     const anchorId = String(node.attrs['source_anchor_id'] ?? '');
     const target = rewriteHeadingIdsInFragment(
       (anchorId
-        ? resolveLiveReferenceProjection(doc, anchorId)
+        ? resolveLiveReferenceProjection(doc, anchorId, liveReferenceBodyStyle(node))
         : resolve(String(node.attrs['source_heading_id'] ?? ''))
       ).content,
       () => '',

@@ -14,8 +14,13 @@
  * by-value prototype needed exists here.
  */
 
-import { Fragment, Slice, type Node as PMNode, type Schema } from 'prosemirror-model';
+import { Fragment, Slice, type Mark, type Node as PMNode, type Schema } from 'prosemirror-model';
 import { extractSection, rewriteHeadingIdsInFragment, isTransclusionNode } from './transclusion.js';
+import {
+  styleReferenceText,
+  type ReferenceBodyStyle,
+} from './reference-style.js';
+import type { CreateReferenceHighlightMode } from './settings.js';
 
 export const SELF_REF_NODE = 'self_ref';
 
@@ -45,6 +50,9 @@ export function createLiveReferenceNode(
     italic: boolean;
     emphasized: boolean;
     underlined: boolean;
+    shrink: boolean;
+    shrinkPt: number;
+    highlightMode: CreateReferenceHighlightMode;
   },
 ): PMNode {
   const type = schema.nodes[SELF_REF_NODE];
@@ -58,6 +66,9 @@ export function createLiveReferenceNode(
     reference_heading_italic: style.italic,
     reference_heading_emphasized: style.emphasized,
     reference_heading_underlined: style.underlined,
+    reference_shrink: style.shrink,
+    reference_shrink_pt: style.shrinkPt,
+    reference_highlight_mode: style.highlightMode,
   });
 }
 
@@ -91,7 +102,11 @@ export function resolveSelfProjection(
 }
 
 /** Resolve an exact-selection source anchor into body paragraphs. */
-export function resolveLiveReferenceProjection(doc: PMNode, anchorId: string): Projection {
+export function resolveLiveReferenceProjection(
+  doc: PMNode,
+  anchorId: string,
+  style?: ReferenceBodyStyle,
+): Projection {
   if (!anchorId) return { content: Fragment.empty, missing: true, cycle: false };
   const anchorType = doc.type.schema.marks['live_reference_source'];
   if (!anchorType) return { content: Fragment.empty, missing: true, cycle: false };
@@ -105,7 +120,18 @@ export function resolveLiveReferenceProjection(doc: PMNode, anchorId: string): P
           mark.type === anchorType &&
           String(mark.attrs['ids'] ?? '').split(' ').includes(anchorId),
       );
-      if (anchor) children.push(child.mark(child.marks.filter((mark) => mark !== anchor)));
+      if (anchor) {
+        const source = child.mark(child.marks.filter((mark) => mark !== anchor));
+        let effectivePt = 11;
+        try {
+          const sizes = JSON.parse(String(anchor.attrs['sizes'] ?? '{}')) as Record<string, unknown>;
+          const stored = Number(sizes[anchorId]);
+          if (Number.isFinite(stored) && stored > 0) effectivePt = stored;
+        } catch {
+          /* malformed private metadata falls back to Normal size */
+        }
+        children.push(style ? styleReferenceText(source, effectivePt, style) : source);
+      }
     });
     if (children.length) paragraphs.push(node.type.create(node.attrs, children));
     return false;
@@ -146,8 +172,32 @@ export function liveReferenceSourceRange(
 export function resolveSelfRefProjection(doc: PMNode, node: PMNode): Projection {
   const anchorId = String(node.attrs['source_anchor_id'] ?? '');
   return anchorId
-    ? resolveLiveReferenceProjection(doc, anchorId)
+    ? resolveLiveReferenceProjection(doc, anchorId, liveReferenceBodyStyle(node))
     : resolveSelfProjection(doc, String(node.attrs['source_heading_id'] ?? ''));
+}
+
+export function liveReferenceBodyStyle(node: PMNode): ReferenceBodyStyle {
+  return {
+    shrink: node.attrs['reference_shrink'] === true,
+    shrinkPt: Number(node.attrs['reference_shrink_pt'] ?? 3),
+    highlightMode: String(node.attrs['reference_highlight_mode'] ?? 'shading') as CreateReferenceHighlightMode,
+    useGray50: node.attrs['reference_gray'] === true,
+  };
+}
+
+/** Add the reference heading when a live reference becomes ordinary content. */
+export function materializeSelfRefProjection(node: PMNode, projection: Projection): Fragment {
+  if (!node.attrs['source_anchor_id']) return projection.content;
+  const heading = String(node.attrs['reference_heading'] ?? '');
+  if (!heading) return projection.content;
+  const marks: Mark[] = [];
+  const schema = node.type.schema;
+  if (node.attrs['reference_heading_bold']) marks.push(schema.marks['bold']!.create());
+  if (node.attrs['reference_heading_italic']) marks.push(schema.marks['italic']!.create());
+  if (node.attrs['reference_heading_emphasized']) marks.push(schema.marks['emphasis_mark']!.create());
+  else if (node.attrs['reference_heading_underlined']) marks.push(schema.marks['underline_mark']!.create());
+  return Fragment.from(schema.nodes['paragraph']!.create(null, schema.text(heading, marks)))
+    .append(projection.content);
 }
 
 /**
@@ -264,9 +314,10 @@ function flattenWithResolver(
     if (isSelfRef(node)) {
       const anchorId = String(node.attrs['source_anchor_id'] ?? '');
       const proj = anchorId
-        ? resolveLiveReferenceProjection(sourceDoc, anchorId)
+        ? resolveLiveReferenceProjection(sourceDoc, anchorId, liveReferenceBodyStyle(node))
         : resolve(String(node.attrs['source_heading_id'] ?? ''));
-      rewriteHeadingIdsInFragment(proj.content, freshId).forEach((n) => out.push(n));
+      rewriteHeadingIdsInFragment(materializeSelfRefProjection(node, proj), freshId)
+        .forEach((n) => out.push(n));
       return;
     }
     if (node.content.size) {
@@ -302,12 +353,12 @@ function inlineNestedRefs(
     if (isSelfRef(node)) {
       const anchorId = String(node.attrs['source_anchor_id'] ?? '');
       const child = anchorId
-        ? resolveLiveReferenceProjection(doc, anchorId)
+        ? resolveLiveReferenceProjection(doc, anchorId, liveReferenceBodyStyle(node))
         : resolveMemo(doc, String(node.attrs['source_heading_id'] ?? ''), onStack, memo);
       if (child.cycle) state.cycle = true;
       // A missing nested source contributes nothing (its own window elsewhere
       // shows "source not found"); a resolved one inlines its content.
-      child.content.forEach((n) => out.push(n));
+      materializeSelfRefProjection(node, child).forEach((n) => out.push(n));
       return;
     }
     if (isTransclusionNode(node)) {
