@@ -198,11 +198,13 @@ interface HeadingHit {
 
 /** Flat list of all heading-anchored nodes in the doc, in
  *  document order. Same set the nav-panel uses (TYPE_TO_LEVEL
- *  from `headings.ts`): pocket / hat / block / tag / analytic. */
-function collectHeadingPositions(doc: PMNode): HeadingHit[] {
+ *  from `headings.ts`): pocket / hat / block / tag / analytic.
+ *  `onlyType` narrows it to one node type (the Next / Previous
+ *  Pocket … Tag commands). */
+function collectHeadingPositions(doc: PMNode, onlyType?: string): HeadingHit[] {
   const out: HeadingHit[] = [];
   doc.descendants((node, pos) => {
-    if (node.type.name in TYPE_TO_LEVEL) {
+    if (onlyType ? node.type.name === onlyType : node.type.name in TYPE_TO_LEVEL) {
       out.push({ pos });
     }
     // Descend through non-textblock containers only (card, analytic_unit,
@@ -298,6 +300,30 @@ function destNextHeading(state: EditorState): number | null {
   const headings = collectHeadingPositions(state.doc);
   const caret = state.selection.head;
   for (const h of headings) {
+    const start = h.pos + 1;
+    if (start > caret) return start;
+  }
+  return null;
+}
+
+/** Previous / next heading of ONE type (`pocket` / `hat` / `block` /
+ *  `tag`), for the bindable Next / Previous Pocket … Tag commands.
+ *  Previous has PageUp's shape: the start of the one the caret is in
+ *  (past its start), else the one before. Every other heading type is
+ *  skipped over. */
+function destPrevHeadingOfType(state: EditorState, type: string): number | null {
+  const caret = state.selection.head;
+  const headings = collectHeadingPositions(state.doc, type);
+  for (let i = headings.length - 1; i >= 0; i--) {
+    const start = headings[i]!.pos + 1;
+    if (start < caret) return start;
+  }
+  return null;
+}
+
+function destNextHeadingOfType(state: EditorState, type: string): number | null {
+  const caret = state.selection.head;
+  for (const h of collectHeadingPositions(state.doc, type)) {
     const start = h.pos + 1;
     if (start > caret) return start;
   }
@@ -486,6 +512,17 @@ const { move: moveCaretToPrevHeading, extend: extendSelectionToPrevHeading } =
   commandPair(destPrevHeading);
 const { move: moveCaretToNextHeading, extend: extendSelectionToNextHeading } =
   commandPair(destNextHeading);
+
+/** Caret-move commands for the ribbon registry's `nextPocket` …
+ *  `prevTag` (no default keys). No-op (false) when there's no
+ *  heading of that type in that direction. */
+export function moveToHeadingOfType(type: string, dir: 'prev' | 'next'): Command {
+  return commandPair(
+    dir === 'prev'
+      ? (state) => destPrevHeadingOfType(state, type)
+      : (state) => destNextHeadingOfType(state, type),
+  ).move;
+}
 
 // ─── The keymap plugin ─────────────────────────────────────────────
 

@@ -41,6 +41,7 @@ import type { EditorView } from 'prosemirror-view';
 import { toggleMark } from 'prosemirror-commands';
 import { undo as historyUndo, redo as historyRedo } from 'prosemirror-history';
 import { toggleReadingMarkerCommand } from './reading-marker.js';
+import { moveToHeadingOfType } from './word-selection-keymap.js';
 import { convertCardsToReadMode } from './convert-cards-to-read-mode.js';
 import { openFootnoteEditor } from './footnote-popover.js';
 import { flipQuoteDirection } from './flip-quote-direction.js';
@@ -4398,6 +4399,16 @@ export type RibbonCommandId =
   // ignored. No default bindings — wire up via Settings → Keyboard shortcuts.
   | 'selectCurrentHeading'
   | 'deleteCurrentHeading'
+  // Jump the caret to the next / previous heading of ONE level —
+  // PageUp / PageDown stop at every heading. No default bindings.
+  | 'nextPocket'
+  | 'prevPocket'
+  | 'nextHat'
+  | 'prevHat'
+  | 'nextBlock'
+  | 'prevBlock'
+  | 'nextTag'
+  | 'prevTag'
   // Auto-numbering skeleton authoring (NUMBERING_PLAN.md §4).
   | 'toggleNumberRole'
   | 'toggleSubRole'
@@ -4639,6 +4650,14 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'previewReceived',
   'selectCurrentHeading',
   'deleteCurrentHeading',
+  'nextPocket',
+  'prevPocket',
+  'nextHat',
+  'prevHat',
+  'nextBlock',
+  'prevBlock',
+  'nextTag',
+  'prevTag',
   'toggleNumberRole',
   'toggleSubRole',
   'toggleNumRestart',
@@ -4836,6 +4855,14 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   previewReceived: 'Preview Received Card',
   selectCurrentHeading: 'Select Current Heading',
   deleteCurrentHeading: 'Delete Current Heading',
+  nextPocket: 'Go to Next Pocket',
+  prevPocket: 'Go to Previous Pocket',
+  nextHat: 'Go to Next Hat',
+  prevHat: 'Go to Previous Hat',
+  nextBlock: 'Go to Next Block',
+  prevBlock: 'Go to Previous Block',
+  nextTag: 'Go to Next Tag',
+  prevTag: 'Go to Previous Tag',
   toggleNumberRole: 'Number: Toggle Number Role',
   toggleSubRole: 'Number: Toggle Substructure Role',
   toggleNumRestart: 'Number: Toggle Start-Over-Here',
@@ -4942,6 +4969,14 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   ],
   // show/hide ⇄ toggle visibility pairs
   toggleCommentsVisible: ['toggle comments', 'comments'],
+  nextPocket: ['jump to next pocket', 'next heading', 'navigate'],
+  prevPocket: ['jump to previous pocket', 'previous heading', 'navigate'],
+  nextHat: ['jump to next hat', 'next heading', 'navigate'],
+  prevHat: ['jump to previous hat', 'previous heading', 'navigate'],
+  nextBlock: ['jump to next block', 'next heading', 'navigate'],
+  prevBlock: ['jump to previous block', 'previous heading', 'navigate'],
+  nextTag: ['jump to next tag', 'next heading', 'navigate'],
+  prevTag: ['jump to previous tag', 'previous heading', 'navigate'],
   toggleNavPane: ['toggle navigation pane', 'toggle nav pane', 'sidebar', 'outline pane'],
   convertCardsToReadMode: ['zap card', 'zap cards'],
   toggleReadMode: ['show read mode', 'hide read mode', 'invisibility mode'],
@@ -5221,6 +5256,15 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   previewReceived: '',
   selectCurrentHeading: 'Alt-a',
   deleteCurrentHeading: '',
+  // No defaults: PageUp / PageDown already jump by any heading.
+  nextPocket: '',
+  prevPocket: '',
+  nextHat: '',
+  prevHat: '',
+  nextBlock: '',
+  prevBlock: '',
+  nextTag: '',
+  prevTag: '',
   toggleNumberRole: 'Mod-Alt-1',
   toggleSubRole: 'Mod-Alt-2',
   toggleNumRestart: 'Mod-Alt-3',
@@ -6311,6 +6355,22 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
         ctx.previewReceived();
         return true;
       };
+    case 'nextPocket':
+      return moveToHeadingOfType('pocket', 'next');
+    case 'prevPocket':
+      return moveToHeadingOfType('pocket', 'prev');
+    case 'nextHat':
+      return moveToHeadingOfType('hat', 'next');
+    case 'prevHat':
+      return moveToHeadingOfType('hat', 'prev');
+    case 'nextBlock':
+      return moveToHeadingOfType('block', 'next');
+    case 'prevBlock':
+      return moveToHeadingOfType('block', 'prev');
+    case 'nextTag':
+      return moveToHeadingOfType('tag', 'next');
+    case 'prevTag':
+      return moveToHeadingOfType('tag', 'prev');
     case 'selectCurrentHeading':
       return (_state, dispatch) => {
         if (!dispatch) return true;

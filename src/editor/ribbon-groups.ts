@@ -281,6 +281,19 @@ export const RIBBON_GROUPS: RibbonGroup[] = [
     commands: ['selectSimilar'],
   },
   {
+    title: 'Navigate',
+    commands: [
+      'nextPocket',
+      'prevPocket',
+      'nextHat',
+      'prevHat',
+      'nextBlock',
+      'prevBlock',
+      'nextTag',
+      'prevTag',
+    ],
+  },
+  {
     title: 'Cleanup',
     commands: [
       'convertAnalyticsToTags',
