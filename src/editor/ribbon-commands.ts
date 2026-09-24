@@ -4430,6 +4430,12 @@ export type RibbonCommandId =
   | 'openFindReplace'
   | 'openFindByProximity'
   | 'toggleNavPane'
+  // Set the navigation pane's depth, same as its 1 · 2 · 3 · 4 buttons.
+  // No default bindings.
+  | 'setNavDepth1'
+  | 'setNavDepth2'
+  | 'setNavDepth3'
+  | 'setNavDepth4'
   // Commands that ship without a default binding — bindable via
   // Settings → Keyboard shortcuts. Each maps to a ribbon button or
   // menu item.
@@ -4667,6 +4673,10 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'openFindReplace',
   'openFindByProximity',
   'toggleNavPane',
+  'setNavDepth1',
+  'setNavDepth2',
+  'setNavDepth3',
+  'setNavDepth4',
   // Bindable ribbon actions with no default keys.
   'adjustFontSizeUp',
   'adjustFontSizeDown',
@@ -4864,6 +4874,10 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   openFindReplace: 'Find and Replace',
   openFindByProximity: 'Find Without Category Grouping',
   toggleNavPane: 'Show / Hide Navigation Pane',
+  setNavDepth1: 'Navigation Pane: Show Level 1 (Pockets)',
+  setNavDepth2: 'Navigation Pane: Show Levels 1–2 (Hats)',
+  setNavDepth3: 'Navigation Pane: Show Levels 1–3 (Blocks)',
+  setNavDepth4: 'Navigation Pane: Show Levels 1–4 (Tags)',
   adjustFontSizeUp: 'Increase Font Size by 1pt',
   adjustFontSizeDown: 'Decrease Font Size by 1pt',
   applyFontColor: 'Apply Font Color',
@@ -4943,6 +4957,10 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   // show/hide ⇄ toggle visibility pairs
   toggleCommentsVisible: ['toggle comments', 'comments'],
   toggleNavPane: ['toggle navigation pane', 'toggle nav pane', 'sidebar', 'outline pane'],
+  setNavDepth1: ['nav depth', 'navigation depth', 'outline level', 'level 1', 'pockets'],
+  setNavDepth2: ['nav depth', 'navigation depth', 'outline level', 'level 2', 'hats'],
+  setNavDepth3: ['nav depth', 'navigation depth', 'outline level', 'level 3', 'blocks'],
+  setNavDepth4: ['nav depth', 'navigation depth', 'outline level', 'level 4', 'tags'],
   convertCardsToReadMode: ['zap card', 'zap cards'],
   toggleReadMode: ['show read mode', 'hide read mode', 'invisibility mode'],
   toggleReaderView: ['reading view', 'reader view', 'paginated view', 'read view', 'book view', 'columns'],
@@ -5275,6 +5293,11 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   // ribbon + nav-pane × + pull-tab; the keybinding is a power-
   // user convenience layer, not a discoverable default.
   toggleNavPane: '',
+  // No defaults — the pane's own 1–4 buttons are the primary UI.
+  setNavDepth1: '',
+  setNavDepth2: '',
+  setNavDepth3: '',
+  setNavDepth4: '',
   // Ribbon actions with no default key — all already reachable via
   // the ribbon, so a default chord would be noise. Bindable in
   // Settings → Keyboard shortcuts.
@@ -5539,6 +5562,10 @@ export interface RibbonContext {
    *  (transient), so toggling in one window leaves siblings
    *  untouched. */
   toggleNavPane: () => void;
+  /** Set the focused document's navigation-pane depth, exactly as
+   *  clicking its level button would (transient, per-panel — never
+   *  written to settings). */
+  setNavDepth: (level: 1 | 2 | 3 | 4) => void;
   /** Most-recently-picked font color (hex, no `#`, e.g. `"FF0000"`)
    *  or `null` when the user has chosen "Automatic" / no explicit
    *  color. Read at invocation time by the `applyFontColor` command
@@ -5683,6 +5710,7 @@ const DEFAULT_RIBBON_CONTEXT: RibbonContext = {
   openFindReplace: () => {},
   openFindByProximity: () => {},
   toggleNavPane: () => {},
+  setNavDepth: () => {},
   lastFontColor: () => null,
   openSettings: () => {},
   minimizeWindow: () => {},
@@ -6497,6 +6525,17 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
         ctx.toggleNavPane();
         return true;
       };
+    case 'setNavDepth1':
+    case 'setNavDepth2':
+    case 'setNavDepth3':
+    case 'setNavDepth4': {
+      const level = Number(id.slice(-1)) as 1 | 2 | 3 | 4;
+      return (_state, dispatch) => {
+        if (!dispatch) return true;
+        ctx.setNavDepth(level);
+        return true;
+      };
+    }
     // ─── No-default-binding commands (keybinding parity for
     //     ribbon-button / menu actions) ──────────────────────────
     case 'adjustFontSizeUp':

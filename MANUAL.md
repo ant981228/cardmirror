@@ -291,6 +291,10 @@ mirrors Word's Navigation Pane, but does more:
   expansions. Changing depth keeps the section your cursor is in at the
   top of the outline (turn off **Navigation pane follows the cursor**
   in Settings → General to return to the top of the document instead).
+  To change depth from the keyboard, bind the **Navigation Pane: Show
+  Level 1** … **Show Levels 1–4** commands in Settings → Keyboard
+  shortcuts (unbound by default); they act on the focused document's
+  pane, exactly like the buttons.
 - **Multi-select** — Mod-click adds an entry to the selection,
   Shift-click selects a contiguous range.
 - **Reorder** — drag an entry (or a multi-selection) up or down. It
