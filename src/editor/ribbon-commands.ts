@@ -36,7 +36,7 @@
 
 import { linkUrls } from './autolink.js';
 import { Fragment, type Mark, type MarkType, type Node as PMNode, type ResolvedPos } from 'prosemirror-model';
-import { Selection, TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
+import { EditorState, Selection, TextSelection, type Command, type Transaction } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { toggleMark } from 'prosemirror-commands';
 import { undo as historyUndo, redo as historyRedo } from 'prosemirror-history';
@@ -3019,6 +3019,40 @@ export function shrinkText(
   return sizeCycleCommand(effectivePt, normalPt, restoreOmissions, protectionPatterns, nextShrinkSize);
 }
 
+/** Condense With Warning, then Shrink over the condensed text, in one
+ *  transaction (one undo). Unbound by default. The shrink runs on the
+ *  whole replaced span (pause marker, merged paragraph, resume marker)
+ *  with Shrink's own rules, so the markers stay at Normal size when the
+ *  shrink setting that protects omissions and markers is on. When there
+ *  is nothing left to shrink, the condense still lands on its own. */
+export function condenseAndShrink(condense: Command, shrink: Command): Command {
+  return (state, dispatch) => {
+    let condenseTr: Transaction | null = null;
+    if (!condense(state, (tr) => { condenseTr = tr; })) return false;
+    if (!dispatch) return true;
+    const tr: Transaction = condenseTr!;
+    // Positions inside the replaced range map to its edges, so the
+    // original selection's ends cover everything condense inserted.
+    const { from, to } = state.selection;
+    const spanFrom = tr.mapping.map(from, -1);
+    const spanTo = tr.mapping.map(to, 1);
+    // A bare state over the condensed doc, not `state.apply(tr)`: that
+    // would run plugins' appendTransaction, whose extra steps aren't in
+    // `tr`, and the shrink steps would land at the wrong positions.
+    const afterCondense = EditorState.create({
+      doc: tr.doc,
+      selection: TextSelection.between(tr.doc.resolve(spanFrom), tr.doc.resolve(spanTo)),
+    });
+    shrink(afterCondense, (shrinkTr) => {
+      for (const step of shrinkTr.steps) tr.step(step);
+    });
+    // Leave the caret where Condense With Warning alone would.
+    tr.setSelection(state.selection.map(tr.doc, tr.mapping));
+    dispatch(tr);
+    return true;
+  };
+}
+
 /** Restore shrink-scope text straight to Normal size — the inverse of
  *  the shrink cycle, sharing its scope/eligibility/protection logic. */
 export function regrowText(
@@ -4299,6 +4333,7 @@ export type RibbonCommandId =
   | 'condenseNoIntegrity'
   | 'condenseNoIntegrityWithPilcrows'
   | 'condenseWithWarning'
+  | 'condenseAndShrink'
   | 'uncondense'
   | 'toggleCase'
   | 'copyPreviousCite'
@@ -4544,6 +4579,7 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'condenseNoIntegrity',
   'condenseNoIntegrityWithPilcrows',
   'condenseWithWarning',
+  'condenseAndShrink',
   'uncondense',
   'toggleCase',
   'copyPreviousCite',
@@ -4741,6 +4777,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   condenseNoIntegrity: 'Condense Without Paragraph Integrity',
   condenseNoIntegrityWithPilcrows: 'Condense Without Paragraph Integrity (With Pilcrows)',
   condenseWithWarning: 'Condense With Warning',
+  condenseAndShrink: 'Condense With Warning and Shrink',
   uncondense: 'Uncondense',
   toggleCase: 'Toggle Case',
   copyPreviousCite: 'Copy Previous Cite',
@@ -4959,6 +4996,7 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   standardizeShadingExcept: ['standardize background except', 'standardize shading except', 'exception shading'],
   regrow: ['unshrink', 'regrow', 'restore text size', 'unshrink card text'],
   smartShrink: ['smart shrink', 'deep shrink'],
+  condenseAndShrink: ['fast condense', 'condense and shrink', 'condense shrink'],
   aiAskAboutSelection: ['question'],
   reformatAllCites: ['reformat all cites', 'reformat cites', 'all cites', 'every cite', 'bulk cite'],
   pasteAsText: ['paste without formatting', 'paste unformatted', 'paste text'],
@@ -5109,6 +5147,7 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   condenseNoIntegrity: 'Alt-F3',
   condenseNoIntegrityWithPilcrows: 'Mod-Alt-F3',
   condenseWithWarning: '',
+  condenseAndShrink: '',
   uncondense: 'Mod-Alt-Shift-F3',
   toggleCase: 'Shift-F3',
   copyPreviousCite: 'Alt-F8',
@@ -5779,6 +5818,16 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
         condenseMerge({ withPilcrows: true, headingMode: ctx.headingMode() })(state, dispatch);
     case 'condenseWithWarning':
       return condenseWithWarning(ctx.condenseWarningMarkers);
+    case 'condenseAndShrink':
+      return condenseAndShrink(
+        condenseWithWarning(ctx.condenseWarningMarkers),
+        shrinkText(
+          ctx.effectivePtForNode,
+          ctx.normalPt,
+          ctx.shrinkRestoresOmissionsToNormal,
+          ctx.shrinkProtectionPatterns,
+        ),
+      );
     case 'uncondense': return uncondense();
     case 'toggleCase': return toggleCase();
     case 'copyPreviousCite': return copyPreviousCite();
