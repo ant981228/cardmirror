@@ -5,6 +5,16 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **Emphasis + Background Color.** A new command (Search Everything;
+  unbound, so give it a key in Settings → Keyboard shortcuts) applies
+  Emphasis and the active background color in one keystroke and one
+  undo. Emphasis on its own removes background color, so doing them
+  one at a time in the wrong order used to lose the background.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added
