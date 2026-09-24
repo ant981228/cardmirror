@@ -2908,9 +2908,13 @@ class MultiPaneShell {
       ({ doc, threads, docId } = await fromDocxFull(openBytes));
     }
     const slot = this.slots[target];
-    // An Untitled doc nobody has touched gives up its place to the file
-    // (VS Code / Sublime behavior), rather than staying stacked under it.
-    const replaced = slot.visible && isReplaceableUntitled(slot.visible) ? slot.visible : null;
+    // With the setting on, an Untitled doc nobody has touched gives up its
+    // place to the file (VS Code / Sublime behavior), rather than staying
+    // stacked under it.
+    const replaced =
+      settings.get('openReplacesUntitled') && slot.visible && isReplaceableUntitled(slot.visible)
+        ? slot.visible
+        : null;
     const record = buildDocRecord(opened.name, doc, slot, {
       handle: opened.handle ?? null,
       format,

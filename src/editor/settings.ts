@@ -1589,6 +1589,10 @@ export interface Settings {
    *  (2 full + edge of 3rd visible). With 1 or 2 active slots the
    *  two modes render identically. */
   multiDocLayoutMode: 'compact' | 'wide';
+  /** Three-pane: opening a file into a slot whose visible doc is an
+   *  untouched Untitled (never saved, never edited) closes that doc
+   *  instead of stacking the file on top of it. Off by default. */
+  openReplacesUntitled: boolean;
   /** Quick Cards: tags currently active in the search-palette filter
    *  (edited by the Tag Picker). Empty = no filter (all cards in
    *  scope); non-empty scopes search to cards with >=1 active tag.
@@ -2004,6 +2008,7 @@ const DEFAULTS: Settings = {
   multiDocWorkspace: false,
   mobileLayout: 'auto',
   multiDocLayoutMode: 'compact',
+  openReplacesUntitled: false,
   quickCardActiveTags: [],
   cardCutterEnabled: false,
   cardCutterEnginePath: '',
@@ -2300,6 +2305,17 @@ export const SETTING_METADATA: SettingMeta[] = [
     category: 'general',
     section: 'Workspace',
     dependsOn: 'multiDocWorkspace',
+  },
+  {
+    key: 'openReplacesUntitled',
+    label: 'Opening a file replaces an untouched Untitled doc',
+    description:
+      "Off by default. On, opening a file into a slot that's showing a blank Untitled document you haven't typed in or saved closes that document, so the file takes its place instead of stacking on top of it. An Untitled doc you've typed in (even if you deleted it again), the speech doc, and co-edited docs are always kept.",
+    kind: 'toggle',
+    category: 'general',
+    section: 'Workspace',
+    dependsOn: 'multiDocWorkspace',
+    aliases: ['replace untitled', 'replace empty document', 'close blank document'],
   },
   {
     key: 'navMaxLevel',
@@ -5106,6 +5122,7 @@ function sanitize(s: Settings): Settings {
       typeof s.googleTranslateApiKey === 'string' ? s.googleTranslateApiKey.trim() : '',
     prependTranslationMarker: s.prependTranslationMarker === false ? false : true,
     multiDocWorkspace: !!s.multiDocWorkspace,
+    openReplacesUntitled: s.openReplacesUntitled === true,
     mobileLayout:
       s.mobileLayout === 'mobile' || s.mobileLayout === 'desktop'
         ? s.mobileLayout
