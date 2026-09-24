@@ -2629,7 +2629,7 @@ class MultiPaneShell {
     const host = getHost();
     let opened: OpenedFile[];
     try {
-      if (host.openFiles) {
+      if (settings.get('openMultipleFiles') && host.openFiles) {
         opened = await host.openFiles();
       } else {
         const one = await host.openFile();

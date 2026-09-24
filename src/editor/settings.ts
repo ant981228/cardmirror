@@ -1080,6 +1080,9 @@ export interface Settings {
    *  commands). Off by default: nothing is recorded and the section
    *  never renders until it is on. */
   lastWorkspaceEnabled: boolean;
+  /** Desktop: the Open dialog takes a multi-selection (one slot for the
+   *  batch in three-pane, one window each otherwise). Off by default. */
+  openMultipleFiles: boolean;
   /** Arrange Windows: which side of the screen the speech doc takes
    *  (every other window goes to the other side). */
   arrangeSpeechSide: 'left' | 'right';
@@ -1896,6 +1899,7 @@ const DEFAULTS: Settings = {
   wordCountOrder: 'doc-container-remaining',
   wordCountOrderReadMode: 'doc-container-remaining',
   lastWorkspaceEnabled: false,
+  openMultipleFiles: false,
   arrangeSpeechSide: 'right',
   arrangeSpeechPct: 50,
   displaySizes: { ...DEFAULT_DISPLAY_SIZES },
@@ -2269,6 +2273,17 @@ export const SETTING_METADATA: SettingMeta[] = [
     section: 'Workspace',
     electronOnly: true,
     aliases: ['last workspace', 'reopen documents', 'restore session', 'remember open documents'],
+  },
+  {
+    key: 'openMultipleFiles',
+    label: 'Open several files at once',
+    description:
+      "Off by default. On, the Open dialog lets you pick several files (Shift-click or Mod-click). In the three-pane workspace you choose one slot for the whole batch and they stack there (Ctrl-Tab cycles them); a slot's own Open button loads them into that slot. Otherwise each file opens in its own window. Desktop only.",
+    kind: 'toggle',
+    category: 'general',
+    section: 'Workspace',
+    electronOnly: true,
+    aliases: ['open multiple files', 'multi-select open', 'open several documents'],
   },
   {
     key: 'arrangeSpeechSide',
@@ -4843,6 +4858,7 @@ function sanitize(s: Settings): Settings {
     wordCountOrder: isWordCountOrder(s.wordCountOrder) ? s.wordCountOrder : DEFAULT_WORD_COUNT_ORDER,
     wordCountOrderReadMode: isWordCountOrder(s.wordCountOrderReadMode) ? s.wordCountOrderReadMode : DEFAULT_WORD_COUNT_ORDER,
     lastWorkspaceEnabled: s.lastWorkspaceEnabled === true,
+    openMultipleFiles: s.openMultipleFiles === true,
     arrangeSpeechSide: s.arrangeSpeechSide === 'left' ? 'left' : 'right',
     arrangeSpeechPct:
       typeof s.arrangeSpeechPct === 'number' && Number.isFinite(s.arrangeSpeechPct)

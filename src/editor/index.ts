@@ -6695,11 +6695,12 @@ function saveFiltersForFormat(format: 'cmir' | 'docx'): { name: string; extensio
  *  single-doc mode mounts it as the current view. */
 async function runOpenFlow(): Promise<void> {
   const host = getHost();
-  // Multi-select only where every pick has somewhere to go: the
-  // three-pane workspace (one slot for the batch) or window mode (one
-  // window each). A web single-doc window can hold one doc, so it keeps
-  // the single picker.
-  const multi = host.openFiles && (multiDocActive || host.canSpawnWindow);
+  // Multi-select (a setting, off by default) only where every pick has
+  // somewhere to go: the three-pane workspace (one slot for the batch)
+  // or window mode (one window each). A web single-doc window can hold
+  // one doc, so it keeps the single picker.
+  const multi =
+    settings.get('openMultipleFiles') && host.openFiles && (multiDocActive || host.canSpawnWindow);
   let opened: OpenedFile[];
   try {
     if (multi) {
