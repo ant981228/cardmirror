@@ -1300,6 +1300,12 @@ Opening a third document, expanding a slot, or emptying one hands the widths
 back to the normal layout. Desktop only — a browser cannot place its own
 windows, so the command does not appear in the web edition.
 
+New Speech Document normally asks which slot to use. Turn on **Settings →
+General → Workspace → New speech documents open on the speech doc side** (off
+by default) and it skips the question: the new speech doc opens in the slot on
+the side set above (Slot 3 for right, Slot 1 for left), so it's already where
+Arrange Windows would put it.
+
 ### Send-to-speech and the dropzone
 
 Assemble a speech document by sending cards into it:

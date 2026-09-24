@@ -1086,6 +1086,9 @@ export interface Settings {
   /** Arrange Windows: the speech doc's share of the width, in percent
    *  (10–90); the docs side gets the rest. */
   arrangeSpeechPct: number;
+  /** Three-pane: New Speech Document skips the slot picker and opens
+   *  in the slot on the Arrange Windows speech side. Off by default. */
+  newSpeechDocInSpeechSlot: boolean;
   /**
    * Per-style font sizes (in points). See DisplaySizes for details.
    * Each field becomes a CSS custom property on `#editor`.
@@ -1898,6 +1901,7 @@ const DEFAULTS: Settings = {
   lastWorkspaceEnabled: false,
   arrangeSpeechSide: 'right',
   arrangeSpeechPct: 50,
+  newSpeechDocInSpeechSlot: false,
   displaySizes: { ...DEFAULT_DISPLAY_SIZES },
   displayParagraphSpacing: { ...DEFAULT_PARAGRAPH_SPACING },
   displayTypography: { ...DEFAULT_DISPLAY_TYPOGRAPHY },
@@ -2290,6 +2294,17 @@ export const SETTING_METADATA: SettingMeta[] = [
     category: 'general',
     section: 'Workspace',
     aliases: ['speech doc width', 'window split', 'arrange ratio'],
+  },
+  {
+    key: 'newSpeechDocInSpeechSlot',
+    label: 'New speech documents open on the speech doc side',
+    description:
+      'Off by default, so New Speech Document asks which slot to use. On, it skips that question and opens the new speech doc in the slot on the Arrange Windows speech doc side (Slot 3 for right, Slot 1 for left), stacked on whatever is there.',
+    kind: 'toggle',
+    category: 'general',
+    section: 'Workspace',
+    dependsOn: 'multiDocWorkspace',
+    aliases: ['speech doc slot', 'new speech slot', 'speech side slot'],
   },
   {
     key: 'multiDocLayoutMode',
@@ -4848,6 +4863,7 @@ function sanitize(s: Settings): Settings {
       typeof s.arrangeSpeechPct === 'number' && Number.isFinite(s.arrangeSpeechPct)
         ? Math.min(90, Math.max(10, Math.round(s.arrangeSpeechPct)))
         : 50,
+    newSpeechDocInSpeechSlot: s.newSpeechDocInSpeechSlot === true,
     displaySizes: sanitizeDisplaySizes(s.displaySizes),
     displayParagraphSpacing: sanitizeParagraphSpacing(s.displayParagraphSpacing),
     underlineFollowsFontColor: s.underlineFollowsFontColor === true,

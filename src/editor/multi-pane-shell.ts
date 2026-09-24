@@ -3032,7 +3032,11 @@ class MultiPaneShell {
     });
     if (!speechName) return;
     const trimmed = speechName;
-    const target = await this.promptForSlot(`Speech ${trimmed}`);
+    // Optionally skip the picker: the speech-side slot is where Arrange
+    // Windows would put this doc anyway.
+    const target = settings.get('newSpeechDocInSpeechSlot')
+      ? slotPlanForSpeech(settings.get('arrangeSpeechSide')).speechSlot
+      : await this.promptForSlot(`Speech ${trimmed}`);
     if (!target) return;
     const format = settings.get('defaultSpeechDocFormat');
     const filename = formatSpeechFilename(trimmed, format);
