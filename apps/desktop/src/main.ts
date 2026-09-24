@@ -814,6 +814,35 @@ ipcMain.handle('host:open-file', async (event, opts: { filters?: FileFilter[] })
   };
 });
 
+// Multi-select variant of host:open-file: the Open command lets the user
+// pick several documents at once. Each pick gets the same read grant and
+// empty-on-disk flag as the single open; a file that can't be read is
+// dropped rather than failing the whole batch.
+ipcMain.handle('host:open-files', async (event, opts: { filters?: FileFilter[] }) => {
+  const win = ownerWindow(event.sender);
+  const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+    properties: ['openFile', 'multiSelections'],
+    filters: opts?.filters?.length ? opts.filters : [],
+  });
+  if (result.canceled || result.filePaths.length === 0) return [];
+  const files = [];
+  for (const filePath of result.filePaths) {
+    grantReadPath(filePath);
+    try {
+      const bytes = await readDocumentBytes(filePath);
+      files.push({
+        name: path.basename(filePath),
+        bytes: new Uint8Array(bytes),
+        handle: filePath,
+        emptyOnDisk: await isEmptyOnDisk(filePath, bytes),
+      });
+    } catch (err) {
+      console.error('Open failed for', filePath, err);
+    }
+  }
+  return files;
+});
+
 // ── Card-cutter local plugin (experimental; NEVER bundled in the
 // release). The engine ships as a user-installed JS bundle on disk; the
 // renderer asks for its source here and runs it in its main world. ──

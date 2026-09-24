@@ -995,6 +995,7 @@ let multiDocActive = false;
 /** When the multi-pane shell is active, this delegates file-open
  *  routing to its prompt-for-slot flow. */
 let multiDocOnFileOpen: ((opened: OpenedFile) => Promise<void> | void) | null = null;
+let multiDocOnFilesOpen: ((opened: OpenedFile[]) => Promise<void> | void) | null = null;
 /** When the multi-pane shell is active, "Show in context" routes a
  *  flashcard's source into a slot of this window (rather than a separate
  *  window) and scrolls to the anchor. */
@@ -1151,6 +1152,7 @@ let multiDocOnRecoveredDoc:
  *  mountView paths into per-pane routing. */
 export function enableMultiDocMode(opts: {
   onFileOpen: (opened: OpenedFile) => Promise<void> | void;
+  onFilesOpen?: (opened: OpenedFile[]) => Promise<void> | void;
   showInContext?: (req: ShowInContextRequest) => Promise<void> | void;
   onNewDoc?: () => Promise<void> | void;
   toggleReadMode?: () => void;
@@ -1223,6 +1225,7 @@ export function enableMultiDocMode(opts: {
 }): void {
   multiDocActive = true;
   multiDocOnFileOpen = opts.onFileOpen;
+  multiDocOnFilesOpen = opts.onFilesOpen ?? null;
   multiDocShowInContext = opts.showInContext ?? null;
   multiDocOnNewDoc = opts.onNewDoc ?? null;
   multiDocToggleReadMode = opts.toggleReadMode ?? null;
@@ -6691,16 +6694,60 @@ function saveFiltersForFormat(format: 'cmir' | 'docx'): { name: string; extensio
  *  multi-pane shell (which shows the "send to slot N" picker);
  *  single-doc mode mounts it as the current view. */
 async function runOpenFlow(): Promise<void> {
-  let opened: OpenedFile | null;
+  const host = getHost();
+  // Multi-select only where every pick has somewhere to go: the
+  // three-pane workspace (one slot for the batch) or window mode (one
+  // window each). A web single-doc window can hold one doc, so it keeps
+  // the single picker.
+  const multi = host.openFiles && (multiDocActive || host.canSpawnWindow);
+  let opened: OpenedFile[];
   try {
-    opened = await getHost().openFile({ filters: OPEN_FILE_FILTERS });
+    if (multi) {
+      opened = await host.openFiles!({ filters: OPEN_FILE_FILTERS });
+    } else {
+      const one = await host.openFile({ filters: OPEN_FILE_FILTERS });
+      opened = one ? [one] : [];
+    }
   } catch (err) {
     console.error('Open failed:', err);
     void alertDialog(`Failed to open: ${err instanceof Error ? err.message : err}`);
     return;
   }
-  if (!opened) return;
-  await routeOpenedFile(opened);
+  if (opened.length === 0) return;
+  if (opened.length > 1 && multiDocActive && multiDocOnFilesOpen) {
+    await routeOpenedFilesToSlot(opened);
+    return;
+  }
+  // Single-doc: the first file mounts here if this window is still a
+  // pristine starter; the rest (and the first, otherwise) spawn windows.
+  for (const file of opened) await routeOpenedFile(file);
+}
+
+/** Several files from one Open dialog in the three-pane workspace: run
+ *  the same journal decode and cross-window guard as `routeOpenedFile`
+ *  on each, then hand the survivors to the shell, which asks for one
+ *  slot for the whole batch. */
+async function routeOpenedFilesToSlot(opened: OpenedFile[]): Promise<void> {
+  const files: OpenedFile[] = [];
+  for (const file of opened) {
+    const src = await resolveOpenedFile(file);
+    if (src === 'corrupt') {
+      showToast(`"${file.name}" is corrupt or could not be read.`);
+      continue;
+    }
+    if (src.handle != null && (await isFileOpenInAnotherWindow(src.handle))) {
+      showToast(`"${src.name}" is already open in another window.`);
+      continue;
+    }
+    files.push({ name: src.name, bytes: src.bytes, handle: src.handle });
+  }
+  if (files.length === 0) return;
+  try {
+    await multiDocOnFilesOpen!(files);
+  } catch (err) {
+    console.error('Multi-doc open failed:', err);
+    void alertDialog(`Failed to open: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /** Route an already-obtained opened file: cross-window duplicate guard,

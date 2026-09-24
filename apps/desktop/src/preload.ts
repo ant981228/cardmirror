@@ -202,6 +202,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFile: (opts: { filters: FileFilter[] }) =>
     ipcRenderer.invoke('host:open-file', opts),
 
+  openFiles: (opts: { filters: FileFilter[] }) =>
+    ipcRenderer.invoke('host:open-files', opts),
+
   /** Read a file at a known path (no picker) for the home screen's
    *  "open recent" flow. Resolves null when the path is gone /
    *  unreadable so the caller can prune the stale recent. */
