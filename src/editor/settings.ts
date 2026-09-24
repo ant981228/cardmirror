@@ -1086,6 +1086,10 @@ export interface Settings {
   /** Arrange Windows: the speech doc's share of the width, in percent
    *  (10–90); the docs side gets the rest. */
   arrangeSpeechPct: number;
+  /** Three-pane: the first document opened (or created with New) in the
+   *  speech-side slot while no speech doc is marked gets marked as the
+   *  speech doc. Off by default. */
+  autoMarkSpeechSlotDoc: boolean;
   /**
    * Per-style font sizes (in points). See DisplaySizes for details.
    * Each field becomes a CSS custom property on `#editor`.
@@ -1898,6 +1902,7 @@ const DEFAULTS: Settings = {
   lastWorkspaceEnabled: false,
   arrangeSpeechSide: 'right',
   arrangeSpeechPct: 50,
+  autoMarkSpeechSlotDoc: false,
   displaySizes: { ...DEFAULT_DISPLAY_SIZES },
   displayParagraphSpacing: { ...DEFAULT_PARAGRAPH_SPACING },
   displayTypography: { ...DEFAULT_DISPLAY_TYPOGRAPHY },
@@ -2290,6 +2295,17 @@ export const SETTING_METADATA: SettingMeta[] = [
     category: 'general',
     section: 'Workspace',
     aliases: ['speech doc width', 'window split', 'arrange ratio'],
+  },
+  {
+    key: 'autoMarkSpeechSlotDoc',
+    label: 'Mark the first document in the speech doc slot as the speech doc',
+    description:
+      "Off by default. On, when no speech doc is marked, the first document you open (or create with New) in the slot on the Arrange Windows speech doc side (Slot 3 for right, Slot 1 for left) is marked as the speech doc. Nothing changes once a speech doc is marked, and moving a doc between slots never marks it.",
+    kind: 'toggle',
+    category: 'general',
+    section: 'Workspace',
+    dependsOn: 'multiDocWorkspace',
+    aliases: ['auto mark speech doc', 'mark speech doc automatically', 'speech slot'],
   },
   {
     key: 'multiDocLayoutMode',
@@ -4848,6 +4864,7 @@ function sanitize(s: Settings): Settings {
       typeof s.arrangeSpeechPct === 'number' && Number.isFinite(s.arrangeSpeechPct)
         ? Math.min(90, Math.max(10, Math.round(s.arrangeSpeechPct)))
         : 50,
+    autoMarkSpeechSlotDoc: s.autoMarkSpeechSlotDoc === true,
     displaySizes: sanitizeDisplaySizes(s.displaySizes),
     displayParagraphSpacing: sanitizeParagraphSpacing(s.displayParagraphSpacing),
     underlineFollowsFontColor: s.underlineFollowsFontColor === true,

@@ -1300,6 +1300,13 @@ Opening a third document, expanding a slot, or emptying one hands the widths
 back to the normal layout. Desktop only — a browser cannot place its own
 windows, so the command does not appear in the web edition.
 
+To have the speech doc marked for you, turn on **Settings → General →
+Workspace → Mark the first document in the speech doc slot as the speech doc**
+(off by default). While no speech doc is marked, the first document you open or
+create in the speech-side slot (Slot 3 for right, Slot 1 for left) gets marked.
+Once a speech doc is marked, nothing changes, and moving a document between
+slots never marks it.
+
 ### Send-to-speech and the dropzone
 
 Assemble a speech document by sending cards into it:

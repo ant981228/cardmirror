@@ -2904,6 +2904,7 @@ class MultiPaneShell {
       threads,
     });
     slot.push(record);
+    this.maybeAutoMarkSpeech(record, target);
     // Open-from-disk rejoin gate (same as the single-doc open path):
     // a file with a resumable session offers rejoin-or-leave instead
     // of silently diverging.
@@ -2947,6 +2948,19 @@ class MultiPaneShell {
     return null;
   }
 
+  /** Opt-in (off by default): the first doc to land in the speech-side
+   *  slot while no speech doc is marked becomes the speech doc. Called
+   *  from the open and New paths only, so Arrange Windows and moving a
+   *  doc between slots never mark anything. */
+  private maybeAutoMarkSpeech(record: DocRecord, target: SlotId): void {
+    if (!settings.get('autoMarkSpeechSlotDoc')) return;
+    if (target !== slotPlanForSpeech(settings.get('arrangeSpeechSide')).speechSlot) return;
+    const resolver = getSpeechDocResolver();
+    if (resolver.getSpeechView()) return;
+    resolver.setSpeech(record.view);
+    this.refreshSpeechChips();
+  }
+
   /** Create an empty doc; prompt for slot. Used by the ribbon's
    *  "New doc" button. */
   async createNewDoc(): Promise<void> {
@@ -2959,6 +2973,7 @@ class MultiPaneShell {
       format: null,
     });
     slot.push(record);
+    this.maybeAutoMarkSpeech(record, target);
     // Caret into the empty paragraph + focus, so typing (or arming a
     // style for typing) works immediately with no extra click. Every
     // other slot-populating path focuses too — UNLESS the target pane
