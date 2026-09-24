@@ -1636,6 +1636,7 @@ const ribbonContext: RibbonContext = {
   },
   clearFormattingOnNamedStyleToggleOff: () =>
     settings.get('clearFormattingOnNamedStyleToggleOff'),
+  clearRemovesHighlighting: () => settings.get('clearRemovesHighlighting'),
   effectivePtForNode: (node, parent) => effectivePtForNode(node, parent),
   normalPt: () => settings.get('displaySizes').normal,
   shrinkRestoresOmissionsToNormal: () =>

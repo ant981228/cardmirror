@@ -382,7 +382,7 @@ below say which fallback applies where it matters.
 | **Underline** | F9 / Mod-U | Toggles underline on the selection (press again to remove). With **nothing selected** the two differ: **F9** underlines the word at the cursor; **Mod-U** instead turns on underline for the text you're about to type (like Mod-I for italics). |
 | **Emphasis** | F10 | Applies the Emphasis style (a box, by default). Apply-only; use Clear or Underline to swap it off. |
 | **Highlight** | F11 | Toggles the active highlight color. Press again to remove. |
-| **Clear** | F12 | Strips direct formatting back to plain text (leaves highlighting — toggle that off separately). |
+| **Clear** | F12 | Strips direct formatting back to plain text (leaves highlighting unless **Clear (F12) also removes highlighting** is on in Settings → Editing). |
 | **Bold / Italic** | Mod-B / Mod-I | Standard direct formatting. With nothing selected, toggles it for the text you're about to type; while italic typing is on, the cursor tilts to match. Tags and headings are bold by default, so **Bold inside a tag un-bolds** the selected words (press it again to restore) — and .docx files with un-bolded words in tags now show that correctly. |
 
 Super/subscript and strikethrough live in the **Format** menu (super and
