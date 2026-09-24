@@ -1030,6 +1030,13 @@ as you open more.
   active document into a slot.
 - **Expand** a slot to full width with **Mod-Shift-F**, and restore it
   the same way.
+- **Hide Slot** (a command, unbound by default) takes the focused slot out
+  of the layout so the other slots share its width. Its documents stay open.
+  **Reveal All Slots** brings every hidden slot back, and so do **Mod-1/2/3**
+  on that slot, opening or sending a document into it, and Arrange Windows.
+  The last slot showing can't be hidden. Turn on **Settings → General →
+  Workspace → Show a Hide button on each slot** (off by default) for a Hide
+  button in each slot's title bar.
 - When you have more than one document in a slot, jump between them using
   the drop-down in the document's title bar or by using **Ctrl-Tab**.
 

@@ -4480,6 +4480,8 @@ export type RibbonCommandId =
   | 'sendDocToSlot2'
   | 'sendDocToSlot3'
   | 'toggleSlotExpand'
+  | 'hideSlot'
+  | 'revealAllSlots'
   | 'cycleDocNext'
   | 'cycleDocPrev'
   // Smart close — closes the focused slot's visible doc in
@@ -4697,6 +4699,8 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'sendDocToSlot2',
   'sendDocToSlot3',
   'toggleSlotExpand',
+  'hideSlot',
+  'revealAllSlots',
   'cycleDocNext',
   'cycleDocPrev',
   'closeDocOrWindow',
@@ -4893,6 +4897,8 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   sendDocToSlot2: 'Send Doc to Slot 2',
   sendDocToSlot3: 'Send Doc to Slot 3',
   toggleSlotExpand: 'Toggle Slot Expand / Restore',
+  hideSlot: 'Hide Slot',
+  revealAllSlots: 'Reveal All Slots',
   cycleDocNext: 'Next Document in Slot',
   cycleDocPrev: 'Previous Document in Slot',
   closeDocOrWindow: 'Close Doc or Window',
@@ -5308,6 +5314,9 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   sendDocToSlot2: 'Mod-Shift-2',
   sendDocToSlot3: 'Mod-Shift-3',
   toggleSlotExpand: 'Mod-Shift-f',
+  // Unbound by default — rebindable via Settings → Keyboard shortcuts.
+  hideSlot: '',
+  revealAllSlots: '',
   // Unbound by default — rebindable via Settings → Keyboard shortcuts.
   cycleDocNext: '',
   cycleDocPrev: '',
@@ -6653,6 +6662,8 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
     case 'sendDocToSlot2':
     case 'sendDocToSlot3':
     case 'toggleSlotExpand':
+    case 'hideSlot':
+    case 'revealAllSlots':
     case 'cycleDocNext':
     case 'cycleDocPrev':
     case 'closeDocOrWindow':

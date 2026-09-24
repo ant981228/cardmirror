@@ -11597,6 +11597,7 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
 .pmd-pane-focused .pmd-pane-chip-close,
 .pmd-pane-focused .pmd-pane-chip-stack,
 .pmd-pane-focused .pmd-pane-chip-nav,
+.pmd-pane-focused .pmd-pane-chip-hide,
 .pmd-pane-focused .pmd-pane-chip-expand {
   color: var(--pmd-c-text-on-accent);
 }
@@ -11622,6 +11623,7 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
  * The chip's accent fill is theme-invariant, so its hover glyph is too:
  * the light-mode black, pinned via --pmd-c-on-accent-hover. */
 .pmd-pane-focused .pmd-pane-chip-nav:hover,
+.pmd-pane-focused .pmd-pane-chip-hide:hover,
 .pmd-pane-focused .pmd-pane-chip-expand:hover {
   color: var(--pmd-c-on-accent-hover);
 }
@@ -11734,6 +11736,20 @@ body.pmd-multi-nav-empty.pmd-multi-doc #status-bar {
   line-height: 1;
 }
 .pmd-pane-chip-expand:hover { color: var(--pmd-c-text-strong); }
+.pmd-pane-chip-hide {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--pmd-c-text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.pmd-pane-chip-hide[hidden] { display: none; }
+.pmd-pane-chip-hide:hover { color: var(--pmd-c-text-strong); }
 .pmd-pane-chip-nav {
   flex: 0 0 auto;
   width: 18px;
