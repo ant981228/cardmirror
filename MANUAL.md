@@ -1086,7 +1086,11 @@ entire cite* is on. Undo restores the cards.
   its cite-marked and highlighted words show unless you turn on
   *Read mode: keep entire cite* (Settings → General), which shows the
   whole citation; *Read mode: show undertags* (same place) brings the
-  undertags back, whole. Neither adds to the word count or read time.
+  undertags back, whole; and *Read mode: show background color* (same
+  place) keeps background-colored text visible beside the highlighting —
+  handy after [Lock Highlighting](#colors-highlight-background-and-font-color)
+  when you want the old pass on screen while you read your new one. None
+  of them adds to the word count or read time.
 
 - It **locks the keyboard**, so a stray key or trackpad twitch at the
   podium can't edit your file.
@@ -2451,6 +2455,13 @@ headers shown inside each tab.
   and Convert Cards to Read Mode follows it too. Undertag text still does
   not count toward word counts or read-time estimates unless it is
   highlighted.
+- **Read mode: show background color** — when on, read mode shows text
+  with a background color as well as highlighted text, so highlighting
+  you locked to background (Lock Highlighting) — or an opponent's old
+  highlighting — stays visible while you read your own. Off by default.
+  Display-only, and Convert Cards to Read Mode follows it too.
+  Background-colored text still does not count toward word counts or
+  read-time estimates.
 
 **Word counts**
 

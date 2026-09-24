@@ -214,11 +214,17 @@ export const readModeAwareRedo: Command = (state, dispatch, view) => {
 
 /** Read mode keeps a text node visible iff it carries the paragraph's
  *  read-aloud mark — or is a red reading-position marker (so the marker
- *  you drop while reading actually shows). */
+ *  you drop while reading actually shows) — or, with "Read mode: show
+ *  background color" on, carries background color (`shading`), so a
+ *  highlighting pass locked to background stays visible beside a
+ *  re-highlight. The setting is read at decoration time; both shells
+ *  rebuild the set when it flips. */
 function isReadKept(child: PMNode, markNames: readonly string[]): boolean {
+  const keepShading = settings.get('readModeShowBackground');
   return child.marks.some(
     (m) =>
       markNames.includes(m.type.name) ||
+      (keepShading && m.type.name === 'shading') ||
       (m.type.name === 'font_color' && isReadingMarkerColor(m.attrs['color'] as string)),
   );
 }

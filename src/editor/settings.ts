@@ -996,6 +996,14 @@ export interface Settings {
    *  read time: the counter is mark-based and unhighlighted undertag
    *  text carries no read-aloud mark. */
   readModeShowUndertags: boolean;
+  /** When true, read mode keeps text carrying background color
+   *  (`shading`) visible, alongside highlighted text — so an old
+   *  highlighting pass locked to background (Lock Highlighting,
+   *  Create Reference) still shows while reading a re-highlight.
+   *  Display-only, like keep-entire-cite; Convert Cards to Read Mode
+   *  follows it. Off by default. Never counted toward word counts /
+   *  read time: the counter excludes shaded text by design. */
+  readModeShowBackground: boolean;
   /** Word-style Repeat: when true, Mod-Y with nothing left to redo
    *  re-runs the last editing action at the current selection (the
    *  last burst of typing, a formatting command, Backspace/Delete, a
@@ -1880,6 +1888,7 @@ const DEFAULTS: Settings = {
   readModeParagraphIntegrity: false,
   readModeKeepEntireCite: false,
   readModeShowUndertags: false,
+  readModeShowBackground: false,
   repeatWithModY: false,
   markUnreadAfterMarker: false,
   defaultZoomPct: 100,
@@ -2408,6 +2417,16 @@ export const SETTING_METADATA: SettingMeta[] = [
     category: 'general',
     section: 'Editor behavior',
     aliases: ['undertags read mode', 'show undertags', 'read mode undertags'],
+  },
+  {
+    key: 'readModeShowBackground',
+    label: 'Read mode: show background color',
+    description:
+      'When on, read mode shows text with a background color as well as highlighted text — so highlighting you locked to background (Lock Highlighting) or someone else\'s old highlighting stays visible while you read your own. Off by default. Display-only, like keep entire cite; Convert Cards to Read Mode follows it too. Background-colored text still does not count toward word counts or read-time estimates.',
+    kind: 'toggle',
+    category: 'general',
+    section: 'Editor behavior',
+    aliases: ['background read mode', 'shading read mode', 'show background', 'show shading', 'read mode background', 'rehighlight read mode'],
   },
   {
     key: 'repeatWithModY',
@@ -4826,6 +4845,7 @@ function sanitize(s: Settings): Settings {
     readModeParagraphIntegrity: !!s.readModeParagraphIntegrity,
     readModeKeepEntireCite: !!s.readModeKeepEntireCite,
     readModeShowUndertags: !!s.readModeShowUndertags,
+    readModeShowBackground: !!s.readModeShowBackground,
     repeatWithModY: !!s.repeatWithModY,
     markUnreadAfterMarker: !!s.markUnreadAfterMarker,
     // A legacy persisted `zoomPct` is deliberately ignored — live body
