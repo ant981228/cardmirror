@@ -1032,6 +1032,10 @@ as you open more.
   the same way.
 - When you have more than one document in a slot, jump between them using
   the drop-down in the document's title bar or by using **Ctrl-Tab**.
+- Opening a file into a slot that's showing a blank **Untitled** document
+  you haven't touched (never typed in, never saved) replaces it instead of
+  stacking on top. Once you've typed anything, even if you delete it
+  again, the Untitled doc stays put.
 
 ### Per-document outlines
 
