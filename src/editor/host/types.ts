@@ -218,6 +218,11 @@ export interface Host {
    *  contents or `null` if the user cancelled. */
   openFile(opts?: OpenFileOptions): Promise<OpenedFile | null>;
 
+  /** Multi-select variant of `openFile`: resolve with every picked
+   *  file, or an empty array if the user cancelled. Optional — a host
+   *  without it falls back to `openFile`. */
+  openFiles?(opts?: OpenFileOptions): Promise<OpenedFile[]>;
+
   /** Show a native save-file picker pre-filled with `suggestedName`
    *  and write `bytes` to the user's chosen location. Resolve with
    *  the saved file's final name + a handle for future in-place

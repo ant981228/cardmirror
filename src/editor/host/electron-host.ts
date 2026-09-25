@@ -179,6 +179,13 @@ interface ElectronAPI {
     /** Optional so an older main without the stat-0 flag is tolerated. */
     emptyOnDisk?: boolean;
   } | null>;
+  /** Optional so an older preload without multi-select is tolerated. */
+  openFiles?(opts: { filters: FileFilter[] }): Promise<Array<{
+    name: string;
+    bytes: Uint8Array;
+    handle: string;
+    emptyOnDisk?: boolean;
+  }>>;
   /** Verbatim Flow bridge (Windows COM → Excel). Optional so an older
    *  preload tolerates its absence. */
   flowAvailable?(): Promise<FlowAvailable>;
@@ -715,6 +722,22 @@ export class ElectronHost implements Host {
       handle: result.handle,
       ...(result.emptyOnDisk === true ? { emptyOnDisk: true } : {}),
     };
+  }
+
+  async openFiles(opts: OpenFileOptions = {}): Promise<OpenedFile[]> {
+    const bridge = api();
+    if (!bridge.openFiles) {
+      const one = await this.openFile(opts);
+      return one ? [one] : [];
+    }
+    const results = await bridge.openFiles({ filters: opts.filters ?? [] });
+    // Same Buffer-like normalization as openFile.
+    return results.map((result) => ({
+      name: result.name,
+      bytes: result.bytes instanceof Uint8Array ? result.bytes : new Uint8Array(result.bytes),
+      handle: result.handle,
+      ...(result.emptyOnDisk === true ? { emptyOnDisk: true } : {}),
+    }));
   }
 
   /** Absolute path of a dropped File (drag-to-open). '' when it can't be

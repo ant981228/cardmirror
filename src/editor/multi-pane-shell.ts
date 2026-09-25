@@ -2724,25 +2724,43 @@ class MultiPaneShell {
    *  slot — no slot picker, since the user explicitly clicked that
    *  slot's Open button. */
   async openFileIntoSlot(target: SlotId): Promise<void> {
-    let opened: OpenedFile | null;
+    const host = getHost();
+    let opened: OpenedFile[];
     try {
-      opened = await getHost().openFile();
+      if (settings.get('openMultipleFiles') && host.openFiles) {
+        opened = await host.openFiles();
+      } else {
+        const one = await host.openFile();
+        opened = one ? [one] : [];
+      }
     } catch (err) {
       console.error('Open failed:', err);
       void alertDialog(`Failed to open: ${err instanceof Error ? err.message : err}`);
       return;
     }
-    if (!opened) return;
-    // Cross-window duplicate-open guard. Runs BEFORE the within-window
-    // check so a duplicate held by another window jumps focus there
-    // (Electron) or is refused (web) rather than landing on this
-    // window's existing copy if any.
-    if (opened.handle != null && (await isFileOpenInAnotherWindow(opened.handle))) {
-      showToast(`"${opened.name}" is already open in another window.`);
+    if (opened.length === 1) {
+      const file = opened[0]!;
+      // Cross-window duplicate-open guard. Runs BEFORE the within-window
+      // check so a duplicate held by another window jumps focus there
+      // (Electron) or is refused (web) rather than landing on this
+      // window's existing copy if any.
+      if (file.handle != null && (await isFileOpenInAnotherWindow(file.handle))) {
+        showToast(`"${file.name}" is already open in another window.`);
+        return;
+      }
+      if (await this.surfaceDuplicateIfOpen(file)) return;
+      await this.loadOpenedIntoSlot(file, target);
       return;
     }
-    if (await this.surfaceDuplicateIfOpen(opened)) return;
-    await this.loadOpenedIntoSlot(opened, target);
+    const fresh: OpenedFile[] = [];
+    for (const file of opened) {
+      if (file.handle != null && (await isFileOpenInAnotherWindow(file.handle))) {
+        showToast(`"${file.name}" is already open in another window.`);
+        continue;
+      }
+      fresh.push(file);
+    }
+    await this.loadBatchIntoSlot(fresh, target);
   }
 
   /** Called from the ribbon's Open button via `enableMultiDocMode`'s
@@ -2753,6 +2771,37 @@ class MultiPaneShell {
     const choice = await this.promptForSlot(opened.name);
     if (!choice) return;
     await this.loadOpenedIntoSlot(opened, choice);
+  }
+
+  /** Several files from one Open dialog (the caller has already run the
+   *  cross-window guard). One slot picker for the whole batch; every
+   *  file lands in that slot's stack, so Ctrl-Tab cycles them. */
+  async onFilesOpen(files: OpenedFile[]): Promise<void> {
+    if (files.length === 1) {
+      await this.onFileOpen(files[0]!);
+      return;
+    }
+    const choice = await this.promptForSlot(`${files.length} files`);
+    if (!choice) return;
+    await this.loadBatchIntoSlot(files, choice);
+  }
+
+  /** Load a batch into one slot, in dialog order. A file already open in
+   *  this window is skipped with a toast, and one that fails to load is
+   *  reported without stopping the rest. */
+  private async loadBatchIntoSlot(files: OpenedFile[], target: SlotId): Promise<void> {
+    for (const file of files) {
+      if (await this.findOpenRecordByHandle(file.handle ?? null)) {
+        showToast(`"${file.name}" is already open.`);
+        continue;
+      }
+      try {
+        await this.loadOpenedIntoSlot(file, target);
+      } catch (err) {
+        console.error('Open failed for', file.name, err);
+        showToast(`Couldn't open "${file.name}": ${err instanceof Error ? err.message : err}`);
+      }
+    }
   }
 
   /** Flashcard review's "Show in context": reveal the card's source in a
@@ -3789,6 +3838,7 @@ export function mountMultiPaneShell(): void {
   setMultiDocReloadFromDisk((handle) => shell!.reloadFromDisk(handle));
   enableMultiDocMode({
     onFileOpen: (file) => shell!.onFileOpen(file),
+    onFilesOpen: (files) => shell!.onFilesOpen(files),
     showInContext: (req) => shell!.showInContext(req),
     onNewDoc: () => shell!.createNewDoc(),
     toggleReadMode: () => shell!.toggleFocusedReadMode(),

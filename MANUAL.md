@@ -2153,6 +2153,13 @@ home screen — to open it, exactly like File → Open (including the unsaved-ch
 prompt, and focusing a copy that's already open). Other file types are ignored,
 and dragging cards around inside the editor is unaffected.
 
+**Opening several files at once.** Turn on **Settings → General → Workspace →
+Open several files at once** (off by default, desktop only) and the Open dialog
+takes a multi-selection (Shift-click or Mod-click). In the three-pane workspace you
+pick one slot for the whole batch, and every file lands in that slot's stack,
+so **Ctrl-Tab** cycles through them; a slot's own Open button does the same
+without asking. In one-window-per-document mode each file gets its own window.
+
 **Reopening your last set of documents.** Turn on **Settings → General →
 Workspace → Remember my last workspace** (off by default) and CardMirror
 remembers which files you had open when you last quit and lists them on the Home screen under
