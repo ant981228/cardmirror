@@ -48,7 +48,6 @@ import { READ_MODE_DRAG_META } from './reading-marker.js';
 import { checkedSliceFromJSON } from '../schema/slice-check.js';
 import { openCardPreview } from './card-preview-modal.js';
 import { isAnyOverlayOpen } from './overlay-stack.js';
-import { attachPopup } from './pill-tray.js';
 
 interface DropzoneMountOptions {
   parent: HTMLElement;
@@ -222,7 +221,6 @@ export class DropzoneController {
     this.open = open;
     this.root.dataset['open'] = open ? 'true' : 'false';
     this.renderBar();
-    if (open) attachPopup(this.bar, this.listEl);
   }
 
   private renderList(): void {

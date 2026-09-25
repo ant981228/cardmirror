@@ -203,18 +203,12 @@ pill, whichever pill opened it. `min-width: 100%` spans the pill row;
 (index.ts) now sets that variable on the tray from the editor's rect
 (replacing the dropzone-only inline max-width), so a narrow window
 narrows the popup. The popup floats `--pmd-pill-popup-gap` (8px) above
-the row; the open pill keeps its own accent border and its `::after`
-draws a translucent grey bridge (`color-mix` of the muted text color)
-across that gap, the bar's full width, from the bar's top edge to the
-popup's bottom edge — pill and popup stay two things, visibly joined.
-(A first cut merged the bar into the popup as a tab; the user wanted
-the pill kept distinct.) `attachPopup` (pill-tray.ts) measures on open
-whether the bar is flush with the popup's left / right edge and squares
-that popup corner (`pmd-pill-popup-flush-left/right`) so pill, bridge
-and popup share one straight edge — measured, not `:first-child`, since
-a hidden dropzone or pairing pill still occupies its DOM slot. Hover:
-accent border on all three bars; the Send bar's drag-hot ring outranks
-the open rule (`.pmd-pill-bar.pmd-send-bar-hot`).
+the row with a neutral border; the open pill keeps its own shape with
+the accent border, and that alone says which pill is open. (Two earlier
+cuts merged the bar into the popup as a tab, then joined them with a
+translucent bridge; the user wanted the pill distinct and the outline
+alone.) Hover: accent border on all three bars; the Send bar's drag-hot
+ring outranks the open rule (`.pmd-pill-bar.pmd-send-bar-hot`).
 
 Dropzone: the root is now a plain `.pmd-pill`; the list carries
 `pmd-pill-popup`; Clear moved into a `.pmd-dropzone-actions` footer
@@ -226,6 +220,18 @@ root. Receive: in the home dock the pill stays `position: relative`, so
 its popup hangs off the pill as before. `pill-scroll-clearance` measures
 the tray, whose height is now just the bar row — an open popup never
 inflates the typing clearance. Tests: pill-popup-anatomy.test.ts.
+
+### Changed: no browser focus ring
+
+User call 2026-09-25: Chromium's `outline: auto` on keyboard focus
+follows the macOS accent color and showed up on pill bars, nav rows and
+chips after any keyboard activation, carrying no information. A base
+rule `:focus, :focus-visible { outline: none }` (style.css, next to the
+`button` reset) suppresses it everywhere. The app's own focus outlines
+— the "input focus ring" scaffolding on text fields, `.pmd-confirm-btn`,
+`.pmd-home-action`, `.pmd-list-pick-row`, the ribbon color controls and
+font-size input, transclusion glyphs — are more specific and unchanged.
+Pinned in pill-popup-anatomy.test.ts.
 
 ## 1.12.0 — 2026-09-21
 

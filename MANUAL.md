@@ -1388,12 +1388,11 @@ previews until you turn it off.
 
 The dropzone pill and the **Send** and **Receive** pills (if collaboration
 is on) sit together in one row at the bottom-left of the editor, and all
-three open the same way: click one and its list rises above the row,
-connected to the pill you clicked by a short grey bridge, with the pill
-itself outlined in blue. Every list starts at the row's left edge and can
-run as wide as the editor, whichever pill opened it, so that outlined pill
-and its bridge are what tell you which one you're looking at. The shelf's
-**Clear** button sits at the bottom of its list.
+three open the same way: click one and its list rises above the row, and
+the pill you clicked is outlined in blue. Every list starts at the row's
+left edge and can run as wide as the editor, whichever pill opened it, so
+that outlined pill is what tells you which one you're looking at. The
+shelf's **Clear** button sits at the bottom of its list.
 
 ### Saving a send doc
 

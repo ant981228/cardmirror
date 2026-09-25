@@ -85,13 +85,17 @@ see `DETAILED_CHANGELOG.md`.
 ### Changed
 
 - **The dropzone, Send and Receive pills open the same way.** Click any
-  of the three and its list rises above the pill row, connected to the
-  pill you clicked by a short grey bridge, with that pill outlined in
-  blue — that is how you tell which one is open. Every list starts at the row's left edge and
+  of the three and its list rises above the pill row, and the pill you
+  clicked is outlined in blue — that is how you tell which one is open.
+  Every list starts at the row's left edge and
   can run as wide as the editor, so shelf items are no longer squeezed
   into a thin column and the Receive list no longer runs off the edge of
   a narrow window. All three pills get the same blue border on hover.
   The shelf's Clear button now sits at the bottom of its list.
+- **No more browser focus ring.** The orange-or-accent-colored ring the
+  browser drew around whatever last took keyboard focus (a pill, a nav
+  row, a chip) is gone everywhere. Text fields still show their own blue
+  outline while active.
 
 ## 1.12.0 — 2026-09-21
 

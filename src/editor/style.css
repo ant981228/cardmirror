@@ -563,6 +563,18 @@ body {
    AND black on dark, breaking dark mode. `inherit` makes each
    button pick up whatever color the surrounding scope resolved
    to (body's `--pmd-c-text`, the ribbon's, the editor's, etc.). */
+/* No browser focus ring anywhere (user call 2026-09-25). Chromium's
+   `outline: auto` on keyboard focus follows the OS accent color and lands
+   on every focusable thing — pill bars, nav rows, chips — where it says
+   nothing the app's own states don't: text fields draw their own accent
+   outline on focus (the "input focus ring" scaffolding below), dialogs arm
+   a default button, the editor is the caret. Those deliberate
+   `:focus-visible` / `:focus` outlines are more specific than this reset
+   and still apply. */
+:focus,
+:focus-visible {
+  outline: none;
+}
 button {
   color: inherit;
 }
@@ -14606,13 +14618,10 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
    (`--pmd-pill-popup-max`, set inline on the tray by positionDropzone —
    a narrow window narrows the popup instead of pushing it off screen).
    The popup floats a small gap above the row; the open pill keeps its
-   own outline (the accent "clicked" border) and a translucent grey
-   BRIDGE — the bar's ::after — spans that gap between the bar and the
-   popup's bottom edge, so the popup reads as connected to that button
-   without absorbing it. That bridge is how you tell which pill is open
-   now that they all rise from the same place. In the home screen's dock
-   (receive pill only) the popup hangs off the pill itself: same look,
-   pill-relative. */
+   own shape with the accent "clicked" border, which is how you tell
+   which pill is open now that they all rise from the same place. In the
+   home screen's dock (receive pill only) the popup hangs off the pill
+   itself: same look, pill-relative. */
 .pmd-pill {
   --pmd-pill-popup-gap: 8px;
 }
@@ -14638,41 +14647,17 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 [data-open="true"] > .pmd-pill-popup {
   display: block;
 }
-/* The bridge is flush with a popup corner when its pill is the outermost
-   one (`attachPopup`, pill-tray.ts, measures which): that corner squares
-   off so pill, bridge and popup share one straight edge. */
-.pmd-pill-popup-flush-left {
-  border-bottom-left-radius: 0;
-}
-.pmd-pill-popup-flush-right {
-  border-bottom-right-radius: 0;
-}
 /* Hover: the same accent border on all three bars. */
 .pmd-dropzone-bar:hover,
 .pmd-send-bar:hover,
 .pmd-receive-bar:hover {
   border-color: var(--pmd-c-accent);
 }
-/* Open: the accent "clicked" outline on the pill only, plus the bridge
-   up to the popup. Offsets are from the bar's padding box, so -1px /
-   calc(100% + 1px) reach its outer edges: the bridge runs the bar's full
-   width from its top edge to the popup's bottom edge. */
+/* Open: the accent "clicked" outline on the pill only. */
 [data-open="true"] > .pmd-dropzone-bar,
 [data-open="true"] > .pmd-pill-bar {
-  position: relative;
   color: var(--pmd-c-text);
   border-color: var(--pmd-c-accent);
-}
-[data-open="true"] > .pmd-dropzone-bar::after,
-[data-open="true"] > .pmd-pill-bar::after {
-  content: '';
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  bottom: calc(100% + 1px);
-  height: var(--pmd-pill-popup-gap, 8px);
-  background: color-mix(in srgb, var(--pmd-c-text-muted) 28%, transparent);
-  pointer-events: none;
 }
 
 /* Blue arrival flash — the exact accent ring the command bar uses

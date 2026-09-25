@@ -34,7 +34,6 @@ import {
 import { promptForText } from '../text-prompt.js';
 import { normalizePairingCode, looksLikePairingCode } from './pairing-ids.js';
 import { recentSenders } from './inbox-store.js';
-import { attachPopup } from '../pill-tray.js';
 
 interface SendPillMountOptions {
   parent: HTMLElement;
@@ -752,7 +751,6 @@ export class SendPillController {
     if (this.expanded) return;
     this.expanded = true;
     this.root.dataset['open'] = 'true';
-    attachPopup(this.bar, this.panel);
     // Expanded by a drag (not a click): the actions row is in zone mode.
     if (!this.inviteMode) this.applyDragZoneLabels(true);
   }

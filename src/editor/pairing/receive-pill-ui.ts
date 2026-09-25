@@ -29,7 +29,6 @@ import { collabEnabled } from '../collab/collab-gate.js';
 import { collabInviteJoiner, collabSessionJoinPrompt } from '../collab/collab-hooks.js';
 import { deletePrefetch } from '../collab/collab-store.js';
 import { checkedSliceFromJSON } from '../../schema/slice-check.js';
-import { attachPopup } from '../pill-tray.js';
 
 interface ReceivePillMountOptions {
   parent: HTMLElement;
@@ -251,7 +250,6 @@ export class ReceivePillController {
       void inboxStore.markAllRead();
     }
     this.render();
-    if (open) attachPopup(this.bar, this.listEl);
   }
 
   private render(): void {
