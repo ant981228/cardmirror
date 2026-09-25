@@ -2706,6 +2706,14 @@ class MultiPaneShell {
     if (!this.arranging && !SLOT_IDS.some((id) => this.slots[id].stack.length > 0)) {
       homeScreen.show();
     }
+    // While any slot holds docs, at least one slot is shown. hideSlot
+    // refuses the last shown slot, but closing the docs in the shown
+    // slots can empty every one of them and leave only hidden slots —
+    // a workspace with docs and nothing on screen, and nothing focused
+    // for Mod-W to act on (field bug 2026-09-25). Bring the hidden
+    // slots back, as Reveal All Slots would, before the focus hand-off
+    // below looks for a pane.
+    if (!SLOT_IDS.some((id) => this.slotShown(this.slots[id]))) this.revealAllSlots();
     if (this.focusedSlot !== slot) return;
     this.focusedSlot = null;
     // Clear the emptied pane's highlight NOW: focusSlot's stamp-all

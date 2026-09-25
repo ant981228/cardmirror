@@ -151,7 +151,12 @@ before-prompt path goes through it (closeRecord / closeAllExcept on a
 dirty doc, the quit prompt, surfaceDuplicateIfOpen, show-in-context) —
 without that, a dirty doc in a hidden slot drew a save prompt for a doc
 you couldn't see, with Save routed to the doc you could.
-`focusSlotByIndex`'s own reveal is folded into it. Cora's PR #81.
+`focusSlotByIndex`'s own reveal is folded into it. Second fixup
+(field bug, first three-pane pass): `handleSlotEmptied` reveals every
+hidden slot when the last shown slot empties while hidden slots still
+hold docs — hideSlot guards the last shown slot, but closing docs could
+empty all the shown ones, leaving a blank workspace with nothing
+focused. Cora's PR #81.
 
 ### Added: open several files at once
 

@@ -1063,8 +1063,10 @@ as you open more.
   on that slot, opening or sending a document into it, Arrange Windows, and
   anything that needs you to see one of its documents (a save prompt, or a
   file that turns out to be open there already).
-  The last slot showing can't be hidden. Turn on **Settings → General →
-  Workspace → Show a Hide button on each slot** (off by default) for a Hide
+  The last slot showing can't be hidden, and if you close every document
+  in the slots that are showing, the hidden ones come back. Turn on
+  **Settings → General → Workspace → Show a Hide button on each slot**
+  (off by default) for a Hide
   button in each slot's title bar.
 - When you have more than one document in a slot, jump between them using
   the drop-down in the document's title bar or by using **Ctrl-Tab**.
