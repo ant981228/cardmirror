@@ -1343,6 +1343,13 @@ by default) and it skips the question: the new speech doc opens in the slot on
 the side set above (Slot 3 for right, Slot 1 for left), so it's already where
 Arrange Windows would put it.
 
+To have the speech doc marked for you, turn on **Settings → General →
+Workspace → Mark the first document in the speech doc slot as the speech doc**
+(off by default). While no speech doc is marked, the first document you open or
+create in the speech-side slot (Slot 3 for right, Slot 1 for left) gets marked.
+Once a speech doc is marked, nothing changes, and moving a document between
+slots never marks it.
+
 ### Send-to-speech and the dropzone
 
 Assemble a speech document by sending cards into it:
