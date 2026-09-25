@@ -81,7 +81,7 @@ import {
   autosaveBlockedForRecoveredDraft,
   recoveredDraftJournalSavedAt,
 } from './journal-staleness.js';
-import { makeBlankDoc } from './blank-doc.js';
+import { isUntouchedBlank, makeBlankDoc } from './blank-doc.js';
 import { opensAsBlank, blankDocumentBytes } from './empty-open.js';
 import { homeScreen } from './home-screen.js';
 import { captureCleanToken } from './save-clean-token.js';
@@ -1345,6 +1345,17 @@ class Slot {
     if (idx < this.visibleIndex) this.visibleIndex--;
     this.refreshChip();
   }
+}
+
+/** Whether opening a file into this record's slot should close the
+ *  record: never saved, no unsaved changes, still the blank doc New
+ *  made with no undo history, and not the speech doc or a co-edited
+ *  doc (both carry meaning beyond their content). */
+function isReplaceableUntitled(rec: DocRecord): boolean {
+  if (rec.handle != null || rec.format != null || rec.dirty) return false;
+  if (getSpeechDocResolver().isSpeechByUid(rec.uid)) return false;
+  if (collabCopresenceFor(rec.uid) != null) return false;
+  return isUntouchedBlank(rec.view.state);
 }
 
 /** Run a record's debounced heavy-update work NOW (nav rebuild +
@@ -2903,6 +2914,13 @@ class MultiPaneShell {
       ({ doc, threads, docId } = await fromDocxFull(openBytes));
     }
     const slot = this.slots[target];
+    // With the setting on, an Untitled doc nobody has touched gives up its
+    // place to the file (VS Code / Sublime behavior), rather than staying
+    // stacked under it.
+    const replaced =
+      settings.get('openReplacesUntitled') && slot.visible && isReplaceableUntitled(slot.visible)
+        ? slot.visible
+        : null;
     const record = buildDocRecord(opened.name, doc, slot, {
       handle: opened.handle ?? null,
       format,
@@ -2910,6 +2928,8 @@ class MultiPaneShell {
       threads,
     });
     slot.push(record);
+    // Now hidden and clean, so this closes without a prompt.
+    if (replaced) await slot.closeRecord(replaced);
     // Open-from-disk rejoin gate (same as the single-doc open path):
     // a file with a resumable session offers rejoin-or-leave instead
     // of silently diverging.
