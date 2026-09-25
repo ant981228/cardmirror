@@ -71,6 +71,12 @@ is by node type, so Next Tag skips analytics although both sit at
 outline level 4. Headings inside live views and linked copies count as
 stops. New Navigate group in the shortcuts editor. Tests in word-
 selection-keymap.test.ts. Cora's PR #74.
+Fixup from the first pass: the minimal `tr.scrollIntoView()` left the
+heading flush with whichever edge the caret came from; the commands now
+scroll through `scrollToHeadingId` / `preciseScrollIntoView` (the
+nav-pane click path — `commandPair` takes an optional `scroll` hook),
+so the heading lands just under the ribbon. PageUp / PageDown keep the
+minimal scroll. Tests: heading-jump-scroll.test.ts.
 
 ### Added: Clear (F12) also removes highlighting
 

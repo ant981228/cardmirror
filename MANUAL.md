@@ -773,9 +773,10 @@ everywhere:
   body text — a quick way to move through a file by its outline.
 - **Go to Next / Previous Pocket, Hat, Block, or Tag** — the same jump,
   but stopping only at headings of that one level (Next Tag skips
-  Blocks, Analytics, and everything else). These are unbound by
-  default; assign keys in Settings → Keyboard shortcuts or run them
-  from the command bar.
+  Blocks, Analytics, and everything else). The heading lands where a
+  click in the navigation pane would put it, just under the ribbon.
+  These are unbound by default; assign keys in Settings → Keyboard
+  shortcuts or run them from the command bar.
 
 Hold **Shift** with any of these to **extend the selection** instead of
 just moving the cursor, exactly as in Word. So **Shift-Ctrl/Alt-Right**

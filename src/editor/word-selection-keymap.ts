@@ -45,7 +45,9 @@ import { keymap } from 'prosemirror-keymap';
 import { TextSelection } from 'prosemirror-state';
 import type { Command, EditorState, Transaction } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
+import type { EditorView } from 'prosemirror-view';
 import { classifyChar } from './word-break.js';
+import { preciseScrollIntoView, scrollToHeadingId } from './precise-scroll.js';
 import { TYPE_TO_LEVEL } from './headings.js';
 
 // ─── Textblock class-map (Layer 1 lookup inside a textblock) ───────
@@ -337,8 +339,14 @@ function destNextHeadingOfType(state: EditorState, type: string): number | null 
  *  `extend` keeps the anchor and moves only the head. */
 function commandPair(
   computeDest: (state: EditorState) => number | null,
+  opts: {
+    /** Scroll the destination on screen yourself (needs the view);
+     *  without it, or with no view, the transaction's own minimal
+     *  scroll-into-view is used. */
+    scroll?: (view: EditorView, dest: number) => void;
+  } = {},
 ): { move: Command; extend: Command } {
-  const apply = (extending: boolean): Command => (state, dispatch) => {
+  const apply = (extending: boolean): Command => (state, dispatch, view) => {
     const destRaw = computeDest(state);
     if (destRaw === null) return false;
     // Clamp to a valid TextSelection position; PM throws if the
@@ -365,7 +373,12 @@ function commandPair(
       }
     }
     if (!dispatch) return true;
-    dispatch(tr.scrollIntoView());
+    if (opts.scroll && view) {
+      dispatch(tr);
+      opts.scroll(view, destRaw);
+    } else {
+      dispatch(tr.scrollIntoView());
+    }
     return true;
   };
   return { move: apply(false), extend: apply(true) };
@@ -513,14 +526,32 @@ const { move: moveCaretToPrevHeading, extend: extendSelectionToPrevHeading } =
 const { move: moveCaretToNextHeading, extend: extendSelectionToNextHeading } =
   commandPair(destNextHeading);
 
+/** Land the heading the caret just jumped to where a nav-pane click
+ *  puts it: at the top of the scroller, less the headings' scroll
+ *  margin, so it sits just under the ribbon — instead of the
+ *  transaction's minimal scroll, which leaves it flush with whichever
+ *  edge the caret came from. Same path as `NavigationPanel.jumpTo`:
+ *  the heading's `data-id` element, else the element at the position.
+ *  `dest` is one past the heading node's start. */
+function scrollHeadingLikeNavClick(view: EditorView, dest: number): void {
+  const id = view.state.doc.nodeAt(dest - 1)?.attrs['id'];
+  if (typeof id === 'string' && id && scrollToHeadingId(view, id)) return;
+  let el: Node | null = view.domAtPos(dest).node;
+  while (el && el.nodeType !== Node.ELEMENT_NODE) el = el.parentNode;
+  if (el instanceof HTMLElement) preciseScrollIntoView(view, el);
+}
+
 /** Caret-move commands for the ribbon registry's `nextPocket` …
  *  `prevTag` (no default keys). No-op (false) when there's no
- *  heading of that type in that direction. */
+ *  heading of that type in that direction. The heading lands where
+ *  a nav-pane click would put it (see `scrollHeadingLikeNavClick`);
+ *  PageUp / PageDown keep their minimal scroll. */
 export function moveToHeadingOfType(type: string, dir: 'prev' | 'next'): Command {
   return commandPair(
     dir === 'prev'
       ? (state) => destPrevHeadingOfType(state, type)
       : (state) => destNextHeadingOfType(state, type),
+    { scroll: scrollHeadingLikeNavClick },
   ).move;
 }
 
