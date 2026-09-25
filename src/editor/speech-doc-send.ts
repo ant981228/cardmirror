@@ -14,7 +14,7 @@
 
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection, NodeSelection, type EditorState, type Transaction } from 'prosemirror-state';
-import { Slice, type Node as PMNode, type ResolvedPos } from 'prosemirror-model';
+import { Fragment, Slice, type Node as PMNode, type ResolvedPos } from 'prosemirror-model';
 import { closeHistory } from 'prosemirror-history';
 import { schema, newHeadingId } from '../schema/index.js';
 import { rewriteHeadingIds } from './drag-controller.js';
@@ -22,6 +22,7 @@ import { nearestValidInsertPos } from './insert-position.js';
 import { flattenZonesInSlice, enclosingZonePos } from './transclusion.js';
 import { flattenSelfRefsInSlice, isSelfRef } from './self-transclusion.js';
 import { normalizeSelectionForSend } from './send-normalize.js';
+import { getSimilarSelectionState } from './similar-selection-plugin.js';
 import { getSpeechDocResolver } from './speech-doc-registry.js';
 import { getElectronHost } from './host/index.js';
 import { alertDialog } from './text-prompt.js';
@@ -109,23 +110,64 @@ export function resolveSendRange(view: EditorView): SendRange | null {
   if (sel instanceof NodeSelection && isSelfRef(sel.node)) {
     return { from: sel.from, to: sel.from + sel.node.nodeSize };
   }
-  if (!sel.empty) {
-    // A selection INSIDE a live zone (isolating, so it can't cross the boundary)
-    // sends the whole transcluded cards it overlaps — as a cached copy (the slice
-    // carries no zone node, so no live link travels). The general normalizer only
-    // sees top-level doc children and would miss it, returning null.
-    const zonePos = enclosingZonePos(doc, sel.from);
-    if (zonePos !== null && zonePos === enclosingZonePos(doc, sel.to)) {
-      return zoneChildSendRange(doc, zonePos, sel.from, sel.to);
-    }
-    // Normalize an arbitrary selection to a run of whole top-level nodes that
-    // leads with a structural unit, so whatever is sent can always be placed
-    // cleanly on receipt (never splitting a card). Returns null when nothing
-    // structural is selected.
-    return normalizeSelectionForSend(doc, sel.from, sel.to);
-  }
+  if (!sel.empty) return spanSendRange(doc, sel.from, sel.to);
   // Empty selection: the cursor's enclosing structure (card / heading + section).
   return enclosingStructureRange(doc, sel.$from);
+}
+
+/** Send range for one explicit span `[from, to)` of a selection. */
+function spanSendRange(doc: PMNode, from: number, to: number): SendRange | null {
+  // A selection INSIDE a live zone (isolating, so it can't cross the boundary)
+  // sends the whole transcluded cards it overlaps — as a cached copy (the slice
+  // carries no zone node, so no live link travels). The general normalizer only
+  // sees top-level doc children and would miss it, returning null.
+  const zonePos = enclosingZonePos(doc, from);
+  if (zonePos !== null && zonePos === enclosingZonePos(doc, to)) {
+    return zoneChildSendRange(doc, zonePos, from, to);
+  }
+  // Normalize an arbitrary selection to a run of whole top-level nodes that
+  // leads with a structural unit, so whatever is sent can always be placed
+  // cleanly on receipt (never splitting a card). Returns null when nothing
+  // structural is selected.
+  return normalizeSelectionForSend(doc, from, to);
+}
+
+/** Ranges for a discontinuous (shadow) selection — a scattered nav-pane
+ *  ⌘-click set, the manual Ctrl/Cmd selection, Select Similar — in doc
+ *  order, each normalized like a plain selection, overlaps merged. Empty
+ *  when there's no shadow selection (or the real selection is non-empty,
+ *  which wins, as in `getOperatingRanges`). A shadow set parks the caret
+ *  in the gap before its first range, where the cursor fallback finds no
+ *  enclosing structure — so without this the send silently did nothing. */
+function shadowSendRanges(view: EditorView): SendRange[] {
+  const state = view.state;
+  if (!state.selection.empty) return [];
+  const matches = getSimilarSelectionState(state).matches;
+  if (matches.length === 0) return [];
+  const ranges = matches
+    .map((m) => spanSendRange(state.doc, m.from, m.to))
+    .filter((r): r is SendRange => r !== null)
+    .sort((a, b) => a.from - b.from);
+  const merged: SendRange[] = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r.from <= last.to) last.to = Math.max(last.to, r.to);
+    else merged.push({ ...r });
+  }
+  return merged;
+}
+
+/** One slice holding every range's content back to back. Each range is a
+ *  run of whole nodes, so the per-range slices are closed and concatenate
+ *  cleanly. Live views are materialized per range, as in a single send. */
+function concatSendSlices(doc: PMNode, ranges: SendRange[]): Slice {
+  const nodes: PMNode[] = [];
+  for (const r of ranges) {
+    flattenSelfRefsInSlice(doc.slice(r.from, r.to), doc, newHeadingId).content.forEach((n) =>
+      nodes.push(n),
+    );
+  }
+  return new Slice(Fragment.fromArray(nodes), 0, 0);
 }
 
 /** Range covering the whole transcluded cards (zone children) that overlap
@@ -188,6 +230,8 @@ export function buildDeleteStructureTr(state: EditorState): Transaction | null {
  *  Returns `null` if the cursor isn't inside a structure that has
  *  natural send semantics (e.g., empty doc). */
 export function resolveSendSlice(view: EditorView): Slice | null {
+  const shadow = shadowSendRanges(view);
+  if (shadow.length > 0) return concatSendSlices(view.state.doc, shadow);
   const range = resolveSendRange(view);
   if (!range) return null;
   // Materialize any Live View here (source doc is in hand) so it travels as
@@ -201,6 +245,9 @@ export function resolveSendSlice(view: EditorView): Slice | null {
  *  left untouched (its enclosing-structure send is unambiguous). Returns null
  *  when there's nothing structural to send. */
 export function takeSendSlice(view: EditorView): Slice | null {
+  // A discontinuous selection sends all its pieces; it stays on screen as-is.
+  const shadow = shadowSendRanges(view);
+  if (shadow.length > 0) return concatSendSlices(view.state.doc, shadow);
   const hadSelection = !view.state.selection.empty;
   const range = resolveSendRange(view);
   if (!range) return null;
