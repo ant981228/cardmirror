@@ -29,7 +29,7 @@ text by design and never consults the setting;
 read-mode-show-background.test.ts pins that the count is unchanged with
 the setting on. Not changed: the export-side read-mode transform
 (`transformContainerForReadMode`), which follows neither this nor the
-other read-mode display settings.
+other read-mode display settings. Cora's PR #71.
 
 ### Added: Emphasis + Background Color
 
@@ -48,7 +48,131 @@ ranges, the structural-block skip, and the gap bridge (`withGapFix`).
 It always applies, like F10, so pressing it on text that already has
 the background repaints it instead of toggling it off. A null pen
 ("No background") leaves the text with no background, since the strip
-already removed it. Tests: emphasis-and-shading.test.ts.
+already removed it. Tests: emphasis-and-shading.test.ts. Cora's PR #73.
+
+### Added: Navigation pane depth commands
+
+`setNavDepth1`–`4` (View group, no default keys) call
+`NavigationPanel.setMaxLevel`, made public, through the pane-aware
+`activeNavPanelResolver`, so the change is the same transient, per-panel
+one a button click makes (never written to settings; pressing the active
+level re-collapses manual expansions; follows-cursor honoured) and lands
+on the focused document's pane in three-pane mode. Tests in ribbon-
+commands.test.ts. Cora's PR #72.
+
+### Added: Go to Next / Previous Pocket, Hat, Block, Tag
+
+`moveToHeadingOfType(type, dir)` in word-selection-keymap.ts reuses the
+PageUp / PageDown machinery: `collectHeadingPositions` takes an optional
+node-type filter and the commands come from the same `commandPair` (same
+clamping, same scroll-into-view). Previous keeps PageUp's shape — from
+inside a card, that card's own tag first, then the one before. Matching
+is by node type, so Next Tag skips analytics although both sit at
+outline level 4. Headings inside live views and linked copies count as
+stops. New Navigate group in the shortcuts editor. Tests in word-
+selection-keymap.test.ts. Cora's PR #74.
+
+### Added: Clear (F12) also removes highlighting
+
+Setting `clearRemovesHighlighting` (Editing → Formatting operations,
+off). `clearToNormal()` takes an optional reader (the
+`clearFormattingOnNamedStyleToggleOff` pattern) and, when it returns
+true, adds `highlight` to the strip set in every regime — cursor, whole-
+paragraph, partial, shadow-selection (Select Similar) and the tag /
+analytic dissolve path. Shading is never stripped. Read at run time, so
+a flip applies at once. Tests: clear-removes-highlighting.test.ts.
+Cora's PR #75.
+
+### Added: Condense With Warning and Shrink
+
+`condenseAndShrink(condense, shrink)` runs Condense With Warning into a
+captured transaction, maps the original selection's ends through it
+(positions inside the replaced range map to its edges, so the span
+covers pause marker, merged paragraph and resume marker), runs
+`shrinkText` on a bare `EditorState` over the condensed doc with that
+span selected, and appends its steps to the same transaction — one
+dispatch, one undo. A bare state rather than `state.apply(tr)`, so
+plugin appendTransaction steps can't shift positions. Shrink's own
+settings apply, including marker protection, which keeps the markers at
+Normal. Refuses wherever Condense With Warning refuses. Alias "fast
+condense" (CardMirrorPlus's name for it). Tests: condense-and-
+shrink.test.ts. Cora's PR #80.
+
+### Added: three-pane — opening a file replaces an untouched Untitled doc
+
+Setting `openReplacesUntitled` (Workspace, off). In `loadOpenedIntoSlot`
+— the one path every three-pane open takes (dialog, slot button,
+palette, drag-drop, OS association, workspace restore) — the slot's
+visible doc gives up its place when `isReplaceableUntitled` holds: never
+saved (`handle` and `format` null), not dirty, not the speech doc, not
+co-edited, and `isUntouchedBlank(state)` (blank-doc.ts): one empty
+paragraph AND `undoDepth === 0`, so typed-then-deleted keeps the doc.
+The file is pushed first and the Untitled record closed with
+`Slot.closeRecord`, by then hidden and clean, so silently. Tests: blank-
+doc-untouched.test.ts. Cora's PR #76.
+
+### Added: three-pane — New Speech Document opens on the speech doc side
+
+Setting `newSpeechDocInSpeechSlot` (Workspace, off):
+`createNewSpeechDocument` skips `promptForSlot` and uses
+`slotPlanForSpeech(arrangeSpeechSide).speechSlot` (slot 3 for right,
+slot 1 for left), stacking on whatever is there. Name prompt, filename
+template, format, Pocket seeding and speech-doc marking are unchanged.
+Cora's PR #78.
+
+### Added: three-pane — mark the first document in the speech doc slot
+
+Setting `autoMarkSpeechSlotDoc` (Workspace, off): `maybeAutoMarkSpeech`
+runs after the push in `loadOpenedIntoSlot` (every open path, workspace
+restore included) and in `createNewDoc`, and marks the record only when
+it landed in the speech-side slot and no speech doc is marked. Moving
+between slots and Arrange Windows use neither path, so they never mark;
+an existing mark is never replaced. With the Untitled-replacement
+setting also on, a blank New in that slot gets marked and so is no
+longer replaceable by a later Open — consistent, and worth knowing.
+Cora's PR #79.
+
+### Added: three-pane — Hide Slot / Reveal All Slots
+
+`Slot.paneHidden` plus one visibility rule, `slotShown(slot)`: in expand
+mode only the expanded slot; otherwise a slot with docs that isn't
+hidden. `applyExpandedState`, `reconcileNavRail`, the layout's `data-
+active` count, the wide-layout scroll check and the focus hand-off on
+empty all use it, so width sharing and the outline rail treat a hidden
+slot like an empty one. `hideSlot` ends expand mode first, refuses the
+last slot showing (toast) and moves focus to a slot still showing. The
+flag clears on Reveal All Slots, on a push into the slot
+(`notifySlotPopulated`), on Arrange Windows (which reveals everything
+first) and when the slot empties; it is not persisted in the workspace
+snapshot. Title-bar Hide button behind `showHideSlotButton` (Workspace,
+off; `minus` icon). Merge fixup: `focusSlot` now clears `paneHidden`
+ahead of its focus-follows-visibility guard, because every surface-
+before-prompt path goes through it (closeRecord / closeAllExcept on a
+dirty doc, the quit prompt, surfaceDuplicateIfOpen, show-in-context) —
+without that, a dirty doc in a hidden slot drew a save prompt for a doc
+you couldn't see, with Save routed to the doc you could.
+`focusSlotByIndex`'s own reveal is folded into it. Cora's PR #81.
+
+### Added: open several files at once
+
+Setting `openMultipleFiles` (Workspace, off, desktop only). A new
+`host:open-files` IPC runs the dialog with `multiSelections`; each pick
+gets the same read grant and empty-on-disk flag as `host:open-file`, and
+an unreadable pick is dropped rather than failing the batch.
+`Host.openFiles?` is implemented by `ElectronHost` (falls back to
+`openFile` on an older preload); `BrowserHost` leaves it out, so the web
+build keeps the single picker. `runOpenFlow` offers multi-select only
+where every pick has somewhere to go (three-pane, or a host that can
+spawn windows). Three-pane: `routeOpenedFilesToSlot` runs the journal
+decode and cross-window guard per file, then `onFilesOpen` shows one
+slot picker for the batch and `loadBatchIntoSlot` loads in dialog order,
+skipping already-open files with a toast and reporting a failed load
+without stopping. A slot's Open button loads the batch into that slot
+with no picker; window mode routes each file through `routeOpenedFile`.
+Merge fixup: a `NativeDamagedError` in the batch is collected and, after
+the rest have loaded, gets the same `offerDamagedSalvage` a single
+damaged file does (now exported from index.ts) instead of a per-file
+toast. Cora's PR #77.
 
 ## 1.12.0 — 2026-09-21
 

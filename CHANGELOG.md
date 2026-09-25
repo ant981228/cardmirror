@@ -14,13 +14,73 @@ see `DETAILED_CHANGELOG.md`.
   read mode beside highlighted text, so a highlighting pass you locked
   to background (Lock Highlighting) stays on screen while you read your
   re-highlight. Convert Cards to Read Mode follows it. Background-colored
-  text still doesn't count toward word counts or read time.
+  text still doesn't count toward word counts or read time. Thanks to
+  Cora (@coralynnkc)!
 
 - **Emphasis + Background Color.** A new command (Search Everything;
   unbound, so give it a key in Settings → Keyboard shortcuts) applies
   Emphasis and the active background color in one keystroke and one
   undo. Emphasis on its own removes background color, so doing them
-  one at a time in the wrong order used to lose the background.
+  one at a time in the wrong order used to lose the background. Thanks
+  to Cora (@coralynnkc)!
+
+- **Navigation pane depth commands.** Four new commands, *Navigation
+  Pane: Show Level 1* through *Show Levels 1–4*, set the pane's depth
+  from the keyboard exactly as its 1 · 2 · 3 · 4 buttons do. Unbound by
+  default; give them keys in Settings → Keyboard shortcuts. Thanks to
+  Cora (@coralynnkc)!
+
+- **Go to Next / Previous Pocket, Hat, Block and Tag.** Eight new caret
+  commands jump by one heading level only, so Next Tag skips every Block
+  and Analytic on the way (Verbatim's Next / Previous Tag). PageUp /
+  PageDown still stop at every heading. Unbound by default. Thanks to
+  Cora (@coralynnkc)!
+
+- **Clear (F12) also removes highlighting** (Settings → Editing →
+  Formatting operations, off by default). On, F12 strips highlighting
+  along with everything else it clears, in every case; background color
+  is kept either way. Thanks to Cora (@coralynnkc)!
+
+- **Condense With Warning and Shrink.** One command (unbound; also
+  answers to "fast condense" in Search Everything) runs Condense With
+  Warning and then Shrink on the result, as one step with one undo. The
+  pause and resume markers stay full size when Shrink's marker
+  protection is on. Thanks to Cora (@coralynnkc)!
+
+- **Three-pane: opening a file replaces an untouched Untitled doc**
+  (Settings → General → Workspace, off by default). New, then Open into
+  the same slot no longer leaves a blank Untitled stacked under the
+  file. An Untitled you have typed in (even if you deleted it again),
+  the speech doc, and co-edited docs always stay. Thanks to Cora
+  (@coralynnkc)!
+
+- **Three-pane: New Speech Document opens on the speech doc side**
+  (Settings → General → Workspace, off by default) skips the slot
+  question and puts the new speech doc in the slot Arrange Windows uses
+  for it. Thanks to Cora (@coralynnkc)!
+
+- **Three-pane: mark the first document in the speech doc slot as the
+  speech doc** (Settings → General → Workspace, off by default). While
+  nothing is marked, the first document you open or create in the
+  speech-side slot becomes the speech doc, so Send to Speech works on a
+  file you opened rather than created. Thanks to Cora (@coralynnkc)!
+
+- **Three-pane: Hide Slot and Reveal All Slots.** Two new commands
+  (unbound by default) park a slot, documents and all, so the other two
+  share the width, and bring every hidden slot back. A hidden slot also
+  returns when you press Mod-1/2/3 on it, open or send a document into
+  it, run Arrange Windows, or when one of its documents needs you (a
+  save prompt, or a file that is already open there). *Show a Hide
+  button on each slot* (Settings → General → Workspace) adds a title-bar
+  button. Thanks to Cora (@coralynnkc)!
+
+- **Open several files at once** (Settings → General → Workspace, off by
+  default, desktop only). The Open dialog takes a multi-selection. In
+  the three-pane workspace you pick one slot for the whole batch and the
+  files stack there (Ctrl-Tab cycles them); a slot's own Open button
+  loads them into that slot without asking. Otherwise each file opens in
+  its own window. A damaged file in the batch gets the usual repair
+  offer once the rest have opened. Thanks to Cora (@coralynnkc)!
 
 ## 1.12.0 — 2026-09-21
 

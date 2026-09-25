@@ -1060,7 +1060,9 @@ as you open more.
 - **Hide Slot** (a command, unbound by default) takes the focused slot out
   of the layout so the other slots share its width. Its documents stay open.
   **Reveal All Slots** brings every hidden slot back, and so do **Mod-1/2/3**
-  on that slot, opening or sending a document into it, and Arrange Windows.
+  on that slot, opening or sending a document into it, Arrange Windows, and
+  anything that needs you to see one of its documents (a save prompt, or a
+  file that turns out to be open there already).
   The last slot showing can't be hidden. Turn on **Settings → General →
   Workspace → Show a Hide button on each slot** (off by default) for a Hide
   button in each slot's title bar.

@@ -6931,7 +6931,7 @@ function mountOpenedSingleDoc(args: {
  *  file handle so the first save forces Save As and the damaged
  *  original stays byte-intact for forensics; the drop report joins
  *  the local diagnostics log. */
-async function offerDamagedSalvage(name: string, bytes: Uint8Array): Promise<void> {
+export async function offerDamagedSalvage(name: string, bytes: Uint8Array): Promise<void> {
   let salvaged: ReturnType<typeof parseNativeSalvage>;
   try {
     salvaged = parseNativeSalvage(bytes);

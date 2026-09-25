@@ -38,7 +38,7 @@ import { EditorView } from 'prosemirror-view';
 import { setViewDocPath } from './transclusion-doc-path.js';
 import { Node as PMNode } from 'prosemirror-model';
 import { schema, newHeadingId } from '../schema/index.js';
-import { fromDocxFull, parseNative, serializeNativeAsync, NATIVE_FILE_EXTENSION } from '../index.js';
+import { fromDocxFull, parseNative, serializeNativeAsync, NativeDamagedError, NATIVE_FILE_EXTENSION } from '../index.js';
 import { settings } from './settings.js';
 import { MARK_UNREAD_TOGGLE } from './mark-unread-plugin.js';
 import { PMD_READ_MODE_TOGGLE } from './read-mode-plugin.js';
@@ -133,6 +133,7 @@ import {
   getCommentsColumnEl,
   notifyCommentsForActiveTransaction,
   sendViewToDropzone,
+  offerDamagedSalvage,
 } from './index.js';
 import { sendViewToStarred } from './pairing/send-to-starred.js';
 import { sendViewToRecipient } from './pairing/send-to-recipient.js';
@@ -2093,11 +2094,7 @@ class MultiPaneShell {
   focusSlotByIndex(idx: 0 | 1 | 2): void {
     const slot = this.slots[SLOT_IDS[idx]!];
     if (slot.stack.length === 0) return;
-    // Focusing a hidden slot brings it back.
-    if (slot.paneHidden) {
-      slot.paneHidden = false;
-      this.applyExpandedState();
-    }
+    // A hidden slot comes back on focus (see focusSlot).
     if (this.expandedSlot && this.expandedSlot !== slot) {
       this.setExpandedSlot(slot);
     } else {
@@ -2203,6 +2200,17 @@ class MultiPaneShell {
     // doc splits chord routing (view keymaps need DOM focus) from
     // command routing (active view), which reads as "styling does
     // nothing". The slot takes focus normally when it becomes visible.
+    // A slot the user hid (Hide Slot) comes back when something focuses
+    // it. Every surface-before-prompt path lands here — closeRecord /
+    // closeAllExcept on a dirty doc, the quit prompt, a duplicate open,
+    // show-in-context — and a save prompt for a doc you can't see, with
+    // Save routed to the doc you CAN see, is what hiding must never
+    // cause. Under expand mode the guard below still holds: only the
+    // expanded pane is visible, exactly as before.
+    if (slot.paneHidden && slot.stack.length > 0) {
+      slot.paneHidden = false;
+      this.applyExpandedState();
+    }
     if (slot.paneEl.hidden) return;
     const wasSame = this.focusedSlot === slot && getActiveView() === slot.visible?.view;
     // The focused highlight is DERIVED: stamped across all panes on
@@ -2788,8 +2796,10 @@ class MultiPaneShell {
 
   /** Load a batch into one slot, in dialog order. A file already open in
    *  this window is skipped with a toast, and one that fails to load is
-   *  reported without stopping the rest. */
+   *  reported without stopping the rest. A damaged .cmir gets the same
+   *  repair offer a single open gives it, once the rest are in. */
   private async loadBatchIntoSlot(files: OpenedFile[], target: SlotId): Promise<void> {
+    const damaged: OpenedFile[] = [];
     for (const file of files) {
       if (await this.findOpenRecordByHandle(file.handle ?? null)) {
         showToast(`"${file.name}" is already open.`);
@@ -2798,10 +2808,18 @@ class MultiPaneShell {
       try {
         await this.loadOpenedIntoSlot(file, target);
       } catch (err) {
+        if (err instanceof NativeDamagedError) {
+          damaged.push(file);
+          continue;
+        }
         console.error('Open failed for', file.name, err);
         showToast(`Couldn't open "${file.name}": ${err instanceof Error ? err.message : err}`);
       }
     }
+    // Consent-first repair offer (repaired copy, no file handle), the
+    // same one the single-file path gives — after the batch, so one bad
+    // file never holds up the others.
+    for (const file of damaged) await offerDamagedSalvage(file.name, file.bytes);
   }
 
   /** Flashcard review's "Show in context": reveal the card's source in a
