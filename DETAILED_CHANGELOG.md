@@ -5,6 +5,28 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Added: title-bar proxy icon (macOS)
+
+Word lets you drag an open document out of its title bar into another
+app, such as a Slack message. CardMirror now does the same on macOS
+through AppKit's represented-file proxy icon
+(`BrowserWindow.setRepresentedFilename`). With it, dragging the icon
+(revealed on title hover since Big Sur) supplies the file URL to the
+drop target, and Cmd-click on the title opens the path menu.
+
+The renderer pushes the focused doc's on-disk path over the new
+`host:set-represented-file` IPC from `updateWindowTitle`, which every
+doc-identity change already goes through (open, Save / Save As, close to
+home, new doc, pane focus, multi-pane mount / detach). `null` (untitled,
+recovered draft, home screen) clears the icon. Pushes are deduped on the
+renderer side because the title path is hot. In the multi-doc workspace
+the title lists every slot, but the icon names the focused doc. Main
+ignores the call off macOS; Electron has no Windows or Linux equivalent.
+The preload method is optional in `ElectronAPI`, so a newer renderer
+against an older shell skips it.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added: URLs → links (Link URLs, autolink, Mod+click)

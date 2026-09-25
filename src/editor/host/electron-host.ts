@@ -318,6 +318,9 @@ interface ElectronAPI {
   /** Push the current filename for a uid so the Select-Speech-Doc
    *  modal can show meaningful row labels across every window. */
   docInfoUpdate(uid: string, filename: string | null): Promise<void>;
+  /** macOS title-bar proxy icon (draggable document icon). Optional
+   *  so a renderer against an older packaged shell skips it. */
+  setRepresentedFile?(path: string | null): Promise<void>;
   /** Cross-window dropzone shelf. List returns current items;
    *  add/remove/clear mutate and broadcast via onDropzoneChanged. */
   dropzoneList(): Promise<
@@ -1064,6 +1067,10 @@ export class ElectronHost implements Host {
 
   async docInfoUpdate(uid: string, filename: string | null): Promise<void> {
     await api().docInfoUpdate(uid, filename);
+  }
+
+  async setRepresentedFile(path: string | null): Promise<void> {
+    await api().setRepresentedFile?.(path);
   }
 
   async dropzoneList(): Promise<

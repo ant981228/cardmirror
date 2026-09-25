@@ -5,6 +5,16 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **Drag a document out of the title bar (macOS).** A saved
+  document's file icon now sits in the window's title bar: hover over
+  the title, then drag the icon into Slack, Mail, Finder, or any other
+  app to share the file, as you can with Word. Cmd-click the title to
+  see where the file lives.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added
