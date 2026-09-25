@@ -4176,7 +4176,6 @@ body.pmd-nav-hidden #nav-pane-pull-tab {
 .pmd-home-recents-clear:hover,
 .pmd-dropzone-row-delete:hover,
 .pmd-dropzone-bar:hover,
-.pmd-dropzone-clear:hover,
 .pmd-qc-add-suggestion:hover,
 .pmd-voice-pill:hover,
 .pmd-receive-bar:hover,
@@ -4928,6 +4927,11 @@ body.pmd-multi-doc .pmd-pill-tray {
   text-align: center;
   line-height: 1.3;
 }
+/* An author `display` beats the UA's `[hidden] { display: none }`, so the
+   empty shelf showed a "0" (field report 2026-09-25). */
+.pmd-dropzone-count[hidden] {
+  display: none;
+}
 /* Shared scaffolding (flex fill).
    Diverge by pulling a selector out, not by re-copying. */
 .pmd-qc-manage-row-main,
@@ -4936,26 +4940,9 @@ body.pmd-multi-doc .pmd-pill-tray {
   flex: 1 1 auto;
   min-width: 0;
 }
-.pmd-dropzone-clear {
-  appearance: none;
-  font: inherit;
-  font-size: 0.72rem;
-  background: transparent;
-  border: 1px solid var(--pmd-c-border);
-  border-radius: 4px;
-  padding: 0.1rem 0.4rem;
-  cursor: pointer;
-  color: var(--pmd-c-text-muted);
-}
-/* Shelf popup footer: the Clear button, right-aligned; only rendered
-   while the shelf has items. */
-.pmd-dropzone-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 4px;
-  padding: 4px 0.25rem 0.1rem;
-  border-top: 1px solid var(--pmd-c-border-soft);
-}
+/* Shelf popup footer (Clear): the same actions row + action button as
+   the Send / Receive popups — see `.pmd-send-actions` /
+   `.pmd-send-action`. Only rendered while the shelf has items. */
 
 
 .pmd-nav-panel {
@@ -14707,7 +14694,8 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
    the SAME two footprints as drop zones during a drag (send-by-code /
    recent-senders) — the geometry is shared so the modalities agree. */
 .pmd-send-actions,
-.pmd-receive-actions {
+.pmd-receive-actions,
+.pmd-dropzone-actions {
   display: flex;
   gap: 4px;
   margin-top: 4px;
@@ -14719,8 +14707,11 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
   display: none;
 }
 .pmd-send-action,
-.pmd-receive-action {
+.pmd-receive-action,
+.pmd-dropzone-clear {
   flex: 1 1 0;
+  appearance: none;
+  font: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -14737,6 +14728,7 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 }
 .pmd-send-action:hover,
 .pmd-receive-action:hover,
+.pmd-dropzone-clear:hover,
 .pmd-send-action.pmd-send-action-hot {
   border-color: var(--pmd-c-accent);
   color: var(--pmd-c-accent);
@@ -14745,6 +14737,10 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 .pmd-send-action-icon {
   display: inline-flex;
   flex-shrink: 0;
+}
+/* Icon-set glyphs in an action button match the inline 15px SVGs. */
+.pmd-send-action-icon > .pmd-icon {
+  font-size: 15px;
 }
 .pmd-send-action-collab-hidden {
   display: none;

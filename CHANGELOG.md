@@ -95,11 +95,16 @@ see `DETAILED_CHANGELOG.md`.
   pills' icons now come from the app's own icon set: a storage box for
   the dropzone, and a matching out-tray and in-tray for Send and
   Receive (the old dropzone and Receive icons were a mismatched pair of
-  opposite arrows).
+  opposite arrows). The Receive list gains a **Clear** button beside
+  Join session, and the shelf's Clear is styled like those buttons.
 - **No more browser focus ring.** The orange-or-accent-colored ring the
   browser drew around whatever last took keyboard focus (a pill, a nav
   row, a chip) is gone everywhere. Text fields still show their own blue
   outline while active.
+
+### Fixed
+
+- The dropzone pill showed a **0** badge when the shelf was empty.
 
 ## 1.12.0 — 2026-09-21
 

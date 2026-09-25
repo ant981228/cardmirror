@@ -46,6 +46,8 @@ export class ReceivePillController {
   private bar!: HTMLDivElement;
   private listEl!: HTMLUListElement;
   private joinSessionEl: HTMLButtonElement | null = null;
+  /** Footer Clear — empties the inbox; shown only while it has items. */
+  private clearEl: HTMLButtonElement | null = null;
   private actionsLi: HTMLLIElement | null = null;
   private badge!: HTMLSpanElement;
   private getFocusedView: () => EditorView | null = () => null;
@@ -106,6 +108,24 @@ export class ReceivePillController {
       collabSessionJoinPrompt()?.();
     });
     this.actionsLi.appendChild(this.joinSessionEl);
+    // Clear, like the dropzone's: everything received goes, no prompt
+    // (a resend is always possible). Shown only while there are items.
+    this.clearEl = document.createElement('button');
+    this.clearEl.type = 'button';
+    this.clearEl.className = 'pmd-receive-action pmd-receive-clear';
+    this.clearEl.title = 'Remove everything received';
+    const clearIcon = document.createElement('span');
+    clearIcon.className = 'pmd-send-action-icon';
+    setIcon(clearIcon, 'trash');
+    this.clearEl.appendChild(clearIcon);
+    const clearLabel = document.createElement('span');
+    clearLabel.textContent = 'Clear';
+    this.clearEl.appendChild(clearLabel);
+    this.clearEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void inboxStore.clear();
+    });
+    this.actionsLi.appendChild(this.clearEl);
 
     this.bar = document.createElement('div');
     this.bar.className = 'pmd-pill-bar pmd-receive-bar';
@@ -271,7 +291,10 @@ export class ReceivePillController {
       }
     }
     if (this.actionsLi) {
-      this.actionsLi.hidden = !(collabEnabled() && collabSessionJoinPrompt() !== null);
+      const canJoin = collabEnabled() && collabSessionJoinPrompt() !== null;
+      if (this.joinSessionEl) this.joinSessionEl.hidden = !canJoin;
+      if (this.clearEl) this.clearEl.hidden = total === 0;
+      this.actionsLi.hidden = !canJoin && total === 0;
       this.listEl.appendChild(this.actionsLi);
     }
   }

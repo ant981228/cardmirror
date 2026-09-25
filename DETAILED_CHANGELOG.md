@@ -225,7 +225,16 @@ Receive a down-arrow tray drawn to different geometry, Send a paper
 plane. They now use the icon set through `setIcon`: `archive` (lidded
 storage box) for the dropzone, `upload` (out-tray) for Send and
 `download` (in-tray) for Receive, the set's matched pair; `.pmd-icon`
-sized to 16px inside the bars. Tests: pill-popup-anatomy.test.ts.
+sized to 16px inside the bars. Footer parity: the shelf's Clear is now a
+`.pmd-send-action`-style button (trash icon + label, the same dashed
+full-width footprint as Add contact / Join session — the selector lists
+gained `.pmd-dropzone-actions` / `.pmd-dropzone-clear`), and the
+Receive footer gains its own Clear (`inboxStore.clear()`, no prompt —
+a resend is always possible) beside Join session, each button hidden on
+its own condition and the row hidden only when both are. Fixed on the
+way: `.pmd-dropzone-count { display: inline-block }` beat the UA
+`[hidden]` rule, so the empty shelf showed "0"; a `[hidden]` override
+restores it. Tests: pill-popup-anatomy.test.ts.
 
 ### Changed: no browser focus ring
 

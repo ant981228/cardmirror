@@ -13,6 +13,7 @@ import { DropzoneController } from '../../src/editor/dropzone-ui.js';
 import { dropzoneStore } from '../../src/editor/dropzone-store.js';
 import { SendPillController } from '../../src/editor/pairing/send-pill-ui.js';
 import { ReceivePillController } from '../../src/editor/pairing/receive-pill-ui.js';
+import { inboxStore } from '../../src/editor/pairing/inbox-store.js';
 import { settings } from '../../src/editor/settings.js';
 
 const css = readFileSync(resolve(process.cwd(), 'src/editor/style.css'), 'utf8');
@@ -49,6 +50,11 @@ describe('pill popup CSS contract', () => {
     expect(popup).toMatch(/bottom: calc\(100% \+ var\(--pmd-pill-popup-gap/u);
     expect(popup).toMatch(/border: 1px solid var\(--pmd-c-border\);/u);
     expect(css).toMatch(/\.pmd-dropzone-bar:hover,\n\.pmd-send-bar:hover,\n\.pmd-receive-bar:hover \{\n\s*border-color: var\(--pmd-c-accent\);/u);
+  });
+  it('the dropzone count hides at zero and its Clear shares the action-button styling', () => {
+    expect(css).toMatch(/\.pmd-dropzone-count\[hidden\] \{\n\s*display: none;/u);
+    expect(css).toMatch(/\.pmd-send-action,\n\.pmd-receive-action,\n\.pmd-dropzone-clear \{/u);
+    expect(css).toMatch(/\.pmd-send-actions,\n\.pmd-receive-actions,\n\.pmd-dropzone-actions \{/u);
   });
   it('the browser focus ring is suppressed app-wide (the app draws its own where it matters)', () => {
     expect(css).toMatch(/\n:focus,\n:focus-visible \{\n\s*outline: none;\n\}/u);
@@ -117,5 +123,28 @@ describe('the three pills share the popup anatomy', () => {
     (root.querySelector('.pmd-dropzone-bar') as HTMLElement).click();
     expect(surface.hitTest(200, 300)).not.toBeNull(); // open: the popup counts
     expect(surface.hitTest(30, 515)).not.toBeNull(); // the bar still counts
+  });
+});
+
+describe('receive Clear', () => {
+  it('sits in the footer only while there are items, and empties the inbox on click', () => {
+    vi.spyOn(inboxStore, 'init').mockResolvedValue();
+    const clear = vi.spyOn(inboxStore, 'clear').mockResolvedValue();
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    new ReceivePillController().mount({ parent, getFocusedView: () => null });
+    const store = inboxStore as unknown as { items: unknown[]; fire: () => void };
+    store.items = [];
+    store.fire();
+    const btn = () => parent.querySelector('.pmd-receive-clear') as HTMLButtonElement;
+    expect(btn().hidden).toBe(true);
+    store.items = [{ id: 'r1', label: 'Beta tag', type: 'card', sliceJson: { content: [] }, senderName: 'Cora', senderCode: 'AB12', receivedAt: Date.now(), read: true }];
+    store.fire();
+    expect(btn().hidden).toBe(false);
+    expect((btn().closest('.pmd-receive-actions') as HTMLElement).hidden).toBe(false);
+    btn().click();
+    expect(clear).toHaveBeenCalledTimes(1);
+    store.items = [];
+    store.fire();
   });
 });

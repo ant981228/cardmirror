@@ -104,8 +104,14 @@ export class DropzoneController {
     this.clearBtn = document.createElement('button');
     this.clearBtn.type = 'button';
     this.clearBtn.className = 'pmd-dropzone-clear';
-    this.clearBtn.textContent = 'Clear';
     this.clearBtn.title = 'Remove every shelf item';
+    const clearIcon = document.createElement('span');
+    clearIcon.className = 'pmd-send-action-icon';
+    setIcon(clearIcon, 'trash');
+    this.clearBtn.appendChild(clearIcon);
+    const clearLabel = document.createElement('span');
+    clearLabel.textContent = 'Clear';
+    this.clearBtn.appendChild(clearLabel);
     this.clearBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       void dropzoneStore.clear();

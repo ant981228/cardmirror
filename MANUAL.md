@@ -1503,6 +1503,8 @@ row:
   view with a nav pane, so you can see what someone sent before it goes
   anywhere; **Copy to clipboard** there copies the cards for pasting, and
   **Close** (or Esc) dismisses it.
+- **Clear**, at the bottom of the list, removes everything received (a
+  sender can always send again).
 - Inserted cards fold in the nav pane to your current outline depth
   instead of arriving fully expanded.
 - **Mod-P** inserts the most recently received card at the cursor, and
