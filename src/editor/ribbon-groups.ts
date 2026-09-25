@@ -238,6 +238,8 @@ export const RIBBON_GROUPS: RibbonGroup[] = [
       'sendDocToSlot2',
       'sendDocToSlot3',
       'toggleSlotExpand',
+      'hideSlot',
+      'revealAllSlots',
       'cycleDocNext',
       'cycleDocPrev',
       'closeDocOrWindow',

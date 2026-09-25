@@ -4535,6 +4535,8 @@ const VIEWLESS_RIBBON_COMMANDS = new Set<AnyCommandId>([
   'sendDocToSlot2',
   'sendDocToSlot3',
   'toggleSlotExpand',
+  'hideSlot',
+  'revealAllSlots',
   'cycleDocNext',
   'cycleDocPrev',
   'closeDocOrWindow',
@@ -4596,6 +4598,8 @@ function runViewlessRibbon(id: AnyCommandId): void {
     case 'sendDocToSlot2': void runMultiPane('sendDocToSlot', 1); return;
     case 'sendDocToSlot3': void runMultiPane('sendDocToSlot', 2); return;
     case 'toggleSlotExpand': void runMultiPane('toggleSlotExpand', 0); return;
+    case 'hideSlot': void runMultiPane('hideSlot', 0); return;
+    case 'revealAllSlots': void runMultiPane('revealAllSlots', 0); return;
     case 'cycleDocNext': void runMultiPaneCycle(1); return;
     case 'cycleDocPrev': void runMultiPaneCycle(-1); return;
     case 'closeDocOrWindow':
@@ -4626,7 +4630,7 @@ function runRibbonCommandById(id: AnyCommandId): void {
  *  silently. Encapsulated as a helper so the case bodies in
  *  `runViewlessRibbon` above stay tidy. */
 async function runMultiPane(
-  action: 'focusSlot' | 'sendDocToSlot' | 'toggleSlotExpand',
+  action: 'focusSlot' | 'sendDocToSlot' | 'toggleSlotExpand' | 'hideSlot' | 'revealAllSlots',
   slotIdx: 0 | 1 | 2,
 ): Promise<void> {
   const m = await import('./multi-pane-shell.js');
@@ -4639,6 +4643,12 @@ async function runMultiPane(
       return;
     case 'toggleSlotExpand':
       m.toggleFocusedSlotExpand();
+      return;
+    case 'hideSlot':
+      m.hideFocusedSlot();
+      return;
+    case 'revealAllSlots':
+      m.revealAllSlots();
       return;
   }
 }

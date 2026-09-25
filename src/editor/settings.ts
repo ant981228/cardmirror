@@ -1614,6 +1614,9 @@ export interface Settings {
    *  untouched Untitled (never saved, never edited) closes that doc
    *  instead of stacking the file on top of it. Off by default. */
   openReplacesUntitled: boolean;
+  /** Three-pane: show a Hide button on each slot's title bar. Off by
+   *  default; the Hide Slot / Reveal All Slots commands work either way. */
+  showHideSlotButton: boolean;
   /** Quick Cards: tags currently active in the search-palette filter
    *  (edited by the Tag Picker). Empty = no filter (all cards in
    *  scope); non-empty scopes search to cards with >=1 active tag.
@@ -2034,6 +2037,7 @@ const DEFAULTS: Settings = {
   mobileLayout: 'auto',
   multiDocLayoutMode: 'compact',
   openReplacesUntitled: false,
+  showHideSlotButton: false,
   quickCardActiveTags: [],
   cardCutterEnabled: false,
   cardCutterEnginePath: '',
@@ -2363,6 +2367,17 @@ export const SETTING_METADATA: SettingMeta[] = [
     section: 'Workspace',
     dependsOn: 'multiDocWorkspace',
     aliases: ['replace untitled', 'replace empty document', 'close blank document'],
+  },
+  {
+    key: 'showHideSlotButton',
+    label: 'Show a Hide button on each slot',
+    description:
+      "Off by default. On, each slot's title bar gets a Hide button that takes the slot out of the layout so the other slots share its width; its documents stay open. Reveal All Slots (a command) brings hidden slots back, and so do Mod-1/2/3 or opening a document into the slot. Hide Slot and Reveal All Slots are commands either way (unbound by default).",
+    kind: 'toggle',
+    category: 'general',
+    section: 'Workspace',
+    dependsOn: 'multiDocWorkspace',
+    aliases: ['hide slot', 'hide pane', 'reveal slots', 'minimize slot'],
   },
   {
     key: 'navMaxLevel',
@@ -5202,6 +5217,7 @@ function sanitize(s: Settings): Settings {
       s.multiDocLayoutMode === 'wide' || s.multiDocLayoutMode === 'compact'
         ? s.multiDocLayoutMode
         : DEFAULTS.multiDocLayoutMode,
+    showHideSlotButton: s.showHideSlotButton === true,
     quickCardActiveTags: Array.isArray(s.quickCardActiveTags)
       ? s.quickCardActiveTags.filter((t): t is string => typeof t === 'string')
       : [],

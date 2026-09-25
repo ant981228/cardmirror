@@ -588,6 +588,10 @@ class Slot {
    *  full editor + nav-rail surface while the others stay loaded
    *  but hidden, and back. */
   private chipExpandBtn: HTMLButtonElement;
+  /** Chip hide button — hides this slot's pane (the docs stay open).
+   *  Only shown when the "Show a Hide button on each slot" setting is on;
+   *  the Hide Slot command works either way. */
+  private chipHideBtn: HTMLButtonElement;
   /** Title chip × close button. */
   private chipCloseBtn: HTMLButtonElement;
   /** Editor body — DocRecord.editorEl mounts here. */
@@ -617,6 +621,11 @@ class Slot {
    *  the doc itself stays open — until the user reopens it. Per-slot, so
    *  closing one document's outline leaves the others' untouched. */
   navHidden = false;
+  /** True when the user has hidden this slot (Hide Slot). Its pane and
+   *  outline leave the layout and the other slots share the width; the
+   *  docs stay open. Cleared by Reveal All Slots, by focusing the slot
+   *  (Mod-1/2/3), by a doc landing in it, and when it empties. */
+  paneHidden = false;
   /** Vertical flex weight of this slot's nav section within the rail.
    *  All start at 1 (equal share); dragging a section's resize handle
    *  shifts weight between it and its neighbour. Reset to 1 whenever the
@@ -683,6 +692,18 @@ class Slot {
       this.shell.toggleExpanded(this);
     });
     chip.appendChild(this.chipExpandBtn);
+    this.chipHideBtn = document.createElement('button');
+    this.chipHideBtn.type = 'button';
+    this.chipHideBtn.className = 'pmd-pane-chip-hide';
+    this.chipHideBtn.title = 'Hide this slot (Reveal All Slots brings it back)';
+    setIcon(this.chipHideBtn, 'minus');
+    this.chipHideBtn.hidden = !settings.get('showHideSlotButton');
+    this.chipHideBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    this.chipHideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.shell.hideSlot(this);
+    });
+    chip.appendChild(this.chipHideBtn);
     // Outline-toggle — shows / hides this slot's nav section. Pressed
     // = outline visible. Doubles as the reopen affordance after the
     // user closes the section with its own × button.
@@ -795,6 +816,10 @@ class Slot {
 
   /** Sync the chip's expand button to the shell's current expand
    *  state. Driven by `MultiPaneShell.applyExpandedState`. */
+  setHideButtonVisible(visible: boolean): void {
+    this.chipHideBtn.hidden = !visible;
+  }
+
   setExpandButtonPressed(pressed: boolean): void {
     this.chipExpandBtn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
     this.chipExpandBtn.title = pressed
@@ -941,6 +966,7 @@ class Slot {
       // Reset the per-slot outline-closed flag so a doc opened into
       // this slot later starts with its outline shown.
       this.navHidden = false;
+      this.paneHidden = false;
       this.shell.notifySlotEmptied(this);
       this.shell.reconcileNavRail();
       this.shell.refreshLayout();
@@ -1041,6 +1067,7 @@ class Slot {
       // Reset the per-slot outline-closed flag so a doc opened into
       // this slot later starts with its outline shown.
       this.navHidden = false;
+      this.paneHidden = false;
       // If this empty slot was the expanded one, exit expand mode —
       // no doc to expand any more.
       this.shell.notifySlotEmptied(this);
@@ -1507,6 +1534,7 @@ class MultiPaneShell {
       }
       // Pane word counts depend on reader settings.
       for (const id of SLOT_IDS) this.slots[id].refreshWordCount();
+      for (const id of SLOT_IDS) this.slots[id].setHideButtonVisible(s.showHideSlotButton);
       // Last workspace turned on mid-session: publish the open set now.
       if (s.lastWorkspaceEnabled) this.reportWorkspace();
       // Editor spellcheck is served by the viewport-spellcheck plugin
@@ -1722,7 +1750,7 @@ class MultiPaneShell {
     // back to the normal layout with the same docs intact.
     const active = this.expandedSlot
       ? 1
-      : SLOT_IDS.filter((id) => this.slots[id].stack.length > 0).length;
+      : SLOT_IDS.filter((id) => this.slotShown(this.slots[id])).length;
     this.rowEl.dataset['active'] = String(active);
     // An arranged split only means something while exactly its two
     // slots are the active ones; a third doc, an expand, or an emptied
@@ -1765,6 +1793,58 @@ class MultiPaneShell {
     else this.setExpandedSlot(slot);
   }
 
+  /** Whether `slot`'s pane is part of the layout: in expand mode only
+   *  the expanded slot; otherwise any slot with a doc that the user
+   *  hasn't hidden. */
+  private slotShown(slot: Slot): boolean {
+    if (this.expandedSlot) return slot === this.expandedSlot;
+    return slot.stack.length > 0 && !slot.paneHidden;
+  }
+
+  /** Hide Slot: take `slot`'s pane (and outline) out of the layout so
+   *  the other slots share the width. Its docs stay open. Ends expand
+   *  mode first. Refused for the last slot still showing, so the
+   *  workspace never goes blank. Focus moves to a slot still showing. */
+  hideSlot(slot: Slot): void {
+    if (slot.stack.length === 0 || slot.paneHidden) return;
+    if (this.expandedSlot) this.setExpandedSlot(null);
+    const othersShown = SLOT_IDS.some(
+      (id) => this.slots[id] !== slot && this.slotShown(this.slots[id]),
+    );
+    if (!othersShown) {
+      showToast("Can't hide the only slot that's showing.");
+      return;
+    }
+    slot.paneHidden = true;
+    slot.paneEl.classList.remove('pmd-pane-focused');
+    this.applyExpandedState();
+    if (this.focusedSlot === slot) {
+      this.focusedSlot = null;
+      const next = SLOT_IDS.map((id) => this.slots[id]).find((s) => this.slotShown(s));
+      if (next) {
+        this.focusSlot(next);
+        next.visible?.view.focus();
+      }
+    }
+  }
+
+  /** Reveal All Slots: bring back every hidden slot that has docs. */
+  revealAllSlots(): void {
+    let any = false;
+    for (const id of SLOT_IDS) {
+      if (this.slots[id].paneHidden) {
+        this.slots[id].paneHidden = false;
+        any = true;
+      }
+    }
+    if (any) this.applyExpandedState();
+  }
+
+  /** Hide the focused slot. Used by the `hideSlot` ribbon command. */
+  hideFocusedSlot(): void {
+    if (this.focusedSlot) this.hideSlot(this.focusedSlot);
+  }
+
   /** Set (or clear) the expanded slot and re-apply hidden states
    *  and CSS hooks on every pane + nav section. */
   private setExpandedSlot(slot: Slot | null): void {
@@ -1778,7 +1858,8 @@ class MultiPaneShell {
   /** Reconcile per-slot pane / nav-section visibility with the
    *  current expand state. When `expandedSlot` is set, only that
    *  slot's pane + nav section are shown; otherwise visibility
-   *  reverts to "has a doc loaded → shown". Also keeps every
+   *  reverts to "has a doc loaded and isn't hidden → shown" (see
+   *  `slotShown`). Also keeps every
    *  chip's expand-button aria-pressed flag in sync, and writes a
    *  `data-expanded` attribute on the row + nav rail so CSS can
    *  hook on it. Refreshes the layout count afterwards. */
@@ -1786,10 +1867,7 @@ class MultiPaneShell {
     const expanded = this.expandedSlot;
     for (const id of SLOT_IDS) {
       const slot = this.slots[id];
-      const show = expanded
-        ? slot === expanded
-        : slot.stack.length > 0;
-      slot.paneEl.hidden = !show;
+      slot.paneEl.hidden = !this.slotShown(slot);
       slot.setExpandButtonPressed(slot === expanded);
     }
     if (expanded) {
@@ -1814,15 +1892,14 @@ class MultiPaneShell {
   /** Single source of truth for which nav sections show in the rail,
    *  their vertical split, their resize handles, and whether the rail
    *  itself is shown at all. Derives visibility from: expand mode →
-   *  only the expanded slot; otherwise every slot with a loaded doc —
-   *  minus any the user has individually closed (`navHidden`). */
+   *  only the expanded slot; otherwise every slot with a loaded doc that
+   *  isn't hidden (`slotShown`) — minus any outline the user has
+   *  individually closed (`navHidden`). */
   reconcileNavRail(): void {
-    const expanded = this.expandedSlot;
     const visible: Slot[] = [];
     for (const id of SLOT_IDS) {
       const slot = this.slots[id];
-      const showByLayout = expanded ? slot === expanded : slot.stack.length > 0;
-      const show = showByLayout && !slot.navHidden;
+      const show = this.slotShown(slot) && !slot.navHidden;
       slot.navSectionEl.hidden = !show;
       if (show) visible.push(slot);
     }
@@ -2016,6 +2093,11 @@ class MultiPaneShell {
   focusSlotByIndex(idx: 0 | 1 | 2): void {
     const slot = this.slots[SLOT_IDS[idx]!];
     if (slot.stack.length === 0) return;
+    // Focusing a hidden slot brings it back.
+    if (slot.paneHidden) {
+      slot.paneHidden = false;
+      this.applyExpandedState();
+    }
     if (this.expandedSlot && this.expandedSlot !== slot) {
       this.setExpandedSlot(slot);
     } else {
@@ -2155,7 +2237,7 @@ class MultiPaneShell {
       commentsColumn?.refreshFlashcardAnchors();
       this.attachFocusedScrollSync(slot);
     }
-    const activeCount = SLOT_IDS.filter((id) => this.slots[id].stack.length > 0).length;
+    const activeCount = SLOT_IDS.filter((id) => this.slotShown(this.slots[id])).length;
     if (this.layoutMode === 'wide' && activeCount === 3) {
       // Compare the pane's box against the row's viewport. If any
       // part of the pane is clipped (off-screen), scroll it into
@@ -2595,11 +2677,10 @@ class MultiPaneShell {
     // home screen (shown at empty boot / after the last close) yields
     // to the workspace. No-op when home isn't up.
     homeScreen.hide();
-    if (this.expandedSlot && this.expandedSlot !== slot) {
-      slot.paneEl.hidden = true;
-    } else {
-      slot.paneEl.hidden = false;
-    }
+    // A doc sent or opened into a hidden slot brings the slot back —
+    // the user just asked to put something there.
+    slot.paneHidden = false;
+    slot.paneEl.hidden = !this.slotShown(slot);
     // Section visibility (honouring navHidden + expand mode) is owned
     // by reconcileNavRail.
     this.reconcileNavRail();
@@ -2626,7 +2707,7 @@ class MultiPaneShell {
     // focused" field bug (2026-07-28).
     slot.paneEl.classList.remove('pmd-pane-focused');
     for (const id of SLOT_IDS) {
-      if (this.slots[id].stack.length > 0) {
+      if (this.slotShown(this.slots[id])) {
         this.focusSlot(this.slots[id]);
         return;
       }
@@ -3139,6 +3220,9 @@ class MultiPaneShell {
     const all: DocRecord[] = SLOT_IDS.flatMap((id) => this.slots[id].stack);
     if (all.length === 0) return false;
     if (this.expandedSlot) this.toggleExpanded(this.expandedSlot);
+    // Arranging lays out every doc; a hidden slot would strand its docs
+    // off screen.
+    this.revealAllSlots();
     const speechView = getSpeechDocResolver().getSpeechView();
     const speechRec = all.find((r) => r.view === speechView) ?? null;
     const onTop = this.focusedSlot?.visible ?? null;
@@ -3326,6 +3410,15 @@ export async function restoreWorkspaceIntoSlots(
 export function toggleFocusedSlotExpand(): void {
   if (!shell) return;
   shell.toggleFocusedSlotExpand();
+}
+
+/** Hide the focused slot / reveal every hidden slot. No-ops when the
+ *  shell isn't active. Used by the `hideSlot` / `revealAllSlots` commands. */
+export function hideFocusedSlot(): void {
+  shell?.hideFocusedSlot();
+}
+export function revealAllSlots(): void {
+  shell?.revealAllSlots();
 }
 
 /** Cycle the focused slot's visible doc forward (+1) / back (-1). No-op when
