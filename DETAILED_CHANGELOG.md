@@ -226,6 +226,30 @@ ignores the call off macOS; Electron has no Windows or Linux equivalent.
 The preload method is optional in `ElectronAPI`, so a newer renderer
 against an older shell skips it.
 
+### Added: invisible provenance in .docx exports
+
+User request 2026-09-25 (after asking whether a Word file could say it
+came from CardMirror without any risk to Word or later CardMirror
+users). Exports already carried the `cmirDocId` custom property (since
+0.1.0-alpha.5, Learn's identity key, verified to survive a Word
+round-trip); it says "CardMirror touched this" but not which version
+or whether CardMirror was the last writer. `ExportOptions.generator`
+({ application, version }, supplied by the editor — core stays free of
+the app version and the byte-stable round-trip tests are unaffected)
+now drives `Docx.writeGenerator`: `docProps/app.xml` gets
+`<Application>CardMirror</Application>` and `<AppVersion>` — the
+standard generator fields, shown nowhere in Word's UI and overwritten
+by Word on its own save, so they mean "last written by" — merged into
+an existing app.xml (a Word-authored file re-saved here keeps its Pages
+/ Company / …), with the content-type override and package
+relationship added on first write; plus a `cmirGenerator` custom
+property ("CardMirror 1.13.0") beside `cmirDocId`, which Word preserves.
+`AppVersion` is encoded `NN.NNNN` (`wordAppVersion`: 1.13.0 → 01.1300)
+because Word validates that shape and a free-form string there can
+make it report the file damaged. `writeDocId` / `readDocId` are now
+thin wrappers over generic `writeCustomProperty` / `readCustomProperty`.
+Nothing touches `document.xml`. Tests: round-trip/generator.test.ts.
+
 ### Changed: one popup anatomy for the dropzone, Send and Receive pills
 
 User request 2026-09-25. Before: the dropzone morphed in place (its root

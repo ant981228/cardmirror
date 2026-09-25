@@ -91,5 +91,11 @@ export async function toDocx(doc: PMNode, opts: ExportOptions = {}): Promise<Uin
   if (opts.docId) {
     await docx.writeDocId(opts.docId);
   }
+  // Invisible provenance: app.xml Application/AppVersion + the
+  // cmirGenerator custom property. Caller-supplied so core stays free of
+  // the app's version and the round-trip tests are byte-stable.
+  if (opts.generator) {
+    await docx.writeGenerator(opts.generator.application, opts.generator.version);
+  }
   return docx.toBuffer();
 }

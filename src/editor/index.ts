@@ -819,7 +819,9 @@ async function runNewSpeechDocumentSingleDoc(): Promise<void> {
   let docBytes: Uint8Array;
   try {
     docBytes =
-      format === 'cmir' ? serializeNative(docNode) : await toDocx(docNode, { defaultFont: settings.get('bodyFont') });
+      format === 'cmir'
+        ? serializeNative(docNode)
+        : await toDocx(docNode, { defaultFont: settings.get('bodyFont'), generator: DOCX_GENERATOR });
   } catch (err) {
     console.error('Speech-doc serialization failed:', err);
     void alertDialog(
@@ -986,6 +988,9 @@ const syncFileDragMark = installFileDragMark(
   document.getElementById('file-drag-mark') as HTMLButtonElement,
   () => getElectronHost(),
 );
+/** Provenance stamped into every .docx this app writes (app.xml
+ *  Application / AppVersion + the cmirGenerator custom property). */
+const DOCX_GENERATOR = { application: 'CardMirror', version: appVersion } as const;
 const zoomPct = document.getElementById('zoom-pct')!;
 
 // Module-level state. Declared before the settings subscriber registers
@@ -8126,7 +8131,12 @@ async function serializeForSave(
   // Word has no live-window concept: materialize each self_ref window to real
   // cards (resolved from the source, ids re-stamped) before export.
   const docxNode = flattenSelfRefs(exportDocNode, newHeadingId);
-  return toDocx(docxNode, { ...threadsOpt, ...(docId ? { docId } : {}), defaultFont: settings.get('bodyFont') });
+  return toDocx(docxNode, {
+    ...threadsOpt,
+    ...(docId ? { docId } : {}),
+    defaultFont: settings.get('bodyFont'),
+    generator: DOCX_GENERATOR,
+  });
 }
 
 /**
@@ -11047,6 +11057,7 @@ async function reserializeJournalAs(
   return toDocx(exportDoc, {
     ...(parsed.threads.length > 0 ? { threads: parsed.threads } : {}),
     defaultFont: settings.get('bodyFont'),
+    generator: DOCX_GENERATOR,
   });
 }
 

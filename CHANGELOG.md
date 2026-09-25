@@ -92,7 +92,13 @@ see `DETAILED_CHANGELOG.md`.
   document's file icon now sits in the window's title bar: hover over
   the title, then drag the icon into Slack, Mail, Finder, or any other
   app to share the file, as you can with Word. Cmd-click the title to
-  see where the file lives.
+  see where the file lives. Thanks to Shreeram (@shreerammodi)!
+
+- **Word files record that CardMirror wrote them**, invisibly. A saved
+  .docx now names CardMirror and its version in the file's standard
+  application properties, alongside the document id it already
+  carried. Nothing appears in the document itself, Word and other
+  editors ignore it, and it never affects how a file opens anywhere.
 
 ### Changed
 

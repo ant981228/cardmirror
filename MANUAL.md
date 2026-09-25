@@ -2305,6 +2305,12 @@ and headings instead of importing flat text.
   disk (save first to include your latest edits). In the three-pane
   workspace it follows the focused document.
 
+- **Saved Word files carry an invisible CardMirror marker.** A .docx
+  saved here names CardMirror and its version in the file's standard
+  application properties (the same place Word names itself), next to
+  the document id CardMirror already kept there. Nothing shows in the
+  document, and it changes nothing about how the file opens in Word or
+  anywhere else.
 - **Drag the file out of the title bar (macOS desktop).** Once a document
   has been saved, the window's title bar carries its file icon, as in Word
   or Pages: hover over the title to reveal it, then drag it into Slack,

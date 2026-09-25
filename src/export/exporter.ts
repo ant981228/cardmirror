@@ -81,6 +81,12 @@ export interface ExportOptions {
    *  custom document property (`docProps/custom.xml`) for the Learn
    *  annotation layer. `exportDoc` itself ignores it. */
   docId?: string;
+  /** Who wrote the file. Stamped into `docProps/app.xml` (Application +
+   *  AppVersion — Word replaces both on its own save, so they mean "last
+   *  written by") and as the `cmirGenerator` custom property, which
+   *  survives a Word round-trip. Both live outside the document body:
+   *  nothing a reader, a macro or the importer can trip over. */
+  generator?: { application: string; version: string };
   /** Literal docDefaults font for the packaged styles.xml — the editor
    *  passes the user's display font so previews (Slack/Gmail's
    *  theme-blind converters) approximate what the author sees. Word
