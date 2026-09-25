@@ -185,6 +185,27 @@ the rest have loaded, gets the same `offerDamagedSalvage` a single
 damaged file does (now exported from index.ts) instead of a per-file
 toast. Cora's PR #77.
 
+### Added: status-bar mark drags the document's file out
+
+User request 2026-09-25, the cross-platform twin of the macOS title-bar
+proxy icon (PR #82): Windows has no title-bar equivalent, and the
+ribbon's filename chip is hidden by default, so the handle is a
+CardMirror mark after the zoom controls (`#file-drag-mark`,
+file-drag-mark.ts). The folder mark from logo.png, wordmark cropped and
+background flood-filled to transparent, ships as a 48px data URL that
+serves as both the status-bar glyph and the drag icon (Windows refuses
+a drag without one). `installFileDragMark` wires dragstart →
+`ElectronHost.dragFileOut(path, icon)` → preload `send` →
+`host:drag-file-out` → `webContents.startDrag` (which must run in
+response to the renderer's own dragstart, hence `on`/`send` rather than
+`invoke`; main checks the path is absolute and exists). Click →
+`showItemInFolder`. `updateWindowTitle` — the one path every
+doc-identity change already takes — syncs it with the focused doc's
+handle: hidden without a desktop host (web) or on a shell whose preload
+lacks the surface; dimmed and inert (`data-inert`, 0.35 opacity,
+default cursor) when there is no file on disk (untitled, recovered
+draft, home). Tests: file-drag-mark.test.ts.
+
 ### Changed: one popup anatomy for the dropzone, Send and Receive pills
 
 User request 2026-09-25. Before: the dropzone morphed in place (its root

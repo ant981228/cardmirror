@@ -2297,6 +2297,13 @@ and headings instead of importing flat text.
   **Save As…** (keep both), or cancel. Autosave never overwrites a file
   that changed underneath it; it pauses and tells you to use Save to
   review. **(Desktop only.)**
+- **Drag the file out of the app (desktop).** The CardMirror mark in the
+  bottom-right corner of the status bar stands for the focused document's
+  file: drag it into Slack, Mail, Teams, Finder or Explorer to share the
+  file itself, or click it to show the file in its folder. It's dimmed
+  until the document has been saved, since what travels is the file on
+  disk (save first to include your latest edits). In the three-pane
+  workspace it follows the focused document.
 
 ### Save As presets
 

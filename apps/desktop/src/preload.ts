@@ -164,6 +164,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Open the OS file manager at the crash-recovery journals folder. */
   openJournalsFolder: () => ipcRenderer.invoke('host:open-journals-folder'),
   showItemInFolder: (handle: string) => ipcRenderer.invoke('host:show-item-in-folder', handle),
+  /** Native file drag out of the window (the status-bar CardMirror
+   *  mark). `send`, not `invoke`: startDrag must run in response to the
+   *  renderer's dragstart, synchronously. */
+  dragFileOut: (path: string, iconDataUrl: string) =>
+    ipcRenderer.send('host:drag-file-out', { path, iconDataUrl }),
 
   /** Minimize this OS window (the `minimizeWindow` ribbon command /
    *  macOS Window-menu Minimize). */

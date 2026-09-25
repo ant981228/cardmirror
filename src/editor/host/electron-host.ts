@@ -494,6 +494,9 @@ interface ElectronAPI {
   /** Open the OS file manager at the crash-recovery journals folder. */
   openJournalsFolder(): Promise<void>;
   showItemInFolder?(handle: string): Promise<void>;
+  /** Native file drag out of the window (status-bar mark). Sent from the
+   *  renderer's dragstart; optional so an older preload is tolerated. */
+  dragFileOut?(path: string, iconDataUrl: string): void;
   /** Renderer accessibility tree toggle. Default off — works around a known
    *  Chromium AX-serialization crash. Machine-local pref; changing it needs an
    *  app restart (`relaunchApp`). `isAccessibilitySupportActive` reports whether
@@ -1419,6 +1422,14 @@ export class ElectronHost implements Host {
    *  no-ops gracefully on an older preload without the surface. */
   async showItemInFolder(handle: string): Promise<void> {
     await api().showItemInFolder?.(handle);
+  }
+  /** Whether this shell can start a native file drag (preload surface
+   *  present) — the status-bar mark hides itself otherwise. */
+  canDragFileOut(): boolean {
+    return typeof api().dragFileOut === 'function';
+  }
+  dragFileOut(path: string, iconDataUrl: string): void {
+    api().dragFileOut?.(path, iconDataUrl);
   }
   async openJournalsFolder(): Promise<void> {
     await api().openJournalsFolder();

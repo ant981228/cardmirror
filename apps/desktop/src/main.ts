@@ -30,7 +30,9 @@ import {
   shell,
   utilityProcess,
   session,
+  nativeImage,
 } from 'electron';
+import { existsSync } from 'node:fs';
 import { autoUpdater } from 'electron-updater';
 import { bundlePathFromExe, launchSwapHelper, macBundleSelfUpdatable } from './mac-swap-update.js';
 import { registerVoiceIpc } from './voice/ipc';
@@ -706,6 +708,23 @@ ipcMain.handle('host:open-crash-dumps', async () => {
 ipcMain.handle('host:show-item-in-folder', (_event, handle: unknown) => {
   if (typeof handle !== 'string' || handle.length === 0) return;
   shell.showItemInFolder(handle);
+});
+
+/** Native drag of a saved document out of the window — the status-bar
+ *  CardMirror mark (renderer: file-drag-mark.ts), the cross-platform twin
+ *  of the macOS title-bar proxy icon. `startDrag` has to run in response
+ *  to the renderer's own dragstart, hence `on` + `send` rather than
+ *  `handle`. The path is the doc's handle (absolute on desktop); anything
+ *  else, or a file that no longer exists, is ignored. The drag image is
+ *  the mark itself — Windows refuses a drag without a real icon. */
+ipcMain.on('host:drag-file-out', (event, payload: unknown) => {
+  const p = payload as { path?: unknown; iconDataUrl?: unknown } | null;
+  const file = typeof p?.path === 'string' ? p.path : '';
+  if (!file || !path.isAbsolute(file) || !existsSync(file)) return;
+  const icon =
+    typeof p?.iconDataUrl === 'string' ? nativeImage.createFromDataURL(p.iconDataUrl) : nativeImage.createEmpty();
+  if (icon.isEmpty()) return;
+  event.sender.startDrag({ file, icon: icon.resize({ width: 32, height: 32 }) });
 });
 
 ipcMain.handle('host:open-journals-folder', async () => {

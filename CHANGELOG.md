@@ -82,6 +82,12 @@ see `DETAILED_CHANGELOG.md`.
   its own window. A damaged file in the batch gets the usual repair
   offer once the rest have opened. Thanks to Cora (@coralynnkc)!
 
+- **Drag the file out of the app.** The CardMirror mark in the
+  bottom-right corner of the status bar is the open document's file:
+  drag it into Slack, Mail, Teams, Finder or Explorer to share the file,
+  or click it to show the file in its folder. It's dimmed until the
+  document has been saved. Desktop only.
+
 ### Changed
 
 - **The dropzone, Send and Receive pills open the same way.** Click any

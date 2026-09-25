@@ -52,6 +52,7 @@ import { pushOverlay, popOverlay, isTopOverlay } from './overlay-stack.js';
 import { openDocMenu } from './doc-menu-ui.js';
 import { createReference } from './create-reference.js';
 import { showToast } from './toast.js';
+import { installFileDragMark } from './file-drag-mark.js';
 import { maybeDecryptForOpen, OpenCancelledError, UnsupportedEncryptionError } from './open-encrypted.js';
 import { CLIPBOARD_BUSY_MESSAGE, writeClipboardHtml } from './clipboard-write.js';
 import { buildCutInPlacePlugin, installCutInPlaceContext } from './cut-in-place.js';
@@ -978,6 +979,13 @@ function updatePlainPasteIndicator(armed: boolean): void {
 const zoomOutBtn = document.getElementById('zoom-out-btn') as HTMLButtonElement;
 const zoomInBtn = document.getElementById('zoom-in-btn') as HTMLButtonElement;
 const zoomResetBtn = document.getElementById('zoom-reset-btn') as HTMLButtonElement;
+/** Bottom-right CardMirror mark: drag the focused doc's file into other
+ *  apps (desktop). Synced from `updateWindowTitle`, the one path every
+ *  doc-identity change already goes through. */
+const syncFileDragMark = installFileDragMark(
+  document.getElementById('file-drag-mark') as HTMLButtonElement,
+  () => getElectronHost(),
+);
 const zoomPct = document.getElementById('zoom-pct')!;
 
 // Module-level state. Declared before the settings subscriber registers
@@ -7946,6 +7954,7 @@ function updateWindowTitle(): void {
   const focused = activeFile();
   pushSingleDocInfo();
   reportSingleDocWorkspace();
+  syncFileDragMark(focused.handle);
   if (multiDocActive && multiDocGetAllFilenames) {
     const names = multiDocGetAllFilenames().filter((n): n is string => !!n);
     document.title = names.length > 0
