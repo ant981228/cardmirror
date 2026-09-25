@@ -43,6 +43,7 @@ import {
 } from '../schema/migrate.js';
 import type { Thread } from '../editor/comments-plugin.js';
 import { gzip, gzipAsync, gunzip, isGzip } from './codec.js';
+import { stripUnlinkedLiveReferenceData } from './live-reference-compat.js';
 
 /** Magic identifier present in every CardMirror native file. Rejects
  *  arbitrary JSON files. */
@@ -150,7 +151,9 @@ function buildNativeEnvelope(doc: PMNode, opts: SerializeNativeOptions): Uint8Ar
     formatVersion: FORMAT_VERSION,
     createdBy: opts.appVersion ?? 'CardMirror',
     createdAt: new Date().toISOString(),
-    doc: tripwireForSave(doc).toJSON(),
+    // Older builds can't open a file carrying live-reference data (unknown
+    // mark type), so write it only while a live reference actually uses it.
+    doc: stripUnlinkedLiveReferenceData(tripwireForSave(doc).toJSON()),
   };
   if (opts.threads && opts.threads.length > 0) {
     file.threads = [...opts.threads];

@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import type { Node as PMNode } from 'prosemirror-model';
+import { Schema, type Mark, type Node as PMNode } from 'prosemirror-model';
 import { schema, newHeadingId } from '../../src/schema/index.js';
 import {
   serializeNative,
@@ -12,6 +12,7 @@ import {
   type SaveHealReport,
 } from '../../src/native/index.js';
 import type { Thread } from '../../src/editor/comments-plugin.js';
+import { gunzip } from '../../src/native/codec.js';
 
 const { nodes, marks } = schema;
 
@@ -686,5 +687,65 @@ describe('save-time structural tripwire (audit tier 1)', () => {
     // exactly as it would have before the tripwire existed.
     expect(bytes.length).toBeGreaterThan(0);
     expect(() => parseNative(bytes)).toThrow(/damaged/);
+  });
+});
+
+describe('live reference data is written only while linked', () => {
+  /** The pre-live-reference schema: no anchor mark, legacy self_ref attrs only. */
+  function olderBuildSchema(): Schema {
+    const selfRef = schema.spec.nodes.get('self_ref')!;
+    const attrs = selfRef.attrs!;
+    return new Schema({
+      nodes: schema.spec.nodes.update('self_ref', {
+        ...selfRef,
+        attrs: { source_heading_id: attrs['source_heading_id']!, source_label: attrs['source_label']! },
+      }),
+      marks: schema.spec.marks.remove('live_reference_source'),
+    });
+  }
+
+  function savedDocJson(doc: PMNode): unknown {
+    const envelope: unknown = JSON.parse(new TextDecoder().decode(gunzip(serializeNative(doc))));
+    if (!envelope || typeof envelope !== 'object' || !('doc' in envelope)) throw new Error('no doc in envelope');
+    return envelope.doc;
+  }
+
+  function docWithAnchor(ids: string, sizes: string, refs: PMNode[]): PMNode {
+    const anchor = schema.marks['live_reference_source']!.create({ ids, sizes });
+    return schema.nodes['doc']!.createChecked(null, [
+      schema.nodes['card']!.create(null, [
+        schema.nodes['tag']!.create({ id: 'tag-1' }, schema.text('Tag')),
+        schema.nodes['cite_paragraph']!.create(null, schema.text('Smith 24')),
+        schema.nodes['card_body']!.create(null, [schema.text('before '), schema.text('selected', [anchor])]),
+      ]),
+      ...refs,
+    ]);
+  }
+
+  it('an unlinked anchor and a heading window save in a form older builds open', () => {
+    const headingWindow = schema.nodes['self_ref']!.create({ source_heading_id: 'tag-1', source_label: '↳ Tag' });
+    const doc = docWithAnchor('orphan', '{"orphan":11}', [headingWindow]);
+    const json = savedDocJson(doc);
+    expect(JSON.stringify(json)).not.toContain('live_reference_source');
+    const older = olderBuildSchema();
+    const reopened = older.nodeFromJSON(json);
+    reopened.check();
+    expect(reopened.lastChild!.attrs).toEqual({ source_heading_id: 'tag-1', source_label: '↳ Tag' });
+    // Still round-trips in this build.
+    expect(parseNative(serializeNative(doc)).doc.lastChild!.attrs['source_heading_id']).toBe('tag-1');
+  });
+
+  it('keeps only the anchor ids a live reference still links to', () => {
+    const live = schema.nodes['self_ref']!.create({ source_anchor_id: 'linked', reference_gray: true });
+    const doc = docWithAnchor('orphan linked', '{"orphan":11,"linked":9}', [live]);
+    const { doc: reopened } = parseNative(serializeNative(doc));
+    let anchor: Mark | undefined;
+    reopened.descendants((node) => {
+      anchor ??= node.marks.find((m) => m.type.name === 'live_reference_source');
+      return true;
+    });
+    expect(anchor?.attrs).toEqual({ ids: 'linked', sizes: '{"linked":9}' });
+    expect(reopened.lastChild!.attrs['source_anchor_id']).toBe('linked');
+    expect(reopened.lastChild!.attrs['reference_gray']).toBe(true);
   });
 });
