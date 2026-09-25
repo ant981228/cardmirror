@@ -15,7 +15,10 @@ import { describe, expect, it } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import type { Plugin, Transaction } from 'prosemirror-state';
 import { schema, newHeadingId } from '../../src/schema/index.js';
-import { wordSelectionKeymap } from '../../src/editor/word-selection-keymap.js';
+import {
+  moveToHeadingOfType,
+  wordSelectionKeymap,
+} from '../../src/editor/word-selection-keymap.js';
 
 // ─── Doc builders ─────────────────────────────────────────────────
 
@@ -439,5 +442,57 @@ describe('PageUp / PageDown heading navigation', () => {
       'BLOCK ONE',
       'POCKET',
     ]);
+  });
+});
+
+// ─── Next / Previous Pocket … Tag (one heading type only) ─────────
+describe('moveToHeadingOfType', () => {
+  function pocket(text: string) {
+    return schema.nodes['pocket']!.create({ id: newHeadingId() }, schema.text(text));
+  }
+  function block(text: string) {
+    return schema.nodes['block']!.create({ id: newHeadingId() }, schema.text(text));
+  }
+  function buildDoc() {
+    return makeDoc([
+      pocket('POCKET'),
+      block('BLOCK ONE'),
+      cardWith(tag('TAG ONE'), cardBody('body one')),
+      cardWith(tag('TAG TWO'), cardBody('body two')),
+      block('BLOCK TWO'),
+      cardWith(tag('TAG THREE'), cardBody('body three')),
+    ]);
+  }
+  function walk(type: string, dir: 'prev' | 'next', from: number): string[] {
+    let state = stateWith(buildDoc(), from);
+    const cmd = moveToHeadingOfType(type, dir);
+    const stops: string[] = [];
+    for (;;) {
+      let next: EditorState | null = null;
+      if (!cmd(state, (tr) => { next = state.apply(tr); })) break;
+      state = next!;
+      stops.push(state.selection.$head.parent.textContent);
+    }
+    return stops;
+  }
+
+  it('Next Tag stops only at tags, skipping blocks', () => {
+    expect(walk('tag', 'next', 1)).toEqual(['TAG ONE', 'TAG TWO', 'TAG THREE']);
+  });
+
+  it('Next Block skips the tags between blocks', () => {
+    expect(walk('block', 'next', 1)).toEqual(['BLOCK ONE', 'BLOCK TWO']);
+  });
+
+  it('Previous Tag from inside a card body lands on that card’s tag first', () => {
+    const doc = buildDoc();
+    const start = findTextStart(doc, 'body three');
+    expect(walk('tag', 'prev', start + 2)).toEqual(['TAG THREE', 'TAG TWO', 'TAG ONE']);
+  });
+
+  it('is unavailable when there is no heading of that type ahead', () => {
+    const doc = buildDoc();
+    const state = stateWith(doc, findTextStart(doc, 'body three'));
+    expect(moveToHeadingOfType('pocket', 'next')(state)).toBe(false);
   });
 });
