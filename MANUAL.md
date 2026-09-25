@@ -599,6 +599,15 @@ paint, until you pick a color again.
   Supports all 15 Word highlight colors.
 - **Background color (Mod-F11)** — a separate background color that
   can coexist with a highlight; takes any color.
+- **Emphasis + Background Color** (unbound; run it from Search
+  Everything or give it a key in Settings → Keyboard shortcuts) applies
+  Emphasis and the active background color in one step, with one undo.
+  Applying Emphasis on its own removes background color, so pressing
+  Mod-F11 and then F10 loses the background; this command does them in
+  the order that keeps both. Like F10 it always applies (pressing it
+  again doesn't toggle anything off), and with nothing selected it acts
+  on the word at the cursor. With the "no color" background pen active,
+  the text is emphasized and left with no background.
 - **Font color** — applies a text color; the "Automatic" swatch removes
   it.
 

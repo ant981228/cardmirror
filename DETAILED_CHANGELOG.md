@@ -31,6 +31,25 @@ the setting on. Not changed: the export-side read-mode transform
 (`transformContainerForReadMode`), which follows neither this nor the
 other read-mode display settings.
 
+### Added: Emphasis + Background Color
+
+User request 2026-09-24: one key for emphasis and background together,
+e.g. for re-highlighting over a pass that was locked to background.
+`applyEmphasisAndShading` (ribbon command, Character styles group,
+unbound) is `applyBodyMark('emphasis_mark')` with a new `thenShading`
+option. After the emphasis apply and its direct-formatting strip, it
+paints `shading` in the Mod-F11 pen's color over the same ranges, in
+the same transaction, so it is one undo. The order matters: the apply
+strip (`APPLY_DIRECT_FORMATTING_STRIP_NAMES`) removes `shading`, so
+Mod-F11 then F10 dropped the background, and a two-command chain would
+have to run in the right order. The command inherits everything else
+from F10: word-at-cursor on an empty selection, shadow-selection
+ranges, the structural-block skip, and the gap bridge (`withGapFix`).
+It always applies, like F10, so pressing it on text that already has
+the background repaints it instead of toggling it off. A null pen
+("No background") leaves the text with no background, since the strip
+already removed it. Tests: emphasis-and-shading.test.ts.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added: URLs → links (Link URLs, autolink, Mod+click)

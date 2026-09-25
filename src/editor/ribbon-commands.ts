@@ -1139,7 +1139,14 @@ function getOperatingRangesForFormatting(
 
 function applyBodyMark(
   markName: 'cite_mark' | 'emphasis_mark',
-  opts: { expandToWordWhenEmpty?: boolean } = {},
+  opts: {
+    expandToWordWhenEmpty?: boolean;
+    /** Also paint background color (`shading`) in this color over the
+     *  same ranges, AFTER the apply-strip — which removes shading, so
+     *  it has to come second. Null (the "No background" pen) leaves
+     *  the ranges with no background. */
+    thenShading?: () => string | null;
+  } = {},
 ): Command {
   return withGapFix((state, dispatch) => {
     const markType = schema.marks[markName];
@@ -1186,6 +1193,11 @@ function applyBodyMark(
       // `APPLY_DIRECT_FORMATTING_STRIP_NAMES` for the rationale.
       stripDirectFormattingOnApply(tr, r.from, r.to);
     }
+    const shadingColor = opts.thenShading?.() ?? null;
+    const shadingType = schema.marks['shading'];
+    if (shadingColor !== null && shadingType) {
+      for (const r of ranges) tr.addMark(r.from, r.to, shadingType.create({ color: shadingColor }));
+    }
     if (op.fromShadow) tr.setMeta(META_OPERATING_ON_SHADOW, true);
     dispatch(tr);
     return true;
@@ -1198,6 +1210,19 @@ export function applyCite(): Command {
 
 export function applyEmphasis(): Command {
   return applyBodyMark('emphasis_mark', { expandToWordWhenEmpty: true });
+}
+
+/**
+ * Emphasis and background color in one step (unbound by default): F10,
+ * then the active background color over the same ranges, in one
+ * transaction — one undo. F10 alone strips background, so pressing
+ * Mod-F11 then F10 lost the background; this does it in the order that
+ * keeps both. Apply-only, like F10: repeating it re-applies rather than
+ * toggling off. The background follows the Mod-F11 pen; with "No
+ * background" active, the text is left without one.
+ */
+export function applyEmphasisAndShading(activeShading: () => string | null): Command {
+  return applyBodyMark('emphasis_mark', { expandToWordWhenEmpty: true, thenShading: activeShading });
 }
 
 /**
@@ -4290,6 +4315,7 @@ export type RibbonCommandId =
   | 'toggleUnderlineTyping'
   | 'toggleReadingMarker'
   | 'applyEmphasis'
+  | 'applyEmphasisAndShading'
   | 'emphasizeAcronym'
   | 'applyHighlight'
   | 'highlightAcronym'
@@ -4535,6 +4561,7 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'toggleUnderlineTyping',
   'toggleReadingMarker',
   'applyEmphasis',
+  'applyEmphasisAndShading',
   'emphasizeAcronym',
   'applyHighlight',
   'highlightAcronym',
@@ -4732,6 +4759,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   toggleUnderlineTyping: 'Underline (toggle while typing)',
   toggleReadingMarker: 'Reading-position marker (toggle)',
   applyEmphasis: 'Apply Emphasis Style',
+  applyEmphasisAndShading: 'Emphasis + Background Color',
   emphasizeAcronym: 'Emphasize Acronym',
   applyHighlight: 'Toggle Highlight',
   highlightAcronym: 'Highlight Acronym',
@@ -4967,6 +4995,7 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   linkUrls: ['hyperlink urls', 'autolink', 'make links', 'add links', 'linkify'],
   resetDefaultColors: ['default colors', 'reset colors', 'reset swatches', 'reset highlight color', 'reset background color'],
   applyShading: ['shading', 'text highlight color'],
+  applyEmphasisAndShading: ['emphasize and background', 'emphasis and shading', 'emphasis background', 'emphasize shade'],
   insertImage: ['add image', 'insert picture', 'photo'],
   // "Insert …" element commands also answer to "add …" (genuine equivalence —
   // unlike Add Quick Card / Add Comment / Add Note, which CREATE, not insert).
@@ -5100,6 +5129,7 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   toggleUnderlineTyping: 'Mod-u',
   toggleReadingMarker: 'Mod-Shift-d',
   applyEmphasis: 'F10',
+  applyEmphasisAndShading: '',
   emphasizeAcronym: 'Alt-F10',
   applyHighlight: 'F11',
   highlightAcronym: 'Alt-F11',
@@ -5753,6 +5783,7 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
     case 'toggleUnderlineTyping': return toggleUnderlineTyping(ctx.clearFormattingOnNamedStyleToggleOff);
     case 'toggleReadingMarker': return toggleReadingMarkerCommand;
     case 'applyEmphasis': return applyEmphasis();
+    case 'applyEmphasisAndShading': return applyEmphasisAndShading(ctx.shadingColor);
     case 'emphasizeAcronym': return emphasizeAcronym();
     case 'applyHighlight': return applyHighlight(ctx.highlightColor);
     case 'highlightAcronym': return highlightAcronym(ctx.highlightColor);

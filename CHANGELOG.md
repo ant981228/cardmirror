@@ -16,6 +16,12 @@ see `DETAILED_CHANGELOG.md`.
   re-highlight. Convert Cards to Read Mode follows it. Background-colored
   text still doesn't count toward word counts or read time.
 
+- **Emphasis + Background Color.** A new command (Search Everything;
+  unbound, so give it a key in Settings → Keyboard shortcuts) applies
+  Emphasis and the active background color in one keystroke and one
+  undo. Emphasis on its own removes background color, so doing them
+  one at a time in the wrong order used to lose the background.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added
