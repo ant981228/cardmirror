@@ -1355,6 +1355,12 @@ export interface Settings {
    */
   clearFormattingOnNamedStyleToggleOff: boolean;
   /**
+   * F12 (Clear) also removes highlighting. Off by default: Verbatim's
+   * Clear keeps highlighting, so a reader can un-style a card without
+   * losing what's read. Shading is kept either way.
+   */
+  clearRemovesHighlighting: boolean;
+  /**
    * The highlight color the "Standardize Highlighting (with
    * Exception)" command leaves untouched. One of Word's 15 named
    * highlight colors (`yellow`, `green`, …). Runs highlighted in this
@@ -1952,6 +1958,7 @@ const DEFAULTS: Settings = {
   formattingGapClass: 'both',
   autoBridgeFormattingGaps: true,
   clearFormattingOnNamedStyleToggleOff: true,
+  clearRemovesHighlighting: false,
   standardizeHighlightException: 'yellow',
   standardizeShadingException: 'FFFF00',
   defaultHighlightColor: 'yellow',
@@ -3667,6 +3674,16 @@ export const SETTING_METADATA: SettingMeta[] = [
     section: 'Formatting operations',
   },
   {
+    key: 'clearRemovesHighlighting',
+    label: 'Clear (F12) also removes highlighting',
+    description:
+      'When on, F12 strips highlighting along with the other formatting it clears. Off by default to match Verbatim, which leaves highlighting in place. Shading is never removed.',
+    kind: 'toggle',
+    category: 'editing',
+    section: 'Formatting operations',
+    aliases: ['clear highlighting', 'remove highlighting', 'f12 highlight'],
+  },
+  {
     key: 'createReferenceIncludeHeading',
     label: 'Include the FOR REFERENCE heading',
     description:
@@ -4983,6 +5000,7 @@ function sanitize(s: Settings): Settings {
       s.clearFormattingOnNamedStyleToggleOff === undefined
         ? DEFAULTS.clearFormattingOnNamedStyleToggleOff
         : !!s.clearFormattingOnNamedStyleToggleOff,
+    clearRemovesHighlighting: s.clearRemovesHighlighting === true,
     standardizeHighlightException: isWordHighlightName(
       String(s.standardizeHighlightException ?? ''),
     )

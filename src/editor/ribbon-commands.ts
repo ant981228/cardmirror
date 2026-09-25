@@ -2539,6 +2539,8 @@ export function setFontSize(
 //   - Partial: strip the above plus `underline_direct` AND all named-
 //     style marks — partial is "clear character formatting" in the
 //     Verbatim sense; only highlight/shading are exempted.
+//   - The `clearRemovesHighlighting` setting (off by default) adds
+//     `highlight` to every regime's strip set. Shading is always kept.
 //
 // Paragraph type demotion (full coverage):
 //   - pocket / hat / block → paragraph (setNodeMarkup)
@@ -2605,9 +2607,10 @@ function convertUnderlineDirectToMarkOnTr(
 function cleanFragmentForClearToNormal(
   fragment: Fragment,
   mode: 'cursor' | 'full',
+  extraStrip: readonly string[],
 ): Fragment {
   const stripNames = mode === 'cursor' ? F12_STRIP_DIRECT_NAMES : F12_STRIP_PARTIAL_NAMES;
-  const stripSet = new Set<string>(stripNames);
+  const stripSet = new Set<string>([...stripNames, ...extraStrip]);
   const convertUnderlineDirect = mode === 'cursor';
   const directType = schema.marks['underline_direct'];
   const markType = schema.marks['underline_mark'];
@@ -2644,9 +2647,12 @@ interface ClearToNormalOp {
   partialTo?: number;
 }
 
-export function clearToNormal(): Command {
+/** `removeHighlight` reads the `clearRemovesHighlighting` setting at
+ *  run time; when it's on, `highlight` is stripped along with the rest. */
+export function clearToNormal(removeHighlight: () => boolean = () => false): Command {
   return (state, dispatch) => {
     const sel = state.selection;
+    const extraStrip: readonly string[] = removeHighlight() ? ['highlight'] : [];
     const isEmpty = sel.empty;
 
     // Shadow-selection path: when the PM selection is collapsed and
@@ -2660,7 +2666,7 @@ export function clearToNormal(): Command {
         if (!dispatch) return true;
         const tr = state.tr;
         for (const { from, to } of shadowOp.ranges) {
-          applyClearToNormalPartial(tr, from, to);
+          applyClearToNormalPartial(tr, from, to, extraStrip);
         }
         tr.setMeta(META_OPERATING_ON_SHADOW, true);
         dispatch(tr);
@@ -2703,9 +2709,9 @@ export function clearToNormal(): Command {
     for (let i = ops.length - 1; i >= 0; i--) {
       const op = ops[i]!;
       if (op.mode === 'cursor' || op.mode === 'full') {
-        applyClearToNormalDemote(tr, op);
+        applyClearToNormalDemote(tr, op, extraStrip);
       } else if (op.partialFrom != null && op.partialTo != null) {
-        applyClearToNormalPartial(tr, op.partialFrom, op.partialTo);
+        applyClearToNormalPartial(tr, op.partialFrom, op.partialTo, extraStrip);
       }
     }
 
@@ -2722,13 +2728,19 @@ export function clearToNormal(): Command {
  *      everything the partial-coverage path would, then demote on
  *      top of it. "Both behaviors at once."
  */
-function applyClearToNormalDemote(tr: Transaction, op: ClearToNormalOp): void {
+function applyClearToNormalDemote(
+  tr: Transaction,
+  op: ClearToNormalOp,
+  extraStrip: readonly string[],
+): void {
   const { nodeStart, nodeSize, typeName, depth, mode } = op;
   const contentFrom = nodeStart + 1;
   const contentTo = nodeStart + nodeSize - 1;
   const fragmentMode: 'cursor' | 'full' = mode === 'cursor' ? 'cursor' : 'full';
-  const stripNames =
-    fragmentMode === 'cursor' ? F12_STRIP_DIRECT_NAMES : F12_STRIP_PARTIAL_NAMES;
+  const stripNames = [
+    ...(fragmentMode === 'cursor' ? F12_STRIP_DIRECT_NAMES : F12_STRIP_PARTIAL_NAMES),
+    ...extraStrip,
+  ];
 
   let target: 'paragraph' | 'card_body' | null = null;
   let needDissolve = false;
@@ -2768,6 +2780,7 @@ function applyClearToNormalDemote(tr: Transaction, op: ClearToNormalOp): void {
     const cleanedHead = cleanFragmentForClearToNormal(
       container.firstChild.content,
       fragmentMode,
+      extraStrip,
     );
     const newPara = schema.nodes['paragraph']!.create(null, cleanedHead);
     const lifted: PMNode[] = [newPara];
@@ -2816,8 +2829,13 @@ function applyClearToNormalDemote(tr: Transaction, op: ClearToNormalOp): void {
   }
 }
 
-function applyClearToNormalPartial(tr: Transaction, from: number, to: number): void {
-  stripMarkNamesOnTr(tr, from, to, F12_STRIP_PARTIAL_NAMES);
+function applyClearToNormalPartial(
+  tr: Transaction,
+  from: number,
+  to: number,
+  extraStrip: readonly string[],
+): void {
+  stripMarkNamesOnTr(tr, from, to, [...F12_STRIP_PARTIAL_NAMES, ...extraStrip]);
 }
 
 /** Map a doc-position that falls inside a card / analytic_unit being
@@ -5445,6 +5463,9 @@ export interface RibbonContext {
   /** Whether F9's toggle-off direction also strips direct formatting
    *  (Verbatim's "press F9 twice clears formatting"). */
   clearFormattingOnNamedStyleToggleOff: () => boolean;
+  /** Whether F12 (Clear) also strips highlighting. Off by default,
+   *  matching Verbatim, which keeps it. */
+  clearRemovesHighlighting: () => boolean;
   /** Resolves a text run's effective font-size in pt, accounting for
    *  font_size marks, named-style marks, and paragraph defaults — same
    *  resolver the chip / increment-decrement buttons use. Used by
@@ -5693,6 +5714,7 @@ const DEFAULT_RIBBON_CONTEXT: RibbonContext = {
   headingMode: () => 'respect',
   condenseOnPaste: () => false,
   clearFormattingOnNamedStyleToggleOff: () => true,
+  clearRemovesHighlighting: () => false,
   effectivePtForNode: () => 11,
   normalPt: () => 11,
   shrinkRestoresOmissionsToNormal: () => false,
@@ -5890,7 +5912,7 @@ function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
     case 'pasteCondensed':
       return pasteCondensed(ctx);
     case 'clearToNormal':
-      return clearToNormal();
+      return clearToNormal(ctx.clearRemovesHighlighting);
     case 'shrink':
       return shrinkText(
         ctx.effectivePtForNode,
