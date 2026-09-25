@@ -34,6 +34,7 @@ import {
 import { promptForText } from '../text-prompt.js';
 import { normalizePairingCode, looksLikePairingCode } from './pairing-ids.js';
 import { recentSenders } from './inbox-store.js';
+import { setIcon } from '../icons';
 
 interface SendPillMountOptions {
   parent: HTMLElement;
@@ -173,9 +174,8 @@ export class SendPillController {
     const icon = document.createElement('span');
     icon.className = 'pmd-pill-icon';
     icon.setAttribute('aria-hidden', 'true');
-    // Paper-plane glyph.
-    icon.innerHTML =
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>';
+    // Out-tray (the icon set's `upload`), paired with Receive's in-tray.
+    setIcon(icon, 'upload');
     this.bar.appendChild(icon);
     const labelEl = document.createElement('span');
     labelEl.className = 'pmd-pill-label';

@@ -89,6 +89,19 @@ describe('the three pills share the popup anatomy', () => {
     expect(parent.querySelector('.pmd-receive-list')!.classList.contains('pmd-pill-popup')).toBe(true);
   });
 
+  it('the three bars use one icon set: a storage box, an out-tray and an in-tray', () => {
+    vi.spyOn(dropzoneStore, 'init').mockResolvedValue();
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    new DropzoneController().mount({ parent, getFocusedView: () => null });
+    new SendPillController().mount({ parent });
+    new ReceivePillController().mount({ parent, getFocusedView: () => null });
+    expect(parent.querySelector('.pmd-dropzone-bar .pmd-icon-archive')).not.toBeNull();
+    expect(parent.querySelector('.pmd-send-bar .pmd-icon-upload')).not.toBeNull();
+    expect(parent.querySelector('.pmd-receive-bar .pmd-icon-download')).not.toBeNull();
+    expect(parent.querySelector('.pmd-pill-bar svg, .pmd-dropzone-bar svg')).toBeNull();
+  });
+
   it('dropzone drop surface: the open list counts even though it lies outside the root\'s box', () => {
     vi.spyOn(dropzoneStore, 'init').mockResolvedValue();
     const parent = document.createElement('div');

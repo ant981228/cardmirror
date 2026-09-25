@@ -115,9 +115,8 @@ export class ReceivePillController {
     const icon = document.createElement('span');
     icon.className = 'pmd-pill-icon';
     icon.setAttribute('aria-hidden', 'true');
-    // Inbox / down-into-tray glyph.
-    icon.innerHTML =
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/></svg>';
+    // In-tray (the icon set's `download`), paired with Send's out-tray.
+    setIcon(icon, 'download');
     this.bar.appendChild(icon);
     const labelEl = document.createElement('span');
     labelEl.className = 'pmd-pill-label';

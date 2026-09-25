@@ -91,7 +91,11 @@ see `DETAILED_CHANGELOG.md`.
   can run as wide as the editor, so shelf items are no longer squeezed
   into a thin column and the Receive list no longer runs off the edge of
   a narrow window. All three pills get the same blue border on hover.
-  The shelf's Clear button now sits at the bottom of its list.
+  The shelf's Clear button now sits at the bottom of its list. The
+  pills' icons now come from the app's own icon set: a storage box for
+  the dropzone, and a matching out-tray and in-tray for Send and
+  Receive (the old dropzone and Receive icons were a mismatched pair of
+  opposite arrows).
 - **No more browser focus ring.** The orange-or-accent-colored ring the
   browser drew around whatever last took keyboard focus (a pill, a nav
   row, a chip) is gone everywhere. Text fields still show their own blue

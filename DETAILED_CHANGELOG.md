@@ -219,7 +219,13 @@ inside the root's rect). Send: the recent-senders flyout anchors on its
 root. Receive: in the home dock the pill stays `position: relative`, so
 its popup hangs off the pill as before. `pill-scroll-clearance` measures
 the tray, whose height is now just the bar row — an open popup never
-inflates the typing clearance. Tests: pill-popup-anatomy.test.ts.
+inflates the typing clearance. Icons (user request, same day): the
+bars carried hand-drawn inline SVGs — the dropzone an up-arrow tray and
+Receive a down-arrow tray drawn to different geometry, Send a paper
+plane. They now use the icon set through `setIcon`: `archive` (lidded
+storage box) for the dropzone, `upload` (out-tray) for Send and
+`download` (in-tray) for Receive, the set's matched pair; `.pmd-icon`
+sized to 16px inside the bars. Tests: pill-popup-anatomy.test.ts.
 
 ### Changed: no browser focus ring
 

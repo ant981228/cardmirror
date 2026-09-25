@@ -119,11 +119,12 @@ export class DropzoneController {
     this.bar.setAttribute('tabindex', '0');
     this.bar.title = 'Dropzone — drag content here, click to expand';
 
+    // A storage box (the icon set's `archive`): a shelf where cards are
+    // parked. Send / Receive carry the set's matching out-tray / in-tray.
     const icon = document.createElement('span');
     icon.className = 'pmd-dropzone-icon';
     icon.setAttribute('aria-hidden', 'true');
-    icon.innerHTML =
-      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M12 14V4"/><path d="M8 8l4-4 4 4"/></svg>';
+    setIcon(icon, 'archive');
     this.bar.appendChild(icon);
 
     this.countBadge = document.createElement('span');

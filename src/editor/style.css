@@ -14598,6 +14598,13 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
   align-items: center;
   color: var(--pmd-c-text-muted);
 }
+/* The three pills draw icon-set glyphs (archive / upload / download —
+   one pack, so the in-tray and out-tray match). `.pmd-icon` is 1em
+   square; 16px matches the pill text's optical size. */
+.pmd-pill-icon > .pmd-icon,
+.pmd-dropzone-icon > .pmd-icon {
+  font-size: 16px;
+}
 .pmd-pill-label {
   font-weight: 500;
 }
