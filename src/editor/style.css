@@ -2345,24 +2345,33 @@ body:not(.pmd-multi-doc) #app {
 }
 
 /* Bottom-right CardMirror mark: drag handle for the focused document's
-   file (file-drag-mark.ts sets the image). Sized like the zoom buttons,
-   no chrome — the mark is the whole affordance; the grab cursor and the
-   tooltip say what it does. Dimmed while there is no file on disk. */
+   file (file-drag-mark.ts sets the image). The same button chrome as
+   the zoom buttons beside it (keep in sync with `.zoom-controls button`),
+   the mark drawn inside at 80%; the grab cursor and the tooltip say what
+   it does. Dimmed like a disabled zoom button while there is no file on
+   disk. */
 #file-drag-mark {
   flex: 0 0 auto;
   width: 1.15rem;
   height: 1.15rem;
   margin-left: 0.4rem;
   padding: 0;
-  border: none;
-  background: transparent center / contain no-repeat;
+  background: var(--pmd-c-bg);
+  background-position: center;
+  background-size: 80%;
+  background-repeat: no-repeat;
+  border: 1px solid var(--pmd-c-border);
+  border-radius: 3px;
   cursor: grab;
+}
+#file-drag-mark:hover {
+  background-color: var(--pmd-c-hover);
 }
 #file-drag-mark:active {
   cursor: grabbing;
 }
 #file-drag-mark[data-inert] {
-  opacity: 0.35;
+  opacity: 0.4;
   cursor: default;
 }
 #file-drag-mark[hidden] {
