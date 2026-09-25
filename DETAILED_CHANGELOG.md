@@ -5,6 +5,32 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Added: Read mode: show background color
+
+User request 2026-09-24: after Lock Highlighting (or Create Reference)
+turns an earlier pass into background color and the card is
+re-highlighted, read mode hid the locked pass entirely, since it keeps
+only `highlight` (plus `cite_mark` in cites). Setting
+`readModeShowBackground` (General → Editor behavior, under show
+undertags, off by default) adds `shading` to what `isReadKept` accepts,
+for every read-aloud paragraph kind — body, paragraph, undertag and
+cite. Read at decoration time; both shells add it to the diff that
+rebuilds the decoration set on a flip. No stylesheet change: block
+collapse keys off `.pmd-rm-keep`, which the shaded runs now carry, so a
+body paragraph holding only background-colored text shows rather than
+collapsing. Convert Cards to Read Mode, scroll anchoring
+(`nearestReadKeptPos` / `firstReadKeptPos`) and the card preview follow
+through the shared predicate.
+
+Counting: untouched. `readAloudBucket` (word-count.ts) excludes shaded
+text by design and never consults the setting;
+read-mode-show-background.test.ts pins that the count is unchanged with
+the setting on. Not changed: the export-side read-mode transform
+(`transformContainerForReadMode`), which follows neither this nor the
+other read-mode display settings.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added: URLs → links (Link URLs, autolink, Mod+click)

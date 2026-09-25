@@ -1378,6 +1378,7 @@ function closeOpenStackDropdown(): void {
 let shellLastMarkUnread = settings.get('markUnreadAfterMarker');
 let shellLastKeepEntireCite = settings.get('readModeKeepEntireCite');
 let shellLastShowUndertags = settings.get('readModeShowUndertags');
+let shellLastShowBackground = settings.get('readModeShowBackground');
 let shellLastNumberingSig = numberingDisplaySig();
 
 class MultiPaneShell {
@@ -1544,9 +1545,14 @@ class MultiPaneShell {
       // its decoration set (re-sending the on-toggle is the rebuild; the
       // single-doc path does the same through applyReadMode). Diff-gated
       // like the mark-unread nudge: the rebuild is O(doc).
-      if (s.readModeKeepEntireCite !== shellLastKeepEntireCite || s.readModeShowUndertags !== shellLastShowUndertags) {
+      if (
+        s.readModeKeepEntireCite !== shellLastKeepEntireCite ||
+        s.readModeShowUndertags !== shellLastShowUndertags ||
+        s.readModeShowBackground !== shellLastShowBackground
+      ) {
         shellLastKeepEntireCite = s.readModeKeepEntireCite;
         shellLastShowUndertags = s.readModeShowUndertags;
+        shellLastShowBackground = s.readModeShowBackground;
         for (const id of SLOT_IDS) {
           for (const rec of this.slots[id].stack) {
             if (rec.readMode) rec.view.dispatch(rec.view.state.tr.setMeta(PMD_READ_MODE_TOGGLE, true));

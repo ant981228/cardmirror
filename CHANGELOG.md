@@ -5,6 +5,17 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **Read mode: show background color** (Settings → General → Editor
+  behavior, off by default) keeps background-colored text visible in
+  read mode beside highlighted text, so a highlighting pass you locked
+  to background (Lock Highlighting) stays on screen while you read your
+  re-highlight. Convert Cards to Read Mode follows it. Background-colored
+  text still doesn't count toward word counts or read time.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added

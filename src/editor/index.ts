@@ -3947,6 +3947,7 @@ let lastReadModeBorders = settings.get('hideEmphasisBordersInReadMode');
 let lastReadModeParaIntegrity = settings.get('readModeParagraphIntegrity');
 let lastReadModeKeepCite = settings.get('readModeKeepEntireCite');
 let lastReadModeShowUndertags = settings.get('readModeShowUndertags');
+let lastReadModeShowBackground = settings.get('readModeShowBackground');
 let lastMarkUnread = settings.get('markUnreadAfterMarker');
 let lastNumberingDisplay = numberingDisplaySig();
 
@@ -4013,13 +4014,15 @@ settings.subscribe((s) => {
       s.hideEmphasisBordersInReadMode !== lastReadModeBorders ||
       s.readModeParagraphIntegrity !== lastReadModeParaIntegrity ||
       s.readModeKeepEntireCite !== lastReadModeKeepCite ||
-      s.readModeShowUndertags !== lastReadModeShowUndertags)
+      s.readModeShowUndertags !== lastReadModeShowUndertags ||
+      s.readModeShowBackground !== lastReadModeShowBackground)
   ) {
     lastReadMode = s.readMode;
     lastReadModeBorders = s.hideEmphasisBordersInReadMode;
     lastReadModeParaIntegrity = s.readModeParagraphIntegrity;
     lastReadModeKeepCite = s.readModeKeepEntireCite;
     lastReadModeShowUndertags = s.readModeShowUndertags;
+    lastReadModeShowBackground = s.readModeShowBackground;
     // (applyReadMode re-sends the toggle, which rebuilds the plugin's
     // decoration set — how a keep-entire-cite flip reaches the text.)
     applyReadMode(s.readMode);
