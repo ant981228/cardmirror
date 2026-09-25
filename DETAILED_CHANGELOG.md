@@ -202,16 +202,19 @@ pill, whichever pill opened it. `min-width: 100%` spans the pill row;
 `width: min(420px, --pmd-pill-popup-max)` where `positionDropzone`
 (index.ts) now sets that variable on the tray from the editor's rect
 (replacing the dropzone-only inline max-width), so a narrow window
-narrows the popup. The open pill's bar becomes the popup's tab: top
-corners squared, top border transparent, painted above the popup (z 3
-over 2) with a `::after` masking the popup's bottom border across the
-bar's width. `attachPopup` (pill-tray.ts) measures on open whether the
-bar is flush with the popup's left / right edge and squares that popup
-corner (`pmd-pill-popup-flush-left/right`) — measured, not
-`:first-child`, since a hidden dropzone or pairing pill still occupies
-its DOM slot. Hover: accent border on all three bars. Open: accent
-border on tab and popup; the Send bar's drag-hot ring survives on the
-tab (`.pmd-pill-bar.pmd-send-bar-hot` outranks the tab rule).
+narrows the popup. The popup floats `--pmd-pill-popup-gap` (8px) above
+the row; the open pill keeps its own accent border and its `::after`
+draws a translucent grey bridge (`color-mix` of the muted text color)
+across that gap, the bar's full width, from the bar's top edge to the
+popup's bottom edge — pill and popup stay two things, visibly joined.
+(A first cut merged the bar into the popup as a tab; the user wanted
+the pill kept distinct.) `attachPopup` (pill-tray.ts) measures on open
+whether the bar is flush with the popup's left / right edge and squares
+that popup corner (`pmd-pill-popup-flush-left/right`) so pill, bridge
+and popup share one straight edge — measured, not `:first-child`, since
+a hidden dropzone or pairing pill still occupies its DOM slot. Hover:
+accent border on all three bars; the Send bar's drag-hot ring outranks
+the open rule (`.pmd-pill-bar.pmd-send-bar-hot`).
 
 Dropzone: the root is now a plain `.pmd-pill`; the list carries
 `pmd-pill-popup`; Clear moved into a `.pmd-dropzone-actions` footer

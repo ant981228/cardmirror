@@ -85,9 +85,9 @@ see `DETAILED_CHANGELOG.md`.
 ### Changed
 
 - **The dropzone, Send and Receive pills open the same way.** Click any
-  of the three and its list rises above the pill row, growing out of the
-  pill you clicked; the outline joining the pill to its list is how you
-  tell which one is open. Every list starts at the row's left edge and
+  of the three and its list rises above the pill row, connected to the
+  pill you clicked by a short grey bridge, with that pill outlined in
+  blue — that is how you tell which one is open. Every list starts at the row's left edge and
   can run as wide as the editor, so shelf items are no longer squeezed
   into a thin column and the Receive list no longer runs off the edge of
   a narrow window. All three pills get the same blue border on hover.

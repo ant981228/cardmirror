@@ -14605,17 +14605,22 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
    visible pill), at least as wide as the row and up to the editor's width
    (`--pmd-pill-popup-max`, set inline on the tray by positionDropzone —
    a narrow window narrows the popup instead of pushing it off screen).
-   The open pill's bar becomes the popup's TAB: top corners squared, top
-   border gone, its ::after masking the popup's bottom border across the
-   bar's width, so the popup reads as growing out of that button — which
-   is how you tell which pill is open now that they all rise from the
-   same place. In the home screen's dock (receive pill only) the popup
-   hangs off the pill itself: same look, pill-relative. */
+   The popup floats a small gap above the row; the open pill keeps its
+   own outline (the accent "clicked" border) and a translucent grey
+   BRIDGE — the bar's ::after — spans that gap between the bar and the
+   popup's bottom edge, so the popup reads as connected to that button
+   without absorbing it. That bridge is how you tell which pill is open
+   now that they all rise from the same place. In the home screen's dock
+   (receive pill only) the popup hangs off the pill itself: same look,
+   pill-relative. */
+.pmd-pill {
+  --pmd-pill-popup-gap: 8px;
+}
 .pmd-pill-popup {
   display: none;
   position: absolute;
   left: 0;
-  bottom: 100%;
+  bottom: calc(100% + var(--pmd-pill-popup-gap, 8px));
   box-sizing: border-box;
   min-width: 100%;
   width: min(420px, var(--pmd-pill-popup-max, 380px));
@@ -14625,7 +14630,7 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
   margin: 0;
   padding: 0.25rem;
   background: var(--pmd-c-bg);
-  border: 1px solid var(--pmd-c-accent);
+  border: 1px solid var(--pmd-c-border);
   border-radius: 10px;
   box-shadow: 0 6px 18px var(--pmd-c-shadow-fade);
   z-index: 2;
@@ -14633,9 +14638,9 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 [data-open="true"] > .pmd-pill-popup {
   display: block;
 }
-/* The tab is flush with a popup corner when its pill is the outermost
+/* The bridge is flush with a popup corner when its pill is the outermost
    one (`attachPopup`, pill-tray.ts, measures which): that corner squares
-   off so the bar's border runs straight into the popup's. */
+   off so pill, bridge and popup share one straight edge. */
 .pmd-pill-popup-flush-left {
   border-bottom-left-radius: 0;
 }
@@ -14648,33 +14653,26 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 .pmd-receive-bar:hover {
   border-color: var(--pmd-c-accent);
 }
-/* Open: the bar is the popup's tab. Painted above the popup (z 3 > 2)
-   so its ::after can hide the popup's bottom border along the join. */
+/* Open: the accent "clicked" outline on the pill only, plus the bridge
+   up to the popup. Offsets are from the bar's padding box, so -1px /
+   calc(100% + 1px) reach its outer edges: the bridge runs the bar's full
+   width from its top edge to the popup's bottom edge. */
 [data-open="true"] > .pmd-dropzone-bar,
 [data-open="true"] > .pmd-pill-bar {
   position: relative;
-  z-index: 3;
-  background: var(--pmd-c-bg);
   color: var(--pmd-c-text);
   border-color: var(--pmd-c-accent);
-  border-top-color: transparent;
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-  box-shadow: none;
 }
 [data-open="true"] > .pmd-dropzone-bar::after,
 [data-open="true"] > .pmd-pill-bar::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  top: -2px;
-  height: 3px;
-  background: var(--pmd-c-bg);
-}
-[data-open="true"] > .pmd-dropzone-bar:hover,
-[data-open="true"] > .pmd-pill-bar:hover {
-  background: var(--pmd-c-bg);
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 1px);
+  height: var(--pmd-pill-popup-gap, 8px);
+  background: color-mix(in srgb, var(--pmd-c-text-muted) 28%, transparent);
+  pointer-events: none;
 }
 
 /* Blue arrival flash — the exact accent ring the command bar uses

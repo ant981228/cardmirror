@@ -39,13 +39,17 @@ describe('pill popup CSS contract', () => {
     const rule = css.match(/\n\.pmd-pill-popup \{\n([^}]*)\}/u)?.[1] ?? '';
     expect(rule).toMatch(/position: absolute;/u);
     expect(rule).toMatch(/left: 0;/u);
-    expect(rule).toMatch(/bottom: 100%;/u);
+    expect(rule).toMatch(/bottom: calc\(100% \+ var\(--pmd-pill-popup-gap, 8px\)\);/u);
     expect(rule).toMatch(/min-width: 100%;/u);
     expect(rule).toMatch(/--pmd-pill-popup-max/u);
   });
-  it('the open bar is the popup\'s tab and all three bars share the hover border', () => {
-    expect(css).toMatch(/\[data-open="true"\] > \.pmd-dropzone-bar,\n\[data-open="true"\] > \.pmd-pill-bar \{[^}]*border-top-left-radius: 0;/u);
-    expect(css).toMatch(/\[data-open="true"\] > \.pmd-pill-bar::after \{/u);
+  it('the open bar keeps its own accent outline, bridges the gap to the popup, and all three bars share the hover border', () => {
+    expect(css).toMatch(/\[data-open="true"\] > \.pmd-dropzone-bar,\n\[data-open="true"\] > \.pmd-pill-bar \{[^}]*border-color: var\(--pmd-c-accent\);/u);
+    const bridge = css.match(/\[data-open="true"\] > \.pmd-pill-bar::after \{\n([^}]*)\}/u)?.[1] ?? '';
+    expect(bridge).toMatch(/bottom: calc\(100% \+ 1px\);/u);
+    expect(bridge).toMatch(/height: var\(--pmd-pill-popup-gap/u);
+    const popup = css.match(/\n\.pmd-pill-popup \{\n([^}]*)\}/u)?.[1] ?? '';
+    expect(popup).toMatch(/bottom: calc\(100% \+ var\(--pmd-pill-popup-gap/u);
     expect(css).toMatch(/\.pmd-dropzone-bar:hover,\n\.pmd-send-bar:hover,\n\.pmd-receive-bar:hover \{\n\s*border-color: var\(--pmd-c-accent\);/u);
   });
 });
