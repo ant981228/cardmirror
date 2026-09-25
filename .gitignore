@@ -8,7 +8,7 @@ Thumbs.db
 .idea/
 
 # Node / future build artifacts (placeholders for when we have code)
-node_modules/
+node_modules
 dist/
 build/
 .next/
