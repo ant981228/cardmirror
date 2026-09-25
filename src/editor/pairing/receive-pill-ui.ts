@@ -146,7 +146,7 @@ export class ReceivePillController {
     // One combined badge: "total · N new" (blue) when there are unread
     // cards, fading to just "total" (gray) once everything's been seen.
     this.badge = document.createElement('span');
-    this.badge.className = 'pmd-receive-badge';
+    this.badge.className = 'pmd-pill-badge pmd-receive-badge';
     this.badge.hidden = true;
     this.bar.appendChild(this.badge);
 

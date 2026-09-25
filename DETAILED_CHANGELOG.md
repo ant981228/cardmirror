@@ -233,12 +233,13 @@ Receive footer gains its own Clear (`inboxStore.clear()`, no prompt —
 a resend is always possible) beside Join session, each button hidden on
 its own condition and the row hidden only when both are. Fixed on the
 way: `.pmd-dropzone-count { display: inline-block }` beat the UA
-`[hidden]` rule, so the empty shelf showed "0"; a `[hidden]` override
-restores it. Dark mode: the count's accent text on an 18% accent tint
-was near-invisible on the pill's dark surface; a `:root[data-theme=
-"dark"]` override mixes the accent 55% toward white for the text and
-uses a 48% tint behind it (color-mix on the token, so the colorblind
-preset's accent follows). Tests: pill-popup-anatomy.test.ts.
+`[hidden]` rule, so the empty shelf showed "0". Both counts are now one
+`.pmd-pill-badge` (Receive's metrics: 0.72rem, 0.45em side padding,
+1.1em min-width, grey base, no `display` of its own so `hidden` falls
+through to the UA rule); the dropzone gave up its blue tint (near
+invisible in dark mode anyway) for the same grey, and Receive's unread
+state recolors on top as before. The unused `.pmd-pill-count` rule is
+gone. Tests: pill-popup-anatomy.test.ts.
 
 ### Changed: no browser focus ring
 

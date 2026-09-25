@@ -96,7 +96,8 @@ see `DETAILED_CHANGELOG.md`.
   the dropzone, and a matching out-tray and in-tray for Send and
   Receive (the old dropzone and Receive icons were a mismatched pair of
   opposite arrows). The Receive list gains a **Clear** button beside
-  Join session, and the shelf's Clear is styled like those buttons.
+  Join session, the shelf's Clear is styled like those buttons, and the
+  dropzone's item count is now the same grey badge Receive uses.
 - **No more browser focus ring.** The orange-or-accent-colored ring the
   browser drew around whatever last took keyboard focus (a pill, a nav
   row, a chip) is gone everywhere. Text fields still show their own blue
@@ -105,8 +106,6 @@ see `DETAILED_CHANGELOG.md`.
 ### Fixed
 
 - The dropzone pill showed a **0** badge when the shelf was empty.
-- In dark mode the dropzone's item count was hard to read; its blue is
-  brighter there now.
 
 ## 1.12.0 — 2026-09-21
 

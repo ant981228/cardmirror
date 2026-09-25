@@ -51,8 +51,14 @@ describe('pill popup CSS contract', () => {
     expect(popup).toMatch(/border: 1px solid var\(--pmd-c-border\);/u);
     expect(css).toMatch(/\.pmd-dropzone-bar:hover,\n\.pmd-send-bar:hover,\n\.pmd-receive-bar:hover \{\n\s*border-color: var\(--pmd-c-accent\);/u);
   });
-  it('the dropzone count hides at zero and its Clear shares the action-button styling', () => {
-    expect(css).toMatch(/\.pmd-dropzone-count\[hidden\] \{\n\s*display: none;/u);
+  it('one badge rule for both counts, with no display of its own so hidden works at zero', () => {
+    const badge = css.match(/\n\.pmd-pill-badge \{\n([^}]*)\}/u)?.[1] ?? '';
+    expect(badge).toMatch(/min-width: 1\.1em;/u);
+    expect(badge).not.toMatch(/display:/u);
+    expect(css).not.toMatch(/\n\.pmd-dropzone-count \{/u);
+    expect(css).not.toMatch(/\n\.pmd-pill-count \{/u);
+  });
+  it('the dropzone Clear shares the action-button styling', () => {
     expect(css).toMatch(/\.pmd-send-action,\n\.pmd-receive-action,\n\.pmd-dropzone-clear \{/u);
     expect(css).toMatch(/\.pmd-send-actions,\n\.pmd-receive-actions,\n\.pmd-dropzone-actions \{/u);
   });
@@ -103,6 +109,8 @@ describe('the three pills share the popup anatomy', () => {
     new SendPillController().mount({ parent });
     new ReceivePillController().mount({ parent, getFocusedView: () => null });
     expect(parent.querySelector('.pmd-dropzone-bar .pmd-icon-archive')).not.toBeNull();
+    expect(parent.querySelector('.pmd-dropzone-bar .pmd-pill-badge.pmd-dropzone-count')).not.toBeNull();
+    expect(parent.querySelector('.pmd-receive-bar .pmd-pill-badge.pmd-receive-badge')).not.toBeNull();
     expect(parent.querySelector('.pmd-send-bar .pmd-icon-upload')).not.toBeNull();
     expect(parent.querySelector('.pmd-receive-bar .pmd-icon-download')).not.toBeNull();
     expect(parent.querySelector('.pmd-pill-bar svg, .pmd-dropzone-bar svg')).toBeNull();

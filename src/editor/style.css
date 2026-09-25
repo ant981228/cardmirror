@@ -4915,31 +4915,11 @@ body.pmd-multi-doc .pmd-pill-tray {
   align-items: center;
   flex: 0 0 auto;
 }
-.pmd-dropzone-count {
-  display: inline-block;
-  font-size: 0.7rem;
-  font-weight: 600;
-  background: var(--pmd-c-accent-soft);
-  color: var(--pmd-c-accent);
-  border-radius: 999px;
-  padding: 0 0.4rem;
-  min-width: 1.1rem;
-  text-align: center;
-  line-height: 1.3;
-}
-/* An author `display` beats the UA's `[hidden] { display: none }`, so the
-   empty shelf showed a "0" (field report 2026-09-25). */
-.pmd-dropzone-count[hidden] {
-  display: none;
-}
-/* Dark: accent text on an 18% accent tint sat too close to the pill's
-   dark surface to read (user report 2026-09-25). A lighter blue on a
-   stronger tint — derived from the accent token so the colorblind preset
-   follows — punchier without becoming the solid "unread" badge. */
-:root[data-theme="dark"] .pmd-dropzone-count {
-  color: color-mix(in srgb, var(--pmd-c-accent) 55%, white);
-  background: color-mix(in srgb, var(--pmd-c-accent) 48%, transparent);
-}
+/* The shelf's item count is the shared `.pmd-pill-badge` (see the pills
+   section) — the same badge as Receive's, grey base included. No `display`
+   of its own, so the `hidden` attribute at zero items works (an author
+   `display` beat the UA rule once and the empty shelf showed "0", field
+   report 2026-09-25). */
 /* Shared scaffolding (flex fill).
    Diverge by pulling a selector out, not by re-copying. */
 .pmd-qc-manage-row-main,
@@ -14603,14 +14583,21 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 .pmd-pill-label {
   font-weight: 500;
 }
-.pmd-pill-count {
+/* One count badge for the pills: the dropzone's item count and Receive's
+   "total · N new". Grey base; Receive's unread state recolors it below.
+   Deliberately no `display` — `hidden` (dropzone at zero, Receive when
+   empty) must fall through to the UA rule. */
+.pmd-pill-badge {
   min-width: 1.1em;
-  padding: 0 0.3em;
+  padding: 0 0.45em;
   border-radius: 999px;
   background: var(--pmd-c-hover);
   color: var(--pmd-c-text-muted);
   font-size: 0.72rem;
+  font-weight: 600;
   text-align: center;
+  white-space: nowrap;
+  transition: background-color 320ms ease, color 320ms ease;
 }
 
 /* ---- Pill popups: one anatomy for Dropzone / Send / Receive ----
@@ -14810,20 +14797,9 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 }
 
 /* ---- Receive pill ---- */
-/* One combined count badge: "total | N new". Blue while there are unread
-   cards, fading to the muted gray once everything's been seen. */
-.pmd-receive-badge {
-  min-width: 1.1em;
-  padding: 0 0.45em;
-  border-radius: 999px;
-  background: var(--pmd-c-hover);
-  color: var(--pmd-c-text-muted);
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-align: center;
-  white-space: nowrap;
-  transition: background-color 320ms ease, color 320ms ease;
-}
+/* One combined count badge (a `.pmd-pill-badge`): "total | N new". Blue
+   while there are unread cards, fading to the muted gray once
+   everything's been seen. */
 /* Hover feedback on the clickable pill. Resting bg is already
    --pmd-c-hover, so hover steps up to the stronger shade. The :not()
    guard keeps the unread badge's accent fill from being grayed on

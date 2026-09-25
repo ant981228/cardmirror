@@ -134,7 +134,7 @@ export class DropzoneController {
     this.bar.appendChild(icon);
 
     this.countBadge = document.createElement('span');
-    this.countBadge.className = 'pmd-dropzone-count';
+    this.countBadge.className = 'pmd-pill-badge pmd-dropzone-count';
     this.countBadge.hidden = true;
     this.bar.appendChild(this.countBadge);
 
