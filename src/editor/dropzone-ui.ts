@@ -4,14 +4,12 @@
  * (positioned by `positionDropzone` in index.ts — not the nav pane,
  * whose bottom edge sits in the outline's auto-scroll zone).
  *
- * The whole element morphs between two states:
- *   - Closed: small grey pill in the editor's bottom-left corner
- *     (icon + item count).
- *   - Open: the same element expands UPWARD to become a panel
- *     hosting the item list. The bottom row of the panel keeps
- *     the icon + count + clear button as the click-to-collapse
- *     bar — visually the pill "grew up" into the panel rather
- *     than a separate UI appearing.
+ * Two states, the same anatomy as the Send / Receive pills:
+ *   - Closed: small grey pill in the tray (icon + item count).
+ *   - Open: the item list is a `.pmd-pill-popup` rising from the
+ *     pill row (left-anchored on the tray, spanning it), with the
+ *     bar as the popup's tab — the popup grows out of the button.
+ *     Clear lives in the popup's footer.
  *
  *   - Drag-over (any state): blue accept-state matching the nav-
  *     pane + editor drop indicators. The bubble's surface
@@ -50,6 +48,7 @@ import { READ_MODE_DRAG_META } from './reading-marker.js';
 import { checkedSliceFromJSON } from '../schema/slice-check.js';
 import { openCardPreview } from './card-preview-modal.js';
 import { isAnyOverlayOpen } from './overlay-stack.js';
+import { attachPopup } from './pill-tray.js';
 
 interface DropzoneMountOptions {
   parent: HTMLElement;
@@ -57,17 +56,19 @@ interface DropzoneMountOptions {
 }
 
 export class DropzoneController {
-  /** The morphing element — small pill when closed, expanded panel
-   *  when open. Anchored to the editor's bottom-left by
-   *  `positionDropzone` (index.ts). */
+  /** The pill: the bar, plus the popup list while open. In the tray
+   *  `positionDropzone` (index.ts) anchors. */
   private root!: HTMLDivElement;
-  /** List area inside the root, only visible when open. */
+  /** The popup list (`.pmd-pill-popup`), shown while open. */
   private listEl!: HTMLUListElement;
-  /** Bottom bar (icon + count + clear). Always visible; acts as
-   *  the click target for toggling open / closed. */
+  /** The bar (icon + count). Always visible; the click target for
+   *  toggling open / closed, and the popup's tab while open. */
   private bar!: HTMLDivElement;
   private countBadge!: HTMLSpanElement;
   private clearBtn!: HTMLButtonElement;
+  /** Popup footer holding Clear; appended by renderList while there
+   *  are items (built once so the listener survives re-renders). */
+  private actionsLi!: HTMLLIElement;
   private items: DropzoneItem[] = [];
   private open = false;
   private surface: DragSurface | null = null;
@@ -87,17 +88,32 @@ export class DropzoneController {
     this.getFocusedView = opts.getFocusedView;
 
     this.root = document.createElement('div');
-    this.root.className = 'pmd-dropzone-root';
+    this.root.className = 'pmd-pill pmd-dropzone-root';
     this.root.dataset['open'] = 'false';
     this.root.setAttribute('role', 'group');
     this.root.setAttribute('aria-label', 'Dropzone shelf');
 
-    // List sits ABOVE the bar (flex column). Hidden until open.
+    // The popup list, above the pill row while open.
     this.listEl = document.createElement('ul');
-    this.listEl.className = 'pmd-dropzone-list';
+    this.listEl.className = 'pmd-dropzone-list pmd-pill-popup';
     this.root.appendChild(this.listEl);
 
-    // Bar — always visible bottom row. Clicking it toggles open.
+    // Popup footer: Clear. Lives in the popup, not the bar, so the bar
+    // stays a pill-sized tab.
+    this.actionsLi = document.createElement('li');
+    this.actionsLi.className = 'pmd-dropzone-actions';
+    this.clearBtn = document.createElement('button');
+    this.clearBtn.type = 'button';
+    this.clearBtn.className = 'pmd-dropzone-clear';
+    this.clearBtn.textContent = 'Clear';
+    this.clearBtn.title = 'Remove every shelf item';
+    this.clearBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void dropzoneStore.clear();
+    });
+    this.actionsLi.appendChild(this.clearBtn);
+
+    // Bar — always visible. Clicking it toggles open.
     this.bar = document.createElement('div');
     this.bar.className = 'pmd-dropzone-bar';
     this.bar.setAttribute('role', 'button');
@@ -116,24 +132,6 @@ export class DropzoneController {
     this.countBadge.hidden = true;
     this.bar.appendChild(this.countBadge);
 
-    // Spacer pushes the clear button to the right edge in open
-    // state. Doesn't matter in closed state (clear is hidden).
-    const spacer = document.createElement('span');
-    spacer.className = 'pmd-dropzone-bar-spacer';
-    this.bar.appendChild(spacer);
-
-    this.clearBtn = document.createElement('button');
-    this.clearBtn.type = 'button';
-    this.clearBtn.className = 'pmd-dropzone-clear';
-    this.clearBtn.textContent = 'Clear';
-    this.clearBtn.title = 'Remove every shelf item';
-    this.clearBtn.hidden = true;
-    this.clearBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      void dropzoneStore.clear();
-    });
-    this.bar.appendChild(this.clearBtn);
-
     const handleToggle = (e: Event): void => {
       e.stopPropagation();
       this.setOpen(!this.open);
@@ -149,9 +147,10 @@ export class DropzoneController {
     this.root.appendChild(this.bar);
     opts.parent.appendChild(this.root);
 
-    // Drag surface — the whole root acts as the target so dropping
-    // anywhere on the morphed shelf (closed pill OR open panel)
-    // counts as a shelf drop.
+    // Drag surface — the pill (its bar) and, while open, the popup list
+    // are both targets, so dropping anywhere on the shelf counts. (The
+    // popup is absolutely positioned: the root's own rect is just the
+    // bar, so the list is measured separately.)
     this.surface = {
       hitTest: (clientX, clientY) => {
         // Don't absorb our own drag-out: virtual sessions originate from
@@ -159,12 +158,11 @@ export class DropzoneController {
         // just duplicate it. Returning null makes that a no-op (and frees
         // the editor surface to win the hit instead).
         if (dragController.getSession()?.virtual) return null;
-        const rect = this.root.getBoundingClientRect();
+        const inRect = (rect: DOMRect): boolean =>
+          clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
         const inside =
-          clientX >= rect.left &&
-          clientX <= rect.right &&
-          clientY >= rect.top &&
-          clientY <= rect.bottom;
+          inRect(this.root.getBoundingClientRect()) ||
+          (this.open && inRect(this.listEl.getBoundingClientRect()));
         if (!inside) return null;
         return {
           el: this.root,
@@ -217,7 +215,6 @@ export class DropzoneController {
     this.countBadge.hidden = n === 0;
     this.countBadge.textContent = String(n);
     this.root.classList.toggle('pmd-dropzone-root-empty', n === 0);
-    this.clearBtn.hidden = !(this.open && n > 0);
   }
 
   private setOpen(open: boolean): void {
@@ -225,6 +222,7 @@ export class DropzoneController {
     this.open = open;
     this.root.dataset['open'] = open ? 'true' : 'false';
     this.renderBar();
+    if (open) attachPopup(this.bar, this.listEl);
   }
 
   private renderList(): void {
@@ -240,6 +238,7 @@ export class DropzoneController {
     for (const item of [...this.items].reverse()) {
       this.listEl.appendChild(this.renderRow(item));
     }
+    this.listEl.appendChild(this.actionsLi);
   }
 
   private renderRow(item: DropzoneItem): HTMLLIElement {

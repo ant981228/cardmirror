@@ -34,6 +34,7 @@ import {
 import { promptForText } from '../text-prompt.js';
 import { normalizePairingCode, looksLikePairingCode } from './pairing-ids.js';
 import { recentSenders } from './inbox-store.js';
+import { attachPopup } from '../pill-tray.js';
 
 interface SendPillMountOptions {
   parent: HTMLElement;
@@ -164,7 +165,7 @@ export class SendPillController {
     this.root.dataset['open'] = 'false';
 
     this.panel = document.createElement('div');
-    this.panel.className = 'pmd-send-panel';
+    this.panel.className = 'pmd-send-panel pmd-pill-popup';
     this.root.appendChild(this.panel);
 
     this.bar = document.createElement('div');
@@ -645,12 +646,15 @@ export class SendPillController {
     if (!this.recentSection) return;
     if (visible && this.recentSection.hidden) {
       // Anchor to the panel's live geometry: right edge + a small gap,
-      // bottoms aligned. Root-relative coordinates (both are absolutely
-      // positioned children of the root).
-      const rootRect = this.root.getBoundingClientRect();
+      // bottoms aligned. Coordinates are relative to the flyout's
+      // containing block — the tray (pills are static inside it) or,
+      // in the home dock, the pill root itself.
+      const baseRect = (
+        (this.recentSection.offsetParent as HTMLElement | null) ?? this.root
+      ).getBoundingClientRect();
       const panelRect = this.panel.getBoundingClientRect();
-      this.recentSection.style.left = `${panelRect.right - rootRect.left + 6}px`;
-      this.recentSection.style.bottom = `${rootRect.bottom - panelRect.bottom}px`;
+      this.recentSection.style.left = `${panelRect.right - baseRect.left + 6}px`;
+      this.recentSection.style.bottom = `${baseRect.bottom - panelRect.bottom}px`;
     }
     this.recentSection.hidden = !visible;
   }
@@ -748,6 +752,7 @@ export class SendPillController {
     if (this.expanded) return;
     this.expanded = true;
     this.root.dataset['open'] = 'true';
+    attachPopup(this.bar, this.panel);
     // Expanded by a drag (not a click): the actions row is in zone mode.
     if (!this.inviteMode) this.applyDragZoneLabels(true);
   }

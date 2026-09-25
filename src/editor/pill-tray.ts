@@ -1,7 +1,22 @@
 /**
- * Geometry helper for the bottom-left "pill tray" — the fixed container holding
- * the dropzone and the send/receive pills (`.pmd-pill-tray`).
+ * Geometry helpers for the bottom-left "pill tray" — the fixed container
+ * holding the dropzone and the send/receive pills (`.pmd-pill-tray`).
  */
+
+/** Square off the corner(s) of a just-opened pill popup that its bar is
+ *  flush with, so the bar's border runs straight into the popup's — the
+ *  "grows out of the button" join (style.css, "Pill popups"). Every popup
+ *  is left-anchored on the tray, so the bar is flush left only when its
+ *  pill is the leftmost VISIBLE one; measured rather than `:first-child`
+ *  because a hidden pill (dropzone off, pairing off) still occupies its
+ *  DOM slot. No-op without layout (tests, detached nodes). */
+export function attachPopup(bar: HTMLElement, popup: HTMLElement): void {
+  const b = bar.getBoundingClientRect();
+  const p = popup.getBoundingClientRect();
+  if (p.width === 0) return;
+  popup.classList.toggle('pmd-pill-popup-flush-left', Math.abs(b.left - p.left) < 1.5);
+  popup.classList.toggle('pmd-pill-popup-flush-right', Math.abs(b.right - p.right) < 1.5);
+}
 
 /** Whether `clientX` falls within the pill tray's horizontal span (padded a
  *  little). Used to suppress the *downward* drag auto-scroll over that column,

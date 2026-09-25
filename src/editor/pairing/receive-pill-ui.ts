@@ -29,6 +29,7 @@ import { collabEnabled } from '../collab/collab-gate.js';
 import { collabInviteJoiner, collabSessionJoinPrompt } from '../collab/collab-hooks.js';
 import { deletePrefetch } from '../collab/collab-store.js';
 import { checkedSliceFromJSON } from '../../schema/slice-check.js';
+import { attachPopup } from '../pill-tray.js';
 
 interface ReceivePillMountOptions {
   parent: HTMLElement;
@@ -82,7 +83,7 @@ export class ReceivePillController {
     this.root.setAttribute('aria-label', 'Received cards');
 
     this.listEl = document.createElement('ul');
-    this.listEl.className = 'pmd-receive-list';
+    this.listEl.className = 'pmd-receive-list pmd-pill-popup';
     this.root.appendChild(this.listEl);
 
     // Footer action inside the popup list: join a session by pasted
@@ -250,6 +251,7 @@ export class ReceivePillController {
       void inboxStore.markAllRead();
     }
     this.render();
+    if (open) attachPopup(this.bar, this.listEl);
   }
 
   private render(): void {

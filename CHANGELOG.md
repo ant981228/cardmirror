@@ -82,6 +82,17 @@ see `DETAILED_CHANGELOG.md`.
   its own window. A damaged file in the batch gets the usual repair
   offer once the rest have opened. Thanks to Cora (@coralynnkc)!
 
+### Changed
+
+- **The dropzone, Send and Receive pills open the same way.** Click any
+  of the three and its list rises above the pill row, growing out of the
+  pill you clicked; the outline joining the pill to its list is how you
+  tell which one is open. Every list starts at the row's left edge and
+  can run as wide as the editor, so shelf items are no longer squeezed
+  into a thin column and the Receive list no longer runs off the edge of
+  a narrow window. All three pills get the same blue border on hover.
+  The shelf's Clear button now sits at the bottom of its list.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added

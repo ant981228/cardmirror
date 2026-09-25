@@ -9801,9 +9801,10 @@ const dropzoneController = new DropzoneController();
 // touch) — structural moves are Move-mode buttons + nav-pane drags.
 if (!BOOT_MOBILE) {
   // All three bottom-left pills share one fixed tray (a flex row) so the
-  // send / receive pills sit to the RIGHT of the dropzone and each pill's
-  // expansion overlays upward without reflowing its neighbors. The tray is
-  // the element `positionDropzone` anchors.
+  // send / receive pills sit to the RIGHT of the dropzone; each pill's
+  // popup rises from the tray's left edge above the whole row (see "Pill
+  // popups" in style.css). The tray is the element `positionDropzone`
+  // anchors.
   const pillTray = document.createElement('div');
   pillTray.className = 'pmd-pill-tray';
   document.body.appendChild(pillTray);
@@ -10035,15 +10036,15 @@ function positionDropzone(): void {
     // the multi-pane footer's band until an unrelated reflow re-ran us.)
     root.style.removeProperty('left');
     root.style.removeProperty('bottom');
-    root.style.removeProperty('max-width');
+    root.style.removeProperty('--pmd-pill-popup-max');
     return;
   }
   root.style.left = `${Math.max(4, Math.round(r.left + 8))}px`;
   root.style.bottom = `${Math.max(4, Math.round(window.innerHeight - r.bottom + 8))}px`;
-  // Cap the expanded shelf so its right edge keeps the same 8px margin
-  // as the left (it's left-anchored, so without this it grows toward
-  // the window edge).
-  root.style.maxWidth = `${Math.max(160, Math.round(r.width - 16))}px`;
+  // Cap every pill popup (they are left-anchored on the tray) so its right
+  // edge keeps the same 8px margin as the left instead of growing toward
+  // the window edge — read by `.pmd-pill-popup` (style.css).
+  root.style.setProperty('--pmd-pill-popup-max', `${Math.max(160, Math.round(r.width - 16))}px`);
   positionRightTray();
   // The scroll runway (so the last content clears the tray) is pure CSS: a
   // `padding-bottom` on the editable, gated on the pill-hidden class. Single-doc

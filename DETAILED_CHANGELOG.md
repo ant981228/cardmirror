@@ -185,6 +185,45 @@ the rest have loaded, gets the same `offerDamagedSalvage` a single
 damaged file does (now exported from index.ts) instead of a per-file
 toast. Cora's PR #77.
 
+### Changed: one popup anatomy for the dropzone, Send and Receive pills
+
+User request 2026-09-25. Before: the dropzone morphed in place (its root
+grew into a panel, capped at the editor width by an inline max-width,
+with Clear in the bar — so its rows were squeezed between a fixed-width
+Preview button and the count), the Receive list popped up above the
+pill at a fixed 260–380px (off the window's edge when narrow), and only
+the Send bar showed a blue border on hover / open.
+
+Now every expansion is a `.pmd-pill-popup` (style.css, "Pill popups"):
+absolutely positioned at `left: 0; bottom: 100%` of the TRAY — the pills
+are `position: static` inside `.pmd-pill-tray`, so the tray is every
+popup's containing block and each one starts at the leftmost visible
+pill, whichever pill opened it. `min-width: 100%` spans the pill row;
+`width: min(420px, --pmd-pill-popup-max)` where `positionDropzone`
+(index.ts) now sets that variable on the tray from the editor's rect
+(replacing the dropzone-only inline max-width), so a narrow window
+narrows the popup. The open pill's bar becomes the popup's tab: top
+corners squared, top border transparent, painted above the popup (z 3
+over 2) with a `::after` masking the popup's bottom border across the
+bar's width. `attachPopup` (pill-tray.ts) measures on open whether the
+bar is flush with the popup's left / right edge and squares that popup
+corner (`pmd-pill-popup-flush-left/right`) — measured, not
+`:first-child`, since a hidden dropzone or pairing pill still occupies
+its DOM slot. Hover: accent border on all three bars. Open: accent
+border on tab and popup; the Send bar's drag-hot ring survives on the
+tab (`.pmd-pill-bar.pmd-send-bar-hot` outranks the tab rule).
+
+Dropzone: the root is now a plain `.pmd-pill`; the list carries
+`pmd-pill-popup`; Clear moved into a `.pmd-dropzone-actions` footer
+rendered only with items; the drag surface's hit test measures the bar
+and, while open, the list separately (an absolute popup no longer sits
+inside the root's rect). Send: the recent-senders flyout anchors on its
+`offsetParent` (the tray, or the pill in the home dock) instead of the
+root. Receive: in the home dock the pill stays `position: relative`, so
+its popup hangs off the pill as before. `pill-scroll-clearance` measures
+the tray, whose height is now just the bar row — an open popup never
+inflates the typing clearance. Tests: pill-popup-anatomy.test.ts.
+
 ## 1.12.0 — 2026-09-21
 
 ### Added: URLs → links (Link URLs, autolink, Mod+click)

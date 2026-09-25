@@ -1386,6 +1386,14 @@ anywhere, and **Close** (or Esc) puts the preview away. A **Read mode**
 button in the preview shows only the marked text, and it stays on for later
 previews until you turn it off.
 
+The dropzone pill and the **Send** and **Receive** pills (if collaboration
+is on) sit together in one row at the bottom-left of the editor, and all
+three open the same way: click one and its list rises above the row,
+growing out of the pill you clicked. Every list starts at the row's left
+edge and can run as wide as the editor, whichever pill opened it, so the
+open pill's joined-up outline is what tells you which one you're looking
+at. The shelf's **Clear** button sits at the bottom of its list.
+
 ### Saving a send doc
 
 When it's time to share a speech with the judge or opponent, use the
@@ -1482,8 +1490,9 @@ invite; add them to your recipients (and name them) or block them from
 there.
 
 **Receive:** incoming cards land in the **Receive** pill, which flashes
-and shows a "total · N new" badge. Click it to open the inbox; each
-row shows the card's label, who sent it, and when. From a row:
+and shows a "total · N new" badge. Click it to open the inbox above the
+pill row; each row shows the card's label, who sent it, and when. From a
+row:
 
 - **Click** inserts the card at the cursor; **Alt-click** appends it at the
   end of the document; or **drag** it in like any dropzone item. Inserting

@@ -4679,6 +4679,16 @@ html.pmd-undoredo-hidden #undo-redo-stack {
 .pmd-pill-tray > * {
   pointer-events: auto;
 }
+/* Pills sit STATIC inside the tray so every popup's containing block is
+   the tray itself: `left: 0` on a popup is the left edge of the leftmost
+   visible pill, whichever pill opened it — the popups all start in the
+   same place and share the full width. (In the home screen's dock the
+   receive pill keeps `position: relative`, so its popup hangs off the
+   pill.) */
+.pmd-pill-tray > .pmd-pill,
+.pmd-pill-tray > .pmd-dropzone-root {
+  position: static;
+}
 /* Home screen's own dock for the receive pill (the pill node is
    re-parented here while home is visible — collab invites join a NEW
    doc, so they must not require one open). Bottom-centered strip on
@@ -4727,44 +4737,19 @@ html.pmd-pill-tray-active .pmd-pane-pill-anchored .pmd-pane-editor .ProseMirror 
 }
 
 /* ---- Dropzone shelf (cross-window scratch space) ----
-   The visible "pill" is `.pmd-dropzone-bar`. The surrounding
-   root has no chrome of its own when closed — the bar IS the
-   visible element. When open, the root gains its own bg + border
-   to become a panel; the bar stays in place at the panel's
-   bottom edge while the list grows above it. The visual effect
-   is the pill morphing into the bottom of a shelf panel.
+   The visible "pill" is `.pmd-dropzone-bar`; the root has no chrome of
+   its own. Open, the shelf list is a `.pmd-pill-popup` rising from the
+   pill row with the bar as its tab — the same anatomy as the Send and
+   Receive pills (see "Pill popups" below).
    Drag-over: blue accept-state via --pmd-c-drop tokens. */
 .pmd-dropzone-root {
-  /* A flex child of `.pmd-pill-tray` — the tray is the fixed element
-     `positionDropzone` (index.ts) anchors to the editor's bottom-left
-     corner (NOT the nav pane: a nav-bottom pill would sit in the
-     outline's auto-scroll zone). The tray's fallback `bottom` clears
-     the status bar via the same `--status-bar-height` var the bar
-     reads, so a missed positioning pass (a boot where
-     `getBoundingClientRect()` comes back 0×0 and the function
-     early-returns, observed on some Windows machines) can't strand
-     the pill in the status bar's vertical band. */
-  position: relative;
-  right: auto;
-  /* Fallback width cap before `positionDropzone` runs; it then sets an
-     exact inline max-width from the editor's rect so the expanded
-     shelf keeps an equal margin on the right. */
-  max-width: 360px;
-  max-height: 60vh;
+  /* One of the three tray pills (`.pmd-pill` chrome; static inside the
+     tray like the others). The tray's fallback `bottom` clears the status
+     bar via the same `--status-bar-height` var the bar reads, so a missed
+     positioning pass (a boot where `getBoundingClientRect()` comes back
+     0×0, observed on some Windows machines) can't strand the pill in the
+     status bar's vertical band. */
   pointer-events: auto;
-  /* z within the tray, which owns the stacking context (tray z=220,
-     above the status bar's 200). In the spec-correct world the pill
-     and the status bar never overlap, so this only matters if a
-     missed positioning pass lands the pill in the bar's band — then
-     it renders visible and clickable rather than clipped. */
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  /* Left-anchored pill; the bar sizes to content. */
-  align-items: flex-start;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 10px;
   /* No transitions on state changes — the open/closed and
      drop-target morphs read better as instant flips. */
   transition: none;
@@ -4779,17 +4764,11 @@ html.pmd-pill-tray-active .pmd-pane-pill-anchored .pmd-pane-editor .ProseMirror 
 body.pmd-multi-doc .pmd-pill-tray {
   bottom: calc(var(--status-bar-height) + var(--pmd-pane-footer-height) + 0.5rem);
 }
-.pmd-dropzone-root[data-open="true"] {
-  align-items: stretch;
-  background: var(--pmd-c-bg);
-  border-color: var(--pmd-c-border);
-  box-shadow: 0 6px 18px var(--pmd-c-shadow-fade);
-}
 /* Drop-target accept state — applies in both closed and open. Keep
    the element's OPAQUE background (it floats over the editor now, so a
    translucent tint showed the doc through it); signal acceptance with
    the blue border + outline glow only. */
-.pmd-dropzone-root[data-open="true"].pmd-dropzone-root-drop-target {
+.pmd-dropzone-root-drop-target > .pmd-dropzone-list {
   border-color: var(--pmd-c-drop);
   box-shadow: 0 0 0 2px var(--pmd-c-drop-outline);
 }
@@ -4799,19 +4778,8 @@ body.pmd-multi-doc .pmd-pill-tray {
    wide pill). The whole-root background/border animates between
    states; the list shows/hides instantly. */
 .pmd-dropzone-list {
+  /* Geometry and chrome come from .pmd-pill-popup. */
   list-style: none;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  flex: 0 1 auto;
-  min-height: 0;
-  display: none;
-}
-.pmd-dropzone-root[data-open="true"] .pmd-dropzone-list {
-  display: block;
-  max-height: 320px;
-  padding: 0.25rem;
-  border-bottom: 1px solid var(--pmd-c-divider);
 }
 .pmd-dropzone-empty {
   padding: 0.6rem 0.5rem;
@@ -4919,17 +4887,6 @@ body.pmd-multi-doc .pmd-pill-tray {
   transition: none;
 }
 
-.pmd-dropzone-root[data-open="true"] .pmd-dropzone-bar {
-  align-self: stretch;
-  background: transparent;
-  border-color: transparent;
-  border-radius: 0 0 9px 9px;
-  box-shadow: none;
-  color: var(--pmd-c-text);
-}
-.pmd-dropzone-root[data-open="true"] .pmd-dropzone-bar:hover {
-  background: var(--pmd-c-surface-soft);
-}
 /* Drop-target accept state on the BAR — applies in both closed
    and open modes so the pill turns blue regardless. */
 .pmd-dropzone-root-drop-target .pmd-dropzone-bar {
@@ -4961,7 +4918,6 @@ body.pmd-multi-doc .pmd-pill-tray {
 }
 /* Shared scaffolding (flex fill).
    Diverge by pulling a selector out, not by re-copying. */
-.pmd-dropzone-bar-spacer,
 .pmd-qc-manage-row-main,
 .pmd-learn-manage-text,
 .pmd-msettings-reader-row input[type='text'] {
@@ -4978,6 +4934,15 @@ body.pmd-multi-doc .pmd-pill-tray {
   padding: 0.1rem 0.4rem;
   cursor: pointer;
   color: var(--pmd-c-text-muted);
+}
+/* Shelf popup footer: the Clear button, right-aligned; only rendered
+   while the shelf has items. */
+.pmd-dropzone-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+  padding: 4px 0.25rem 0.1rem;
+  border-top: 1px solid var(--pmd-c-border-soft);
 }
 
 
@@ -14634,6 +14599,84 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
   text-align: center;
 }
 
+/* ---- Pill popups: one anatomy for Dropzone / Send / Receive ----
+   Every pill's expansion is a `.pmd-pill-popup`: an overlay rising from
+   the top of the pill row, its left edge on the tray's left (the leftmost
+   visible pill), at least as wide as the row and up to the editor's width
+   (`--pmd-pill-popup-max`, set inline on the tray by positionDropzone —
+   a narrow window narrows the popup instead of pushing it off screen).
+   The open pill's bar becomes the popup's TAB: top corners squared, top
+   border gone, its ::after masking the popup's bottom border across the
+   bar's width, so the popup reads as growing out of that button — which
+   is how you tell which pill is open now that they all rise from the
+   same place. In the home screen's dock (receive pill only) the popup
+   hangs off the pill itself: same look, pill-relative. */
+.pmd-pill-popup {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  box-sizing: border-box;
+  min-width: 100%;
+  width: min(420px, var(--pmd-pill-popup-max, 380px));
+  max-width: var(--pmd-pill-popup-max, calc(100vw - 16px));
+  max-height: min(340px, 60vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  background: var(--pmd-c-bg);
+  border: 1px solid var(--pmd-c-accent);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px var(--pmd-c-shadow-fade);
+  z-index: 2;
+}
+[data-open="true"] > .pmd-pill-popup {
+  display: block;
+}
+/* The tab is flush with a popup corner when its pill is the outermost
+   one (`attachPopup`, pill-tray.ts, measures which): that corner squares
+   off so the bar's border runs straight into the popup's. */
+.pmd-pill-popup-flush-left {
+  border-bottom-left-radius: 0;
+}
+.pmd-pill-popup-flush-right {
+  border-bottom-right-radius: 0;
+}
+/* Hover: the same accent border on all three bars. */
+.pmd-dropzone-bar:hover,
+.pmd-send-bar:hover,
+.pmd-receive-bar:hover {
+  border-color: var(--pmd-c-accent);
+}
+/* Open: the bar is the popup's tab. Painted above the popup (z 3 > 2)
+   so its ::after can hide the popup's bottom border along the join. */
+[data-open="true"] > .pmd-dropzone-bar,
+[data-open="true"] > .pmd-pill-bar {
+  position: relative;
+  z-index: 3;
+  background: var(--pmd-c-bg);
+  color: var(--pmd-c-text);
+  border-color: var(--pmd-c-accent);
+  border-top-color: transparent;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  box-shadow: none;
+}
+[data-open="true"] > .pmd-dropzone-bar::after,
+[data-open="true"] > .pmd-pill-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2px;
+  height: 3px;
+  background: var(--pmd-c-bg);
+}
+[data-open="true"] > .pmd-dropzone-bar:hover,
+[data-open="true"] > .pmd-pill-bar:hover {
+  background: var(--pmd-c-bg);
+}
+
 /* Blue arrival flash — the exact accent ring the command bar uses
    (`pmd-qcs-pulse`). Applied to the pill bar for ~0.5s on a new card. */
 @keyframes pmd-pill-flash {
@@ -14655,32 +14698,13 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 }
 
 /* ---- Send pill ---- */
-.pmd-send-bar-hot,
-.pmd-send-pill[data-open="true"] .pmd-send-bar {
+/* Drag-hot ring (pointer over the pill, not on a row). Outranks the
+   open-state tab rule so the ring still shows on the tab mid-drag. */
+.pmd-pill-bar.pmd-send-bar-hot {
   border-color: var(--pmd-c-drop);
   box-shadow: 0 0 0 2px var(--pmd-c-drop-outline);
 }
-/* Partner / group list — an upward overlay popover so expanding it never
-   reflows the dropzone or receive pill beside it. */
-.pmd-send-panel {
-  display: none;
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
-  min-width: 200px;
-  max-width: 320px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 0.25rem;
-  background: var(--pmd-c-bg);
-  border: 1px solid var(--pmd-c-border);
-  border-radius: 10px;
-  box-shadow: 0 6px 18px var(--pmd-c-shadow-fade);
-  z-index: 2;
-}
-.pmd-send-pill[data-open="true"] .pmd-send-panel {
-  display: block;
-}
+/* Partner / group list: a .pmd-pill-popup (geometry + chrome there). */
 .pmd-send-section {
   padding: 0.3rem 0.4rem 0.15rem;
   font-size: 0.68rem;
@@ -14819,25 +14843,8 @@ body.pmd-multi-doc .pmd-cardcutter-trim {
 }
 /* Inbox list — upward overlay popover, same family as the send panel. */
 .pmd-receive-list {
-  display: none;
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
+  /* Geometry and chrome come from .pmd-pill-popup. */
   list-style: none;
-  margin: 0;
-  padding: 0.25rem;
-  min-width: 260px;
-  max-width: 380px;
-  max-height: 340px;
-  overflow-y: auto;
-  background: var(--pmd-c-bg);
-  border: 1px solid var(--pmd-c-border);
-  border-radius: 10px;
-  box-shadow: 0 6px 18px var(--pmd-c-shadow-fade);
-  z-index: 2;
-}
-.pmd-receive-pill[data-open="true"] .pmd-receive-list {
-  display: block;
 }
 .pmd-receive-empty {
   padding: 0.6rem 0.5rem;
