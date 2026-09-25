@@ -4884,6 +4884,32 @@ describe('cycleTheme command', () => {
   });
 });
 
+// ── setNavDepth1–4 commands ─────────────────────────────────────────
+// Keyboard route to the nav pane's 1 · 2 · 3 · 4 buttons. The panel
+// call is wired through RibbonContext in index.ts; here we lock down the
+// registry entries and the level each command passes.
+describe('setNavDepth commands', () => {
+  const ids = ['setNavDepth1', 'setNavDepth2', 'setNavDepth3', 'setNavDepth4'] as const;
+
+  it('are registered with no default binding', () => {
+    for (const id of ids) {
+      expect(RIBBON_COMMAND_IDS).toContain(id);
+      expect(DEFAULT_RIBBON_KEYS[id]).toBe('');
+    }
+  });
+
+  it('pass their own level to ctx.setNavDepth, only on dispatch', () => {
+    const seen: number[] = [];
+    const ctx = { setNavDepth: (l: number) => { seen.push(l); } } as unknown as RibbonContext;
+    for (const id of ids) {
+      const cmd = getRibbonCommand(id, ctx);
+      expect(cmd(null as never, undefined)).toBe(true);
+      expect(cmd(null as never, () => {})).toBe(true);
+    }
+    expect(seen).toEqual([1, 2, 3, 4]);
+  });
+});
+
 // ── minimizeWindow command ───────────────────────────────────────────
 // Restores the stock macOS Cmd+M as a first-class, rebindable command
 // (field request 2026-07-24). The OS minimize itself is a host IPC wired

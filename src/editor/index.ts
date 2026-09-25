@@ -2265,6 +2265,7 @@ const ribbonContext: RibbonContext = {
     if (multiDocActive && multiDocToggleAllNav) multiDocToggleAllNav();
     else settings.set('navPaneVisible', !settings.get('navPaneVisible'));
   },
+  setNavDepth: (level) => activeNavPanelResolver()?.setMaxLevel(level),
   // ─── No-default-binding hooks ────────────────────────────────
   // Each routes through the same button's existing click handler
   // (via `.click()`) — the keybinding then follows the exact same

@@ -2002,8 +2002,9 @@ export class NavigationPanel {
   /** Level buttons: a TRANSIENT, per-panel view change — never written
    *  to settings. The "Default navigation depth" setting (General tab)
    *  governs what NEW documents open at; clicking the already-active
-   *  level re-collapses any manual chevron expansions. */
-  private setMaxLevel(level: number): void {
+   *  level re-collapses any manual chevron expansions. Public so the
+   *  `setNavDepth1`–`4` commands can drive it from a keybinding. */
+  setMaxLevel(level: number): void {
     if (level < 1 || level > 4) return;
     this.applyMaxLevelToCollapseState(level);
     this.localMaxLevel = level;
