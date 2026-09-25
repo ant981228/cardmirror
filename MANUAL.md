@@ -537,6 +537,15 @@ It honors the same protections as Shrink (omission markers, integrity
 warnings, your custom rules), and regular **Shrink (Mod-8)** and **Regrow
 (Mod-Shift-8)** still work on the result.
 
+### Condense With Warning and Shrink
+
+**Condense With Warning and Shrink** (a command, unbound by default) runs
+Condense With Warning on the selected paragraphs, then Shrink on the result,
+as one step with one undo. It's the fast way to cut the unread middle of a card
+down to a single small paragraph between its pause and resume markers. The
+shrink follows Shrink's settings, so with omission protection on (the default)
+the markers stay full size. Press **Mod-8** again to keep cycling smaller.
+
 ### Citations
 
 - **Cite (F8)** applies the cite character style to the author and date,
