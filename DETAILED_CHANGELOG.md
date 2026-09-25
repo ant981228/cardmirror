@@ -206,6 +206,26 @@ lacks the surface; dimmed and inert (`data-inert`, 0.35 opacity,
 default cursor) when there is no file on disk (untitled, recovered
 draft, home). Tests: file-drag-mark.test.ts.
 
+### Added: title-bar proxy icon (macOS)
+
+Word lets you drag an open document out of its title bar into another
+app, such as a Slack message. CardMirror now does the same on macOS
+through AppKit's represented-file proxy icon
+(`BrowserWindow.setRepresentedFilename`). With it, dragging the icon
+(revealed on title hover since Big Sur) supplies the file URL to the
+drop target, and Cmd-click on the title opens the path menu.
+
+The renderer pushes the focused doc's on-disk path over the new
+`host:set-represented-file` IPC from `updateWindowTitle`, which every
+doc-identity change already goes through (open, Save / Save As, close to
+home, new doc, pane focus, multi-pane mount / detach). `null` (untitled,
+recovered draft, home screen) clears the icon. Pushes are deduped on the
+renderer side because the title path is hot. In the multi-doc workspace
+the title lists every slot, but the icon names the focused doc. Main
+ignores the call off macOS; Electron has no Windows or Linux equivalent.
+The preload method is optional in `ElectronAPI`, so a newer renderer
+against an older shell skips it.
+
 ### Changed: one popup anatomy for the dropzone, Send and Receive pills
 
 User request 2026-09-25. Before: the dropzone morphed in place (its root
@@ -2265,8 +2285,6 @@ downloads — the base model is a first-use download too). Release
 builds produce "CardMirror Lite" installers with their own appId for
 side-by-side installs; Lite carries no relay token and never touches
 the auto-update manifests.
-
-
 
 ### Fixed: exported numbering never restarted in Word (startOverride)
 

@@ -649,6 +649,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   docInfoUpdate: (uid: string, filename: string | null) =>
     ipcRenderer.invoke('host:doc-info-update', { uid, filename }),
 
+  /** macOS title-bar proxy icon: the focused doc's on-disk path,
+   *  or `null` to clear (untitled doc, home screen). */
+  setRepresentedFile: (path: string | null) =>
+    ipcRenderer.invoke('host:set-represented-file', path),
+
   /** Dropzone shelf — cross-window in-memory scratch space for
    *  dragged content. List returns the current items; add/remove/
    *  clear mutate and broadcast via `dropzone:changed`. Cleared on

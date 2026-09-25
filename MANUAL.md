@@ -2305,6 +2305,14 @@ and headings instead of importing flat text.
   disk (save first to include your latest edits). In the three-pane
   workspace it follows the focused document.
 
+- **Drag the file out of the title bar (macOS desktop).** Once a document
+  has been saved, the window's title bar carries its file icon, as in Word
+  or Pages: hover over the title to reveal it, then drag it into Slack,
+  Mail, Finder, or any other app to share the file itself. The file is
+  whatever is on disk, so save first to include your latest edits.
+  Cmd-click the title to see the folder it lives in. In the multi-doc
+  workspace the icon follows the focused document.
+
 ### Save As presets
 
 The Save As dialog offers presets so you can produce the right kind of

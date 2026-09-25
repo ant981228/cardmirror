@@ -88,6 +88,12 @@ see `DETAILED_CHANGELOG.md`.
   or click it to show the file in its folder. It's dimmed until the
   document has been saved. Desktop only.
 
+- **Drag a document out of the title bar (macOS).** A saved
+  document's file icon now sits in the window's title bar: hover over
+  the title, then drag the icon into Slack, Mail, Finder, or any other
+  app to share the file, as you can with Word. Cmd-click the title to
+  see where the file lives.
+
 ### Changed
 
 - **The dropzone, Send and Receive pills open the same way.** Click any
@@ -2469,7 +2475,6 @@ beta — it is what it is because of you.
   after a capitalization to revert it, same as smart quotes and the custom
   dash.
 
-
 ### Changed
 
 - **AI errors are clearer, and momentary failures fix themselves.** When the
@@ -2534,8 +2539,6 @@ beta — it is what it is because of you.
   longer converts the tail of a longer hyphen run (pasted hyphens, ASCII
   dividers) — only a clean sequence fires, matching the `--` trigger's
   existing behavior.
-
-
 
 - **Renamed or moved folders no longer strand your document.** If a file's
   folder is renamed, moved, or deleted while the document is open (for
@@ -4575,7 +4578,6 @@ properly, with a real on-switch, once it's ready. What's in the preview:
   thinking/Clod progress indicator, fixes, flashes, and single undo
   step as on desktop (and a pointer to Settings if no API key is set
   up on the device; the Clod toggle is in mobile Settings too).
-
 
 - **Smart Shrink.** Press **Mod-Alt-8** to shrink a card's connective
   text in one step, with per-paragraph depth: paragraphs containing no

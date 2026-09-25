@@ -2305,6 +2305,20 @@ ipcMain.handle(
   },
 );
 
+/** macOS title-bar proxy icon: the renderer pushes the focused doc's
+ *  on-disk path (or null for untitled / no doc). With a represented
+ *  file set, AppKit shows the document icon beside the window title;
+ *  dragging it (or the title, after the hover reveal) drops the file
+ *  into another app — Slack, Mail, Finder — and Cmd-click shows the
+ *  path menu. Empty string clears it. No-op off macOS (Electron has
+ *  no equivalent there). */
+ipcMain.handle('host:set-represented-file', async (event, p: unknown) => {
+  if (process.platform !== 'darwin') return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  win.setRepresentedFilename(typeof p === 'string' && path.isAbsolute(p) ? p : '');
+});
+
 /** List every open doc across every window. The Select Speech Doc
  *  modal calls this to populate its row list. Stale entries
  *  (windowless uids) are filtered out so the modal never offers

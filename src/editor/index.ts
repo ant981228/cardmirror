@@ -7941,6 +7941,22 @@ function pushSingleDocInfo(): void {
   void electronHost.docInfoUpdate(registeredSingleDocUid, currentDocFilename);
 }
 
+/** Last path pushed to main for the macOS title-bar proxy icon.
+ *  `undefined` = never pushed (fresh renderer, incl. crash reload). */
+let lastRepresentedFile: string | null | undefined;
+
+/** Point the window's title-bar proxy icon at the focused doc's
+ *  on-disk file so it can be dragged into other apps (macOS; main
+ *  no-ops elsewhere). Deduped — this rides the hot title path. */
+function syncRepresentedFile(handle: unknown): void {
+  const electronHost = getElectronHost();
+  if (!electronHost) return;
+  const path = typeof handle === 'string' && handle ? handle : null;
+  if (path === lastRepresentedFile) return;
+  lastRepresentedFile = path;
+  void electronHost.setRepresentedFile(path);
+}
+
 /** Sync the active filename into the OS title bar (`document.title`)
  *  AND the in-app filename chip — the chip is the user-facing source
  *  of truth where the OS title isn't visible (frameless Electron
@@ -7955,6 +7971,7 @@ function updateWindowTitle(): void {
   pushSingleDocInfo();
   reportSingleDocWorkspace();
   syncFileDragMark(focused.handle);
+  syncRepresentedFile(focused.handle);
   if (multiDocActive && multiDocGetAllFilenames) {
     const names = multiDocGetAllFilenames().filter((n): n is string => !!n);
     document.title = names.length > 0
