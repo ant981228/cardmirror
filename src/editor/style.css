@@ -4932,6 +4932,14 @@ body.pmd-multi-doc .pmd-pill-tray {
 .pmd-dropzone-count[hidden] {
   display: none;
 }
+/* Dark: accent text on an 18% accent tint sat too close to the pill's
+   dark surface to read (user report 2026-09-25). A lighter blue on a
+   stronger tint — derived from the accent token so the colorblind preset
+   follows — punchier without becoming the solid "unread" badge. */
+:root[data-theme="dark"] .pmd-dropzone-count {
+  color: color-mix(in srgb, var(--pmd-c-accent) 55%, white);
+  background: color-mix(in srgb, var(--pmd-c-accent) 48%, transparent);
+}
 /* Shared scaffolding (flex fill).
    Diverge by pulling a selector out, not by re-copying. */
 .pmd-qc-manage-row-main,

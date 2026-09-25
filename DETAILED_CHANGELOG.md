@@ -234,7 +234,11 @@ a resend is always possible) beside Join session, each button hidden on
 its own condition and the row hidden only when both are. Fixed on the
 way: `.pmd-dropzone-count { display: inline-block }` beat the UA
 `[hidden]` rule, so the empty shelf showed "0"; a `[hidden]` override
-restores it. Tests: pill-popup-anatomy.test.ts.
+restores it. Dark mode: the count's accent text on an 18% accent tint
+was near-invisible on the pill's dark surface; a `:root[data-theme=
+"dark"]` override mixes the accent 55% toward white for the text and
+uses a 48% tint behind it (color-mix on the token, so the colorblind
+preset's accent follows). Tests: pill-popup-anatomy.test.ts.
 
 ### Changed: no browser focus ring
 

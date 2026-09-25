@@ -105,6 +105,8 @@ see `DETAILED_CHANGELOG.md`.
 ### Fixed
 
 - The dropzone pill showed a **0** badge when the shelf was empty.
+- In dark mode the dropzone's item count was hard to read; its blue is
+  brighter there now.
 
 ## 1.12.0 — 2026-09-21
 
