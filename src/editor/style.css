@@ -5907,6 +5907,58 @@ html.pmd-nav-flat .pmd-nav-type-analytic:hover .pmd-nav-label {
   font-weight: 600;
 }
 
+/* Search box between the title and the close button. */
+.pmd-settings-search {
+  flex: 1 1 auto;
+  max-width: 18rem;
+  margin: 0 0.75rem 0 auto;
+  padding: 0.3rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  border: 1px solid var(--pmd-c-border);
+  border-radius: 4px;
+  background: var(--pmd-c-bg);
+  color: var(--pmd-c-text);
+}
+
+/* Search mode: the tab strip goes away and every tab's matching rows are
+   listed in one scroll, each tab's group under its name. The dialog becomes
+   the scroller (the panels stop scrolling individually) with the header
+   pinned so the search box stays in reach. */
+.pmd-settings-searching {
+  overflow-y: auto;
+}
+.pmd-settings-searching .pmd-settings-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--pmd-c-bg);
+}
+.pmd-settings-searching .pmd-settings-tabs-bar {
+  display: none;
+}
+.pmd-settings-searching .pmd-settings-panel {
+  flex: 0 0 auto;
+  overflow: visible;
+  padding-bottom: 0.25rem;
+}
+.pmd-settings-search-category {
+  display: none;
+}
+.pmd-settings-searching .pmd-settings-search-category {
+  display: block;
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--pmd-c-text-strong);
+}
+.pmd-settings-search-miss {
+  display: none !important;
+}
+.pmd-settings-search-empty[hidden] {
+  display: none;
+}
+
 .pmd-settings-close {
   background: transparent;
   border: none;
@@ -6038,7 +6090,10 @@ html.pmd-nav-flat .pmd-nav-type-analytic:hover .pmd-nav-label {
   text-transform: uppercase;
   color: var(--pmd-c-text-muted);
 }
-.pmd-settings-section-title:first-child {
+/* Each panel starts with its (normally hidden) search-mode tab heading, so
+   the panel's first section title is its second child. */
+.pmd-settings-section-title:first-child,
+.pmd-settings-search-category + .pmd-settings-section-title {
   margin-top: 0.3rem;
   padding-top: 0;
   border-top: none;
@@ -6528,6 +6583,7 @@ html.pmd-nav-flat .pmd-nav-type-analytic:hover .pmd-nav-label {
 /* Shared scaffolding (input focus ring).
    Diverge by pulling a selector out, not by re-copying. */
 .pmd-settings-text:focus,
+.pmd-settings-search:focus,
 .pmd-macro-text:focus,
 .pmd-find-input:focus,
 .pmd-comment-reply-input:focus,

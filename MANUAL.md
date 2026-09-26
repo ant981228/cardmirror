@@ -2473,6 +2473,14 @@ collapses into a single entry with a ×N counter instead of nagging.
 
 Open settings with the **gear** icon. Settings are grouped into tabs.
 
+To find a setting without knowing its tab, type in the **Search
+settings** box at the top of the dialog (it has focus when Settings
+opens; **Mod-F** returns to it). Matching rows from every tab are
+listed together under their tab names. A few everyday words map to
+CardMirror's terms, so "toolbar" finds the ribbon settings and
+"hotkey" finds Keyboard. **Esc** clears the search, and a second Esc
+closes Settings.
+
 Some rows only exist on one platform — marked *(desktop)*, *(web)*, or
 *(Windows)* below — and don't appear elsewhere.
 
