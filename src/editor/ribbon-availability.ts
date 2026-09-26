@@ -86,6 +86,11 @@ export function isRibbonCommandAvailable(id: RibbonCommandId): boolean {
   if (CUTTER_COMMANDS.has(id)) return settings.get('cardCutterEnabled') === true;
   // Browsers can't minimize their own window — desktop only.
   if (id === 'minimizeWindow') return getElectronHost() !== null;
+  // Switching between windows is a desktop thing; in the three-pane
+  // workspace (web too) the command drives the slot doc switcher instead.
+  if (id === 'switchWindow') {
+    return getElectronHost() !== null || settings.get('multiDocWorkspace') === true;
+  }
   // Placing windows (or slots by screen share) is a desktop thing.
   if (id === 'arrangeWindows') return getElectronHost() !== null;
   if (id === 'openJournalsFolder') return getElectronHost() !== null;
