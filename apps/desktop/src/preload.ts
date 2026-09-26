@@ -174,6 +174,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
    *  macOS Window-menu Minimize). */
   minimizeWindow: () => ipcRenderer.invoke('host:minimize-window'),
 
+  /** Save As → PDF: print a self-contained HTML page to PDF bytes
+   *  (rendered in a hidden, script-less window). */
+  htmlToPdf: (html: string) =>
+    ipcRenderer.invoke('host:html-to-pdf', html) as Promise<Uint8Array>,
+
   /** Renderer accessibility tree toggle (default off — works around a known
    *  Chromium AX crash). Reads/writes a machine-local pref; changing it needs an
    *  app restart. `isAccessibilitySupportActive` reports whether an assistive-tech
