@@ -216,6 +216,7 @@ interface ElectronAPI {
   pluginLoadFile?(filePath: string): Promise<{ ok: boolean; error?: string }>;
   getPathForFile(file: File): string;
   minimizeWindow?(): Promise<void>;
+  htmlToPdf?(html: string): Promise<Uint8Array>;
   syncLibraryRoots?(roots: string[]): Promise<void>;
   grantLegacyRecents?(paths: string[]): Promise<boolean>;
   readFileAtPath(filePath: string): Promise<{
@@ -763,6 +764,13 @@ export class ElectronHost implements Host {
   /** Minimize this OS window. No-ops gracefully on an older preload. */
   async minimizeWindow(): Promise<void> {
     await api().minimizeWindow?.();
+  }
+
+  /** Print a self-contained HTML page to PDF bytes (Save As → PDF). Null
+   *  on an older preload that has no PDF export. */
+  async htmlToPdf(html: string): Promise<Uint8Array | null> {
+    const fn = api().htmlToPdf;
+    return fn ? new Uint8Array(await fn(html)) : null;
   }
 
   /** Read-scope plumbing — no-ops gracefully on an older preload. */

@@ -738,6 +738,47 @@ ipcMain.handle('host:minimize-window', (event) => {
   ownerWindow(event.sender)?.minimize();
 });
 
+/** Save As → PDF: render a self-contained HTML page (built by the
+ *  renderer from the export doc, styles inlined) in a hidden window and
+ *  print it to PDF bytes. The page is the user's own document, but it
+ *  still loads with JavaScript off and navigation / pop-ups blocked. It
+ *  goes through a temp file rather than a data: URL, which caps out on
+ *  long docs. Backgrounds print, so highlights and shading survive. */
+let pdfExportSeq = 0;
+ipcMain.handle('host:html-to-pdf', async (_event, html: unknown) => {
+  if (typeof html !== 'string') throw new Error('html-to-pdf: expected an HTML string');
+  const tmp = path.join(
+    app.getPath('temp'),
+    `cardmirror-pdf-${process.pid}-${Date.now()}-${++pdfExportSeq}.html`,
+  );
+  await fs.writeFile(tmp, html, 'utf8');
+  const win = new BrowserWindow({
+    show: false,
+    width: 816, // US Letter at 96 dpi — only affects layout before printing
+    height: 1056,
+    webPreferences: {
+      javascript: false,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  try {
+    await win.loadFile(tmp);
+    const pdf = await win.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'Letter',
+      margins: { top: 0.75, bottom: 0.75, left: 0.75, right: 0.75 },
+    });
+    return new Uint8Array(pdf);
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+    await fs.unlink(tmp).catch(() => {});
+  }
+});
+
 // Renderer accessibility tree toggle (see the `--disable-renderer-accessibility`
 // block above). The pref is machine-local and read at startup; these let the
 // settings UI show + change it. Changing it needs a restart to take effect.

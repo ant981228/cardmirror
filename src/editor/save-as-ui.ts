@@ -2,12 +2,15 @@
  * Save As modal. Promise-based — resolves with the user's chosen
  * filename + format + export options, or `null` if they cancelled.
  *
- * Two output formats:
+ * Three output formats:
  *   - `cmir` — CardMirror native (lossless JSON, no Verbatim round-
  *     trip). Recommended for docs that live entirely in CardMirror.
  *   - `docx` — Microsoft Word / Verbatim. Use for sharing with
  *     teammates still on Verbatim, or for any tournament-day round
  *     where the receiving party needs Word.
+ *   - `pdf` — a print-ready copy (pdf-export.ts). Always a separate
+ *     export: the working doc keeps its own file, and comments aren't
+ *     printed.
  *
  * Layout: a Name section, a Format section, then a Save section
  * with one-click presets — As-Is (everything), Send Doc (no
@@ -17,7 +20,7 @@
  * (comments / analytics / undertags checkboxes + a Save Custom
  * button), then Cancel. The format radio drives the default
  * filename extension and which filter the OS dialog defaults to;
- * all content options apply equally to both formats.
+ * all content options apply equally to every format.
  */
 
 import { settings } from './settings.js';
@@ -26,7 +29,7 @@ import { setIcon } from './icons';
 import { pushOverlay, popOverlay } from './overlay-stack.js';
 import { installModalKeys, captureFocusForDialog } from './text-prompt.js';
 
-export type SaveAsFormat = 'cmir' | 'docx';
+export type SaveAsFormat = 'cmir' | 'docx' | 'pdf';
 
 export interface SaveAsResult {
   filename: string;
@@ -68,6 +71,10 @@ export interface OpenSaveAsOptions {
    *  (so re-saving stays in the same format unless the user changes
    *  it). New docs default to `'cmir'`, the native format. */
   defaultFormat: SaveAsFormat;
+  /** Offer the PDF format. Off unless the caller handles a PDF result —
+   *  e.g. crash recovery must not, since a PDF can't stand in for the
+   *  recovered document. */
+  allowPdf?: boolean;
 }
 
 export function openSaveAs(opts: OpenSaveAsOptions): Promise<SaveAsResult | null> {
@@ -79,11 +86,13 @@ export function openSaveAs(opts: OpenSaveAsOptions): Promise<SaveAsResult | null
 const FORMAT_LABELS: Record<SaveAsFormat, string> = {
   cmir: 'CardMirror native (.cmir)',
   docx: 'Microsoft Word (.docx)',
+  pdf: 'PDF (.pdf)',
 };
 
 const FORMAT_BLURBS: Record<SaveAsFormat, string> = {
   cmir: 'Lossless. No conversion. Best for docs that stay in CardMirror.',
   docx: 'For sharing with Verbatim users or any Word-based workflow.',
+  pdf: 'A print-ready copy to read or share. Saved alongside your document; comments aren’t printed.',
 };
 
 class SaveAsModal {
@@ -379,7 +388,7 @@ class SaveAsModal {
     return wrap;
   }
 
-  /** FORMAT section: a heading + the cmir / docx radio rows. */
+  /** FORMAT section: a heading + the cmir / docx / pdf radio rows. */
   private buildFormatSection(): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'pmd-save-as-format';
@@ -389,8 +398,9 @@ class SaveAsModal {
     wrap.appendChild(heading);
 
     const groupName = `pmd-save-as-format-${Math.random().toString(36).slice(2, 8)}`;
-    this.formatRadios = { cmir: null!, docx: null! };
-    for (const id of ['cmir', 'docx'] as const) {
+    this.formatRadios = { cmir: null!, docx: null!, pdf: null! };
+    const formats: SaveAsFormat[] = this.opts.allowPdf ? ['cmir', 'docx', 'pdf'] : ['cmir', 'docx'];
+    for (const id of formats) {
       const row = document.createElement('label');
       row.className = 'pmd-save-as-format-row';
       const input = document.createElement('input');
@@ -495,7 +505,7 @@ class SaveAsModal {
  *  without piling them up. */
 function withExtension(filename: string, format: SaveAsFormat): string {
   let base = filename.trim();
-  for (const ext of ['.cmir', '.docx']) {
+  for (const ext of ['.cmir', '.docx', '.pdf']) {
     if (base.toLowerCase().endsWith(ext)) {
       base = base.slice(0, -ext.length);
       break;

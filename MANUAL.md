@@ -2276,7 +2276,9 @@ and headings instead of importing flat text.
 
 ### Saving
 
-- **Save (Mod-S)** / **Save As… (Mod-Shift-S)**.
+- **Save (Mod-S)** / **Save As… (Mod-Shift-S)**. Both have ribbon
+  buttons: Save is the floppy disk, and Save As (the arrow into a tray)
+  sits beside it.
 - **Autosave** is a toggle in the ribbon that applies to `.cmir`
   files. The button shows whether autosave is actually protecting the
   current doc: a **solid filled** button means it's saving; a **hollow
@@ -2342,6 +2344,18 @@ copy:
   keeps live numbering.
 - Checkboxes (off by default) let you include **private notes** and **AI
   comments** in the saved file.
+
+**Saving as PDF.** Save As offers a third format, **PDF (.pdf)**, for a
+print-ready copy to read on any device or hand to someone without
+CardMirror or Word. Every preset works with it (a Read Doc PDF is just the
+read-mode view, for example), and the page keeps your formatting,
+highlighting and shading. Card numbers are written in as text, and
+comments aren't printed. A PDF is always a separate copy: your document
+keeps its own file and isn't marked saved. On the desktop the PDF goes
+straight to the file you pick (US Letter, ¾-inch margins). In the web
+edition the browser's print dialog opens; choose **Save as PDF** there.
+PDF is offered only from Save As itself, not from the "save before
+closing?" prompts, since a PDF can't stand in for the document.
 
 **Save Send Doc (Mod-Alt-S)** does the Send Doc export in one keystroke,
 no dialog. Two Settings → Files options control where it goes (the
