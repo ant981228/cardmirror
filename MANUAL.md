@@ -2352,8 +2352,9 @@ read-mode view, for example), and the page keeps your formatting,
 highlighting and shading. Card numbers are written in as text, and
 comments aren't printed. A PDF is always a separate copy: your document
 keeps its own file and isn't marked saved. On the desktop the PDF goes
-straight to the file you pick (US Letter, ¾-inch margins). In the web
-edition the browser's print dialog opens; choose **Save as PDF** there.
+straight to the file you pick (US Letter, ¾-inch margins), and a note
+names the saved file. In the web edition the browser's print dialog
+opens; choose **Save as PDF** there.
 PDF is offered only from Save As itself, not from the "save before
 closing?" prompts, since a PDF can't stand in for the document.
 

@@ -8246,7 +8246,11 @@ async function runPdfExport(choice: SaveAsResult, nearPath: string | null): Prom
     filters: [{ name: 'PDF (.pdf)', extensions: ['pdf'] }],
     ...(nearPath ? { nearPath } : {}),
   });
-  if (result) flashSaveSuccess();
+  if (!result) return;
+  // Confirm on the Save As button (not Save — the doc itself wasn't
+  // saved) and name the file, since an export has no other visible trace.
+  if (saveAsBtn) flashSavedGlyph(saveAsBtn);
+  showToast(`PDF saved: ${result.name}`, { durationMs: 3500 });
 }
 
 /** Hardened Save-As entry: the flow must NEVER reject — callers range from
