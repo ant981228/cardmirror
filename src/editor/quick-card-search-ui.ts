@@ -13,6 +13,9 @@
  *   - `c ` → search ribbon commands only
  *   - `s ` → search settings (top-level tabs + individual settings);
  *            selecting one opens that tab and scrolls to the setting
+ *   - `w ` → switch to another CardMirror window (desktop only), most
+ *            recently used first; the `switchWindow` command opens the
+ *            bar with this prefix typed
  *   - `f ` → search `.cmir` files under the configured root. Enter
  *            opens a file; Tab dives INTO the selected file (clearing
  *            the bar) to search its objects (blocks / tags / cites);
@@ -59,6 +62,7 @@ import { runSettingToggle, runSettingCycle } from './setting-commands.js';
 import { CATEGORY_TABS, visibleCategoryTabs, type SettingsTarget } from './settings-categories.js';
 import { appVersion } from './install-info.js';
 import { getHost, getElectronHost, isWindowsHost } from './host/index.js';
+import type { WindowListEntry } from './host/electron-host.js';
 import { showToast } from './toast.js';
 import { confirmDialog } from './text-prompt.js';
 import { showConfirm } from './confirm-dialog.js';
@@ -430,6 +434,8 @@ export interface QuickCardSearchOptions {
    *  zone in place (located by identity, so a stale position is safe) rather
    *  than inserting a new one. */
   rePickTarget?: { pos: number; identity: string };
+  /** Text to open with already typed — e.g. `w ` for Switch Window. */
+  initialQuery?: string;
 }
 
 /** A unified palette row — a quick card, dropzone item, command,
@@ -444,7 +450,8 @@ interface PaletteResult {
     | 'settings'
     | 'folder'
     | 'file'
-    | 'fileobject';
+    | 'fileobject'
+    | 'window';
   name: string;
   /** Right-aligned secondary text: card tags / command keybinding /
    *  the settings tab / the file's subfolder / a cite's owning tag. */
@@ -476,6 +483,8 @@ interface PaletteResult {
   /** Doc range to slice from the dived-into file on insert (fileobject
    *  source) — lazy, so no slice is built until you actually insert. */
   fileRange?: { from: number; to: number };
+  /** Window to bring to the front (window source). */
+  windowId?: number;
   /** Outline depth (1-4) for indentation in the nav-pane-style browse. */
   indentLevel?: number;
   /** Index into `inFile.outline` (outline browse rows only) — the key
@@ -487,7 +496,7 @@ interface PaletteResult {
   collapsed?: boolean;
 }
 
-type Prefix = 'q' | 'd' | 'c' | 's' | 'f' | null;
+type Prefix = 'q' | 'd' | 'c' | 's' | 'f' | 'w' | null;
 
 function activeTagSet(): Set<string> {
   return new Set(settings.get('quickCardActiveTags').map(normalizeTag));
@@ -511,7 +520,7 @@ function parsePrefix(raw: string): { prefix: Prefix; query: string } {
   const m = raw.match(/^([a-zA-Z])\s+(.*)$/);
   if (m) {
     const p = m[1]!.toLowerCase();
-    if (p === 'q' || p === 'd' || p === 'c' || p === 's' || p === 'f')
+    if (p === 'q' || p === 'd' || p === 'c' || p === 's' || p === 'f' || p === 'w')
       return { prefix: p, query: m[2]! };
   }
   return { prefix: null, query: raw };
@@ -735,6 +744,37 @@ const dropzoneOn = (): boolean => settings.get('showDropzonePill');
 const categoryLabel = (id: SettingsCategory): string =>
   CATEGORY_TABS.find((c) => c.id === id)?.label ?? '';
 
+/** Row label for a window: its saved docs' names, else its title minus
+ *  the app suffix (a home-screen or untitled window is just "CardMirror"). */
+export function windowLabel(w: WindowListEntry): string {
+  if (w.docNames.length > 0) return w.docNames.join(' · ');
+  const title = w.title.replace(/\s+—\s+CardMirror$/, '').trim();
+  return title && title !== 'CardMirror' ? title : 'Untitled window';
+}
+
+/** Window source (`w `) — every OTHER CardMirror window, in the
+ *  most-recently-focused order main hands back, so the top row is the
+ *  window you were just in. Every query word must hit the label or title. */
+export function searchWindowSource(windows: WindowListEntry[], query: string): PaletteResult[] {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return windows
+    .filter((w) => !w.isOwnWindow)
+    .filter((w) => {
+      const hay = `${windowLabel(w)} ${w.title}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    })
+    .map((w) => ({
+      source: 'window' as const,
+      name: windowLabel(w),
+      meta: [w.isSpeech ? 'Speech doc' : '', w.isMinimized ? 'Minimized' : '']
+        .filter(Boolean)
+        .join(' · '),
+      matchedName: true,
+      snippet: null,
+      windowId: w.windowId,
+    }));
+}
+
 /** Settings source — top-level tabs AND individual settings, matched on
  *  label. Selecting a tab opens it; selecting a setting opens its tab
  *  and scrolls to the row. Electron-only settings are hidden off
@@ -947,6 +987,8 @@ function badgeText(r: PaletteResult): string {
       return r.browseRoot ? 'ROOT' : 'DIR';
     case 'fileobject':
       return r.fileObjectKind ? FILE_OBJECT_KIND_BADGES[r.fileObjectKind] : 'OBJ';
+    case 'window':
+      return 'WIN';
   }
 }
 
@@ -957,7 +999,7 @@ function resultKey(r: PaletteResult): string {
   const id = r.filePath
     ?? (r.browseLocation
       ? `${r.browseLocation.root}:${r.browseLocation.relativeDirectory}`
-      : r.commandId ?? r.name);
+      : r.commandId ?? (r.windowId !== undefined ? String(r.windowId) : r.name));
   return `${r.source}:${id}`;
 }
 
@@ -981,6 +1023,8 @@ function enterVerb(source: PaletteResult['source']): string {
       return 'open';
     case 'folder':
       return 'enter';
+    case 'window':
+      return 'switch';
     default:
       return 'insert';
   }
@@ -1096,6 +1140,10 @@ class QuickCardSearchUI {
   /** Unsubscribe from main's live `.cmir` index-refresh broadcasts
    *  (Electron only); set on open, cleared on close. */
   private fileIndexUnsub: (() => void) | null = null;
+  /** Window list for the `w ` source, fetched once per open (null = not
+   *  fetched yet). */
+  private windowList: WindowListEntry[] | null = null;
+  private windowListPending = false;
 
   open(opts: QuickCardSearchOptions): void {
     // Re-triggering the open hotkey while open toggles it closed.
@@ -1120,6 +1168,8 @@ class QuickCardSearchUI {
     this.pinsCache = null;
     this.fileTail = [];
     this.materializedTail = [];
+    this.windowList = null;
+    this.windowListPending = false;
 
     const root = document.createElement('div');
     root.className = 'pmd-qcs';
@@ -1165,6 +1215,7 @@ class QuickCardSearchUI {
     window.addEventListener('resize', this.onResize);
     this.unsubscribe = quickCardsStore.subscribe(() => this.runSearch());
 
+    if (opts.initialQuery) this.input.value = opts.initialQuery;
     this.runSearch();
     // Wake the file-index service NOW instead of on the first keystroke:
     // configure kicks its revalidation (once per palette open, matching
@@ -1212,6 +1263,17 @@ class QuickCardSearchUI {
     this.root.remove();
     this.root = null;
     this.view?.focus();
+  }
+
+  /** Whether the bar is open on the `w ` (Switch Window) source. */
+  isInWindowMode(): boolean {
+    return !!this.root && !this.inFile && parsePrefix(this.input.value).prefix === 'w';
+  }
+
+  /** Move the highlighted row — Switch Window pressed again while open
+   *  steps down the list the way Alt+Tab does. */
+  moveSelection(delta: number): void {
+    this.move(delta);
   }
 
   isOpen(): boolean {
@@ -1272,6 +1334,14 @@ class QuickCardSearchUI {
         redo(this.view.state, this.view.dispatch);
         return;
       }
+    }
+    // Ctrl+Tab again in Switch Window mode steps through the windows
+    // (Shift reverses) instead of reaching the Tab / tag-filter case.
+    if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && this.isInWindowMode()) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.move(e.shiftKey ? -1 : 1);
+      return;
     }
     // Alt+P pins / unpins the selected file (keeps it warm).
     if (e.altKey && e.key.toLowerCase() === 'p') {
@@ -1402,6 +1472,9 @@ class QuickCardSearchUI {
         ...searchSettingCycleSource(query),
       ];
       this.emptyText = 'No matching commands.';
+    } else if (prefix === 'w') {
+      this.runWindowSearch(query);
+      return;
     } else if (prefix === 's') {
       // The settings filter shows the deep-link rows (open the dialog) AND
       // the in-place Toggle/Cycle actions, so a setting can be changed from
@@ -1418,7 +1491,7 @@ class QuickCardSearchUI {
       this.results = [];
       this.emptyText = `Type to search everything · / browse · c commands${
         dropzoneOn() ? ' · d dropzone' : ''
-      } · f files · q cards · s settings`;
+      } · f files · q cards · s settings${getElectronHost() ? ' · w windows' : ''}`;
     } else {
       // No prefix — search everything. Files (by filename) join the
       // other sources; the ranked rows come from the file-index service
@@ -1442,6 +1515,42 @@ class QuickCardSearchUI {
       this.finishSearch(this.fileRows, this.fileTotal);
       return;
     }
+    this.finishSearch();
+  }
+
+  /** The `w ` source. The window list comes from main asynchronously; the
+   *  first run fetches it and re-runs the search when it lands. */
+  private runWindowSearch(query: string): void {
+    const host = getElectronHost();
+    if (!host) {
+      this.results = [];
+      this.emptyText = 'Switching windows requires the desktop edition.';
+      this.finishSearch();
+      return;
+    }
+    if (this.windowList === null) {
+      this.results = [];
+      this.emptyText = 'Loading windows…';
+      this.finishSearch();
+      if (!this.windowListPending) {
+        this.windowListPending = true;
+        const token = this.asyncToken;
+        void host
+          .listWindows()
+          .catch(() => [] as WindowListEntry[])
+          .then((list) => {
+            if (!this.root || token !== this.asyncToken) return;
+            this.windowListPending = false;
+            this.windowList = list;
+            this.runSearch();
+          });
+      }
+      return;
+    }
+    this.results = searchWindowSource(this.windowList, query);
+    this.emptyText = this.windowList.some((w) => !w.isOwnWindow)
+      ? 'No matching windows.'
+      : 'No other CardMirror windows are open.';
     this.finishSearch();
   }
 
@@ -2462,6 +2571,17 @@ class QuickCardSearchUI {
       const target = result.settingsTarget;
       this.close();
       void import('./settings-ui.js').then((m) => m.openSettings(target));
+      return;
+    }
+    // Window: close the palette and bring that window to the front.
+    if (result.source === 'window') {
+      const id = result.windowId!;
+      this.close();
+      void getElectronHost()
+        ?.focusWindow(id)
+        .then((ok) => {
+          if (!ok) showToast('That window has closed.');
+        });
       return;
     }
     // File: close the palette, then open the document. atEnd irrelevant.
