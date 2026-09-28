@@ -170,6 +170,7 @@ import {
   migrateAutoUpdateOptOut, migrateDistinguishShadingDefault, effectiveDocTypeFormat } from './settings.js';
 import { openSaveAs, type SaveAsResult } from './save-as-ui.js';
 import { buildPrintHtml, printHtmlInBrowser } from './pdf-export.js';
+import { convertPdf, PdfOpenError } from './pdf-open.js';
 import { highlightColorLabel, shadingColorLabel } from './color-palette.js';
 import { viewportSpellcheckPlugin } from './viewport-spellcheck.js';
 import { commentsPlugin, commentsKey, loadThreads, getCommentsState, gcOrphanThreads, newCommentId, setCommentIdSessionResolver } from './comments-plugin.js';
@@ -6674,10 +6675,11 @@ function bytesLookLikeDocx(bytes: Uint8Array): boolean {
  *  recognized" or the first filter; users can swap to "Word only"
  *  if they want to narrow). */
 const OPEN_FILE_FILTERS = [
-  { name: 'CardMirror, Word, or recovery journal', extensions: ['cmir', 'cmir-journal', 'docx'] },
+  { name: 'CardMirror, Word, PDF, or recovery journal', extensions: ['cmir', 'cmir-journal', 'docx', 'pdf'] },
   { name: 'CardMirror native (.cmir)', extensions: ['cmir'] },
   { name: 'CardMirror recovery journal (.cmir-journal)', extensions: ['cmir-journal'] },
   { name: 'Microsoft Word (.docx)', extensions: ['docx'] },
+  { name: 'PDF exported from Verbatim or CardMirror (.pdf)', extensions: ['pdf'] },
 ];
 
 /** Resolve an opened file to the doc payload to mount. A `.cmir-journal` is a
@@ -6693,7 +6695,26 @@ async function resolveOpenedFile(
 ): Promise<
   | { name: string; bytes: Uint8Array; handle: unknown; format: 'cmir' | 'docx'; recovered: boolean }
   | 'corrupt'
+  | { error: string }
 > {
+  // A PDF (a Verbatim or CardMirror export) converts into a NEW, unsaved
+  // document, like a recovered journal: no handle, so Save can never write
+  // .docx / .cmir bytes over the PDF, and it saves as .docx by default.
+  if (isPdfFile(opened)) {
+    showToast(`Converting "${opened.name}"…`, { durationMs: 2500 });
+    try {
+      const doc = await convertPdf(opened.bytes);
+      const name = `${opened.name.replace(/\.pdf$/i, '')}.docx`;
+      return { name, bytes: serializeNative(doc), handle: null, format: 'docx', recovered: true };
+    } catch (err) {
+      return {
+        error:
+          err instanceof PdfOpenError
+            ? err.message
+            : `"${opened.name}" could not be converted (${err instanceof Error ? err.message : String(err)}).`,
+      };
+    }
+  }
   if (opened.name.toLowerCase().endsWith('.cmir-journal')) {
     try {
       const env = JSON.parse(new TextDecoder().decode(opened.bytes)) as {
@@ -6746,6 +6767,13 @@ async function resolveOpenedFile(
     format,
     recovered: false,
   };
+}
+
+/** A PDF by name, or by its bytes starting with the PDF header. */
+function isPdfFile(opened: OpenedFile): boolean {
+  if (opened.name.toLowerCase().endsWith('.pdf')) return true;
+  const b = opened.bytes;
+  return b.length >= 5 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d;
 }
 
 /** Save-As filter — only the chosen format's extension. Built per
@@ -6805,6 +6833,10 @@ async function routeOpenedFilesToSlot(opened: OpenedFile[]): Promise<void> {
       showToast(`"${file.name}" is corrupt or could not be read.`);
       continue;
     }
+    if ('error' in src) {
+      showToast(src.error);
+      continue;
+    }
     if (src.handle != null && (await isFileOpenInAnotherWindow(src.handle))) {
       showToast(`"${src.name}" is already open in another window.`);
       continue;
@@ -6831,6 +6863,10 @@ async function routeOpenedFile(opened: OpenedFile): Promise<void> {
   const src = await resolveOpenedFile(opened);
   if (src === 'corrupt') {
     void alertDialog('That .cmir-journal file is corrupt or could not be read.');
+    return;
+  }
+  if ('error' in src) {
+    void alertDialog(src.error);
     return;
   }
   // Cross-window duplicate-open guard: if any other window already has this
@@ -7364,6 +7400,10 @@ async function pickAndLoadInPlace(): Promise<boolean> {
   const src = await resolveOpenedFile(opened);
   if (src === 'corrupt') {
     void alertDialog('That .cmir-journal file is corrupt or could not be read.');
+    return false;
+  }
+  if ('error' in src) {
+    void alertDialog(src.error);
     return false;
   }
   if (src.handle != null && (await isFileOpenInAnotherWindow(src.handle))) {

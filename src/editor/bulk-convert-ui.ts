@@ -1,6 +1,7 @@
 /**
  * Bulk convert — a home-screen utility to batch-convert between
- * `.docx` and `.cmir`.
+ * `.docx` and `.cmir`, and to turn PDFs exported from Verbatim or CardMirror
+ * back into `.docx` (src/import/pdf).
  *
  * Pick an input (a single file or a folder, recursed incl. subfolders)
  * and a destination folder, choose the direction and output form
@@ -18,8 +19,9 @@ import { getHost, getElectronHost } from './host/index.js';
 import { settings } from './settings.js';
 import { runWebFileTool } from './web-file-tools.js';
 import { setIcon } from './icons';
+import { convertPdf } from './pdf-open.js';
 
-type Direction = 'docx2cmir' | 'cmir2docx';
+type Direction = 'docx2cmir' | 'cmir2docx' | 'pdf2docx';
 type Output = 'files' | 'zip';
 
 interface InputSel {
@@ -31,6 +33,9 @@ interface InputSel {
 }
 
 async function convertBytes(bytes: Uint8Array, dir: Direction): Promise<Uint8Array> {
+  if (dir === 'pdf2docx') {
+    return toDocx(await convertPdf(bytes), { defaultFont: settings.get('bodyFont') });
+  }
   if (dir === 'docx2cmir') {
     const { doc, threads } = await fromDocxFull(bytes);
     return serializeNative(doc, threads.length ? { threads } : undefined);
@@ -42,10 +47,15 @@ async function convertBytes(bytes: Uint8Array, dir: Direction): Promise<Uint8Arr
   });
 }
 
+/** The extension each direction reads. */
+function sourceExt(dir: Direction): 'docx' | 'cmir' | 'pdf' {
+  return dir === 'docx2cmir' ? 'docx' : dir === 'pdf2docx' ? 'pdf' : 'cmir';
+}
+
 function swapExt(p: string, dir: Direction): string {
-  return dir === 'docx2cmir'
-    ? p.replace(/\.docx$/i, '.cmir')
-    : p.replace(/\.cmir$/i, '.docx');
+  if (dir === 'docx2cmir') return p.replace(/\.docx$/i, '.cmir');
+  if (dir === 'pdf2docx') return p.replace(/\.pdf$/i, '.docx');
+  return p.replace(/\.cmir$/i, '.docx');
 }
 
 function baseName(p: string): string {
@@ -53,7 +63,7 @@ function baseName(p: string): string {
 }
 
 function baseNoExt(name: string): string {
-  return name.replace(/\.(docx|cmir)$/i, '');
+  return name.replace(/\.(docx|cmir|pdf)$/i, '');
 }
 
 /** Join a destination dir + relative path with a forward slash
@@ -110,6 +120,7 @@ class BulkConvertModal {
   }
 
   private direction(): Direction {
+    if (this.dirRadios.pdf2docx.checked) return 'pdf2docx';
     return this.dirRadios.cmir2docx.checked ? 'cmir2docx' : 'docx2cmir';
   }
   private output(): Output {
@@ -139,14 +150,16 @@ class BulkConvertModal {
     this.dirRadios = {
       docx2cmir: radio('pmd-bulk-dir', '.docx → .cmir', true),
       cmir2docx: radio('pmd-bulk-dir', '.cmir → .docx', false),
+      pdf2docx: radio('pmd-bulk-dir', '.pdf → .docx (Verbatim or CardMirror PDFs)', false),
     };
-    for (const r of [this.dirRadios.docx2cmir, this.dirRadios.cmir2docx]) {
+    const dirs = [this.dirRadios.docx2cmir, this.dirRadios.cmir2docx, this.dirRadios.pdf2docx];
+    for (const r of dirs) {
       r.addEventListener('change', () => {
         this.inputSel = null;
         this.refresh();
       });
     }
-    body.appendChild(fieldset('Direction', [this.dirRadios.docx2cmir, this.dirRadios.cmir2docx]));
+    body.appendChild(fieldset('Direction', dirs));
 
     // Output form.
     this.outRadios = {
@@ -230,7 +243,7 @@ class BulkConvertModal {
   // ── Pickers ───────────────────────────────────────────────────────
 
   private async pickFile(): Promise<void> {
-    const srcExt = this.direction() === 'docx2cmir' ? 'docx' : 'cmir';
+    const srcExt = sourceExt(this.direction());
     const opened = await getHost().openFile({
       filters: [{ name: `.${srcExt}`, extensions: [srcExt] }],
     });
@@ -283,7 +296,7 @@ class BulkConvertModal {
         }
         this.setStatus(`Converted “${input.name}”.`);
       } else {
-        const srcExt = dir === 'docx2cmir' ? 'docx' : 'cmir';
+        const srcExt = sourceExt(dir);
         this.setStatus('Scanning…');
         const files = await electron.listFilesRecursive(input.path, srcExt);
         if (files.length === 0) {
@@ -293,6 +306,7 @@ class BulkConvertModal {
         const zipParts: Record<string, Uint8Array> | null = out === 'zip' ? {} : null;
         let ok = 0;
         let failed = 0;
+        let firstError = '';
         for (let i = 0; i < files.length; i++) {
           const f = files[i]!;
           this.setStatus(`Converting ${i + 1} / ${files.length}…`);
@@ -306,6 +320,7 @@ class BulkConvertModal {
             ok++;
           } catch (err) {
             failed++;
+            if (!firstError) firstError = `${f.relPath}: ${err instanceof Error ? err.message : String(err)}`;
             console.error('Bulk convert failed for', f.path, err);
           }
         }
@@ -314,7 +329,7 @@ class BulkConvertModal {
           await electron.writeFileAtPath(joinPath(dest, `${input.name}.zip`), bytes);
         }
         this.setStatus(
-          `Done — ${ok} converted${failed ? `, ${failed} failed (see console)` : ''}.`,
+          `Done — ${ok} converted${failed ? `, ${failed} failed (first: ${firstError})` : ''}.`,
         );
       }
     } catch (err) {
@@ -368,16 +383,17 @@ export function openBulkConvert(): void {
 }
 
 /** Web single-file Convert: pick one `.docx` or `.cmir` and Save-As it in the
- *  other format (direction inferred from the input's extension). The web edition
+ *  other format, or a `.pdf` and Save-As it as `.docx` (direction inferred from
+ *  the input's extension). The web edition
  *  can't do the desktop folder-recursive batch, so it works one file at a time. */
 export function runConvertSingleFileWeb(): Promise<void> {
   return runWebFileTool({
     label: 'Convert',
     verb: 'Converting',
-    accept: /\.(docx|cmir)$/i,
-    acceptMsg: 'Convert works on .docx or .cmir files — please choose one.',
+    accept: /\.(docx|cmir|pdf)$/i,
+    acceptMsg: 'Convert works on .docx, .cmir or .pdf files — please choose one.',
     run: async (bytes, name) => {
-      const dir: Direction = /\.docx$/i.test(name) ? 'docx2cmir' : 'cmir2docx';
+      const dir: Direction = /\.docx$/i.test(name) ? 'docx2cmir' : /\.pdf$/i.test(name) ? 'pdf2docx' : 'cmir2docx';
       const ext = dir === 'docx2cmir' ? 'cmir' : 'docx';
       return {
         bytes: await convertBytes(bytes, dir),

@@ -312,8 +312,8 @@ class HomeScreen {
           this.actionCard(
             desktop ? 'Bulk convert' : 'Convert',
             desktop
-              ? 'Batch-convert a file or folder between .docx and .cmir.'
-              : 'Convert a file between .docx and .cmir.',
+              ? 'Batch-convert a file or folder between .docx and .cmir, or a debate PDF to .docx.'
+              : 'Convert a file between .docx and .cmir, or a debate PDF to .docx.',
             () => this.callbacks?.bulkConvert?.(),
           ),
         ),

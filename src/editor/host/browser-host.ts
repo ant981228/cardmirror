@@ -35,6 +35,7 @@ const DOCX_MIME =
 function mimeForExtension(ext: string): string {
   if (ext === 'docx') return DOCX_MIME;
   if (ext === 'cmir') return 'application/json';
+  if (ext === 'pdf') return 'application/pdf';
   return 'application/octet-stream';
 }
 
