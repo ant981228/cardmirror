@@ -144,21 +144,36 @@ function marksFor(c: StyledChar, ctx: Ctx, body: number): Mark[] {
   return out;
 }
 
+const sameMarks = (a: readonly Mark[], b: readonly Mark[]): boolean =>
+  a.length === b.length && a.every((mk, k) => mk.eq(b[k]!));
+
 /** Inline content: consecutive chars with the same marks become one text node. */
 function inline(chars: StyledChar[], ctx: Ctx, body: number): PMNode[] {
+  const marks = chars.map((c) => sortMarks(marksFor(c, ctx, body)));
+  // Whitespace between two runs formatted alike takes their formatting: a
+  // renderer may not underline or highlight a space (Word leaves the space
+  // at a line wrap bare), which would otherwise split one run in two.
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i]!.text.trim()) continue;
+    let j = i;
+    while (j < chars.length && !chars[j]!.text.trim()) j++;
+    if (i > 0 && j < chars.length && sameMarks(marks[i - 1]!, marks[j]!)) {
+      for (let k = i; k < j; k++) marks[k] = marks[i - 1]!;
+    }
+    i = j - 1;
+  }
   const nodes: PMNode[] = [];
   let text = '';
-  let marks: readonly Mark[] | null = null;
+  let cur: readonly Mark[] | null = null;
   const push = (): void => {
-    if (text) nodes.push(schema.text(text, marks ?? []));
+    if (text) nodes.push(schema.text(text, cur ?? []));
     text = '';
   };
-  chars.forEach((c) => {
-    const ms = marksFor(c, ctx, body);
-    const same = marks !== null && marks.length === ms.length && marks.every((mk, k) => mk.eq(ms[k]!));
-    if (!same) {
+  chars.forEach((c, i) => {
+    const ms = marks[i]!;
+    if (cur === null || !sameMarks(cur, ms)) {
       push();
-      marks = sortMarks(ms);
+      cur = ms;
     }
     text += c.text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
   });

@@ -49,9 +49,13 @@ function marked(doc: PMNode, mark: string, attr?: string): string[] {
   return runs.filter(Boolean);
 }
 
-describe('pdfToDoc — CardMirror (Chromium) export', () => {
+describe.each([
+  // Verbatim's heading styles start a new page, so Word's copy is 4 pages.
+  ['CardMirror (Chromium) export', 'cardmirror-chromium.pdf', /Skia/, 1],
+  ['Verbatim (Word for Mac) export', 'verbatim-word.pdf', /Quartz/, 4],
+])('pdfToDoc — %s', (_label, file, producer, pages) => {
   const source = buildDebateFixture();
-  const result = pdfToDoc(fixture('cardmirror-chromium.pdf'));
+  const result = pdfToDoc(fixture(file));
 
   it('recovers the structure: headings, cards, cites, analytic, loose paragraph', () => {
     expect(shape(result.doc)).toEqual(shape(source));
@@ -80,8 +84,8 @@ describe('pdfToDoc — CardMirror (Chromium) export', () => {
 
   it('is a valid document and names its producer', () => {
     expect(() => result.doc.check()).not.toThrow();
-    expect(result.producer).toMatch(/Skia/);
-    expect(result.pages).toBe(1);
+    expect(result.producer).toMatch(producer);
+    expect(result.pages).toBe(pages);
   });
 });
 
