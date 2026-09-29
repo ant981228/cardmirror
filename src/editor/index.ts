@@ -6693,7 +6693,16 @@ const OPEN_FILE_FILTERS = [
 async function resolveOpenedFile(
   opened: OpenedFile,
 ): Promise<
-  | { name: string; bytes: Uint8Array; handle: unknown; format: 'cmir' | 'docx'; recovered: boolean }
+  | {
+      name: string;
+      bytes: Uint8Array;
+      handle: unknown;
+      format: 'cmir' | 'docx';
+      recovered: boolean;
+      /** Already a document (a converted PDF): mount it as is. `bytes` is
+       *  then computed only if a route needs them (a new window, a pane). */
+      doc?: PMNode;
+    }
   | 'corrupt'
   | { error: string }
 > {
@@ -6702,10 +6711,31 @@ async function resolveOpenedFile(
   // .docx / .cmir bytes over the PDF, and it saves as .docx by default.
   if (isPdfFile(opened)) {
     showToast(`Converting "${opened.name}"…`, { durationMs: 2500 });
+    // A long PDF says how far along it is, at each quarter (never for a
+    // short one: nothing shows until it has taken a moment).
+    const started = Date.now();
+    let shown = 0;
+    const progress = (fraction: number): void => {
+      const quarter = Math.floor(fraction * 4);
+      if (quarter > shown && quarter < 4 && Date.now() - started > 1500) {
+        shown = quarter;
+        showToast(`Converting "${opened.name}"… ${quarter * 25}%`, { durationMs: 2500 });
+      }
+    };
     try {
-      const doc = await convertPdf(opened.bytes);
+      const doc = await convertPdf(opened.bytes, progress);
       const name = `${opened.name.replace(/\.pdf$/i, '')}.docx`;
-      return { name, bytes: serializeNative(doc), handle: null, format: 'docx', recovered: true };
+      let bytes: Uint8Array | null = null;
+      return {
+        name,
+        get bytes(): Uint8Array {
+          return (bytes ??= serializeNative(doc));
+        },
+        doc,
+        handle: null,
+        format: 'docx',
+        recovered: true,
+      };
     } catch (err) {
       return {
         error:
@@ -6924,6 +6954,20 @@ async function routeOpenedFile(opened: OpenedFile): Promise<void> {
     }
     return;
   }
+  if (src.doc) {
+    // Already converted (a PDF): no bytes to decrypt or parse.
+    mountOpenedSingleDoc({
+      docNode: src.doc,
+      docThreads: undefined,
+      docId: null,
+      name: src.name,
+      handle: null,
+      format,
+      dirty: true,
+      recordAsRecent: false,
+    });
+    return;
+  }
   // Password-protected .docx arrives as a compound file, not a zip;
   // decrypt to real .docx bytes (or pass through) before parsing.
   let openBytes: Uint8Array;
@@ -7124,25 +7168,31 @@ async function loadFileInPlace(file: {
   format: 'cmir' | 'docx';
   /** A recovered (.cmir-journal) doc: mount dirty, don't record a recent. */
   recovered?: boolean;
+  /** Already a document (a converted PDF): skip decrypting and parsing. */
+  doc?: PMNode;
 }): Promise<void> {
-  // Decrypt a password-protected .docx (a compound file, not a zip)
-  // before parsing; passes through for a normal file. Throws
-  // OpenCancelledError / UnsupportedEncryptionError, handled by the
-  // callers' catch.
-  const openBytes = await maybeDecryptForOpen(file.bytes, file.filename);
   let docNode: PMNode;
   let docThreads: Thread[] | undefined;
   let docId: string | null = null;
-  if (!bytesLookLikeDocx(openBytes)) {
-    const parsed = parseNative(openBytes);
-    docNode = parsed.doc;
-    docThreads = parsed.threads.length > 0 ? parsed.threads : undefined;
-    docId = parsed.docId;
+  if (file.doc) {
+    docNode = file.doc;
   } else {
-    const result = await fromDocxFull(openBytes);
-    docNode = result.doc;
-    docThreads = result.threads;
-    docId = result.docId;
+    // Decrypt a password-protected .docx (a compound file, not a zip)
+    // before parsing; passes through for a normal file. Throws
+    // OpenCancelledError / UnsupportedEncryptionError, handled by the
+    // callers' catch.
+    const openBytes = await maybeDecryptForOpen(file.bytes, file.filename);
+    if (!bytesLookLikeDocx(openBytes)) {
+      const parsed = parseNative(openBytes);
+      docNode = parsed.doc;
+      docThreads = parsed.threads.length > 0 ? parsed.threads : undefined;
+      docId = parsed.docId;
+    } else {
+      const result = await fromDocxFull(openBytes);
+      docNode = result.doc;
+      docThreads = result.threads;
+      docId = result.docId;
+    }
   }
   void clearCurrentJournal();
   mountView(docNode, docThreads);
@@ -7413,10 +7463,11 @@ async function pickAndLoadInPlace(): Promise<boolean> {
   try {
     await loadFileInPlace({
       filename: src.name,
-      bytes: src.bytes,
+      bytes: src.doc ? new Uint8Array() : src.bytes,
       handle: src.handle,
       format: src.format,
       recovered: src.recovered,
+      ...(src.doc ? { doc: src.doc } : {}),
     });
     return true;
   } catch (err) {

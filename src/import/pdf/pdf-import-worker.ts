@@ -3,6 +3,7 @@
  * src/editor/pdf-open.ts for the client.
  *
  * Protocol: { id, bytes } →
+ *   { id, progress } (0–1, every few percent), then
  *   { id, ok: true, docJson } | { id, ok: false, error, importError }
  */
 
@@ -15,7 +16,12 @@ self.onmessage = (e: MessageEvent): void => {
   const req = e.data as { id: number; bytes: Uint8Array } | null;
   if (!req || typeof req.id !== 'number') return;
   try {
-    const { doc } = pdfToDoc(req.bytes);
+    let last = 0;
+    const { doc } = pdfToDoc(req.bytes, (fraction) => {
+      if (fraction - last < 0.05 && fraction < 1) return;
+      last = fraction;
+      post({ id: req.id, progress: fraction });
+    });
     post({ id: req.id, ok: true, docJson: doc.toJSON() });
   } catch (err) {
     post({

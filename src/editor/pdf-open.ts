@@ -17,10 +17,11 @@ export class PdfOpenError extends Error {}
 type Reply =
   | { id: number; ok: true; docJson: unknown }
   | { id: number; ok: false; error: string; importError: boolean };
+type Progress = { id: number; progress: number };
 
 let worker: Worker | null | undefined;
 let nextId = 1;
-const pending = new Map<number, (r: Reply | null) => void>();
+const pending = new Map<number, { done: (r: Reply | null) => void; progress?: (f: number) => void }>();
 
 function getWorker(): Worker | null {
   if (worker !== undefined) return worker;
@@ -28,13 +29,17 @@ function getWorker(): Worker | null {
     if (typeof Worker === 'undefined') throw new Error('no Worker in this host');
     worker = new Worker(new URL('../import/pdf/pdf-import-worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (e: MessageEvent): void => {
-      const msg = e.data as Reply;
-      const done = pending.get(msg.id);
+      const msg = e.data as Reply | Progress;
+      const waiter = pending.get(msg.id);
+      if ('progress' in msg) {
+        waiter?.progress?.(msg.progress);
+        return;
+      }
       pending.delete(msg.id);
-      done?.(msg);
+      waiter?.done(msg);
     };
     worker.onerror = (): void => {
-      for (const [, done] of pending) done(null);
+      for (const [, waiter] of pending) waiter.done(null);
       pending.clear();
       worker?.terminate();
       worker = undefined;
@@ -52,10 +57,10 @@ export function bytesLookLikePdf(bytes: Uint8Array): boolean {
   return head.includes('%PDF-');
 }
 
-async function inline(bytes: Uint8Array): Promise<PMNode> {
+async function inline(bytes: Uint8Array, onProgress?: (fraction: number) => void): Promise<PMNode> {
   const { pdfToDoc, PdfImportError } = await import('../import/pdf/index.js');
   try {
-    return pdfToDoc(bytes).doc;
+    return pdfToDoc(bytes, onProgress).doc;
   } catch (err) {
     if (err instanceof PdfImportError) throw new PdfOpenError(err.message);
     throw err;
@@ -63,18 +68,22 @@ async function inline(bytes: Uint8Array): Promise<PMNode> {
 }
 
 /** The PDF as a CardMirror document. Throws `PdfOpenError` (with a message
- *  for the user) when the file can't be converted. */
-export async function convertPdf(bytes: Uint8Array): Promise<PMNode> {
+ *  for the user) when the file can't be converted. `onProgress` gets the
+ *  fraction of pages read. */
+export async function convertPdf(
+  bytes: Uint8Array,
+  onProgress?: (fraction: number) => void,
+): Promise<PMNode> {
   const w = getWorker();
   if (w) {
     const reply = await new Promise<Reply | null>((resolve) => {
       const id = nextId++;
-      pending.set(id, resolve);
+      pending.set(id, { done: resolve, ...(onProgress ? { progress: onProgress } : {}) });
       w.postMessage({ id, bytes });
     });
     if (reply?.ok) return schema.nodeFromJSON(reply.docJson);
     if (reply && reply.importError) throw new PdfOpenError(reply.error);
     // Worker died or failed unexpectedly: convert here instead.
   }
-  return inline(bytes);
+  return inline(bytes, onProgress);
 }
