@@ -5,9 +5,10 @@
  * paragraph, wrapped multi-line paragraphs).
  *
  * The PDFs beside this file were made from it:
- *   - cardmirror-chromium.pdf: the doc serialized with CardMirror's frozen
- *     clipboard styles (as Save As → PDF does) and printed by headless
- *     Chrome (`--print-to-pdf`).
+ *   - cardmirror-chromium.pdf: CardMirror's own Save As → PDF output —
+ *     `buildPrintHtml` (src/editor/pdf-export.ts) printed by Electron's
+ *     `printToPDF` with the options of main's `host:html-to-pdf` (US
+ *     Letter, 0.75in margins, backgrounds printed).
  *   - verbatim-word.pdf: `toDocx` of the doc, opened in Microsoft Word for
  *     Mac and saved as PDF.
  * Regenerate both whenever this document changes.
