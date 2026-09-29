@@ -158,7 +158,9 @@ function run(
   depth: number,
 ): void {
   if (depth > 8) return; // runaway form-XObject nesting
-  const lex = new Lexer(data);
+  // Content streams never contain object references: skip the `N G R`
+  // look-ahead the lexer would otherwise do after every integer.
+  const lex = new Lexer(data, 0, data.length, false);
   const stack: GState[] = [];
   let gs: GState = { ...initial };
   let tm: Matrix = IDENTITY;
@@ -181,19 +183,24 @@ function run(
   const showText = (bytes: Uint8Array): void => {
     const font = gs.font;
     if (!font) return;
-    const trm0 = mul([gs.fontSize * gs.hScale, 0, 0, gs.fontSize, 0, gs.rise], mul(tm, gs.ctm));
+    // Within one show, only the text matrix's x translation moves, so every
+    // glyph is `m` applied to (running advance, rise): one matrix product per
+    // show instead of two per glyph.
+    const m = mul(tm, gs.ctm);
     // Rendered size: the length of the text-space unit vertical in page space.
-    const size = Math.hypot(trm0[2], trm0[3]);
+    const size = Math.hypot(m[2] * gs.fontSize, m[3] * gs.fontSize);
+    let acc = 0;
     for (const g of font.decode(bytes)) {
-      const trm = mul([gs.fontSize * gs.hScale, 0, 0, gs.fontSize, 0, gs.rise], mul(tm, gs.ctm));
-      const [x, y] = apply(trm, 0, 0);
       const adv = (g.width * gs.fontSize + gs.charSpace + (g.isSpace ? gs.wordSpace : 0)) * gs.hScale;
-      const [xe] = apply(mul(tm, gs.ctm), adv, 0);
       if (g.text) {
+        const x = acc * m[0] + gs.rise * m[2] + m[4];
+        const y = acc * m[1] + gs.rise * m[3] + m[5];
+        const xe = (acc + adv) * m[0] + m[4];
         chars.push({ text: g.text, x0: Math.min(x, xe), x1: Math.max(x, xe), y, size, font, color: gs.fill });
       }
-      tm = mul([1, 0, 0, 1, adv, 0], tm);
+      acc += adv;
     }
+    tm = mul([1, 0, 0, 1, acc, 0], tm);
   };
 
   const flushPath = (mode: 'fill' | 'stroke' | 'none'): void => {

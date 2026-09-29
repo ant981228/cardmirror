@@ -31,7 +31,7 @@ import { dedupeHeadingIds } from '../../schema/ids.js';
 import { repairDoc } from '../../doc-repair.js';
 import { PdfDocument, PdfError } from './pdf-objects.js';
 import { readPage } from './pdf-content.js';
-import { layoutParagraphs, isCiteChar, type PdfParagraph, type StyledChar } from './pdf-layout.js';
+import { layoutLines, pageLines, isCiteChar, type PdfLine, type PdfParagraph, type StyledChar } from './pdf-layout.js';
 
 export class PdfImportError extends Error {}
 
@@ -187,7 +187,11 @@ function sortMarks(ms: Mark[]): readonly Mark[] {
   return set;
 }
 
-export function pdfToDoc(bytes: Uint8Array): PdfImportResult {
+export function pdfToDoc(
+  bytes: Uint8Array,
+  /** Called as pages are read, with the fraction done (0–1]. */
+  onProgress?: (fraction: number) => void,
+): PdfImportResult {
   let pdf: PdfDocument;
   try {
     pdf = new PdfDocument(bytes);
@@ -200,15 +204,25 @@ export function pdfToDoc(bytes: Uint8Array): PdfImportResult {
   const info = pdf.info();
   const pageList = pdf.pages();
   if (!pageList.length) throw new PdfImportError('This PDF has no pages.');
-  const pages = pageList.map((p) => readPage(pdf, p));
-  const charCount = pages.reduce((n, p) => n + p.chars.length, 0);
+  // Page by page: each page's raw glyphs and rules are dropped once its
+  // lines are built, so peak memory is one page's worth, not the file's.
+  const linesPerPage: PdfLine[][] = [];
+  const heights: number[] = [];
+  let charCount = 0;
+  pageList.forEach((p, i) => {
+    const content = readPage(pdf, p);
+    charCount += content.chars.length;
+    linesPerPage.push(pageLines(content, i));
+    heights.push(content.height);
+    onProgress?.((i + 1) / pageList.length);
+  });
   if (charCount < 50) {
     throw new PdfImportError(
       'This PDF has no readable text — it may be a scan or an image. Only PDFs exported from a document (Verbatim / Word or CardMirror) can be converted.',
     );
   }
 
-  const { paragraphs, bodySize } = layoutParagraphs(pages);
+  const { paragraphs, bodySize } = layoutLines(linesPerPage, heights);
   const n = schema.nodes;
   const blocks: PMNode[] = [];
   // The open card or analytic unit: its head and the paragraphs it takes.
@@ -262,6 +276,6 @@ export function pdfToDoc(bytes: Uint8Array): PdfImportResult {
   return {
     doc,
     producer: [info['Creator'], info['Producer']].filter(Boolean).join(' / '),
-    pages: pages.length,
+    pages: pageList.length,
   };
 }

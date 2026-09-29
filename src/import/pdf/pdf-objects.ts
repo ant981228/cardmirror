@@ -68,7 +68,13 @@ export class PdfOp {
 
 export class Lexer {
   pos: number;
-  constructor(readonly buf: Uint8Array, start = 0, readonly end = buf.length) {
+  constructor(
+    readonly buf: Uint8Array,
+    start = 0,
+    readonly end = buf.length,
+    /** Fold `num gen R` into a PdfRef (object bodies; never content streams). */
+    private readonly refs = true,
+  ) {
     this.pos = start;
   }
 
@@ -88,7 +94,7 @@ export class Lexer {
    *  returned whole. `R` after two ints folds into a PdfRef. */
   next(): PdfValue | PdfOp | undefined {
     const v = this.nextRaw();
-    if (typeof v === 'number' && Number.isInteger(v) && v >= 0) {
+    if (this.refs && typeof v === 'number' && Number.isInteger(v) && v >= 0) {
       // Possible `num gen R`.
       const save = this.pos;
       const g = this.nextRaw();
@@ -138,7 +144,12 @@ export class Lexer {
       this.pos++;
       return new PdfOp(String.fromCharCode(c));
     }
-    // number or keyword
+    // Numbers straight from the bytes (most tokens in a content stream).
+    if ((c >= 0x30 && c <= 0x39) || c === 0x2d || c === 0x2b || c === 0x2e) {
+      const n = this.number();
+      if (n !== null) return n;
+    }
+    // keyword
     const start = this.pos;
     while (this.pos < this.end && !WS.has(b[this.pos]!) && !DELIM.has(b[this.pos]!)) this.pos++;
     if (this.pos === start) {
@@ -152,6 +163,41 @@ export class Lexer {
     if (tok === 'false') return false;
     if (tok === 'null') return null;
     return new PdfOp(tok);
+  }
+
+  /** A number at pos, or null (pos unchanged) when the token isn't one. */
+  private number(): number | null {
+    const b = this.buf;
+    const start = this.pos;
+    let i = start;
+    let neg = false;
+    if (b[i] === 0x2d || b[i] === 0x2b) {
+      neg = b[i] === 0x2d;
+      i++;
+    }
+    let int = 0;
+    let digits = 0;
+    while (i < this.end && b[i]! >= 0x30 && b[i]! <= 0x39) {
+      int = int * 10 + (b[i]! - 0x30);
+      i++;
+      digits++;
+    }
+    let frac = 0;
+    let scale = 1;
+    if (i < this.end && b[i] === 0x2e) {
+      i++;
+      while (i < this.end && b[i]! >= 0x30 && b[i]! <= 0x39) {
+        frac = frac * 10 + (b[i]! - 0x30);
+        scale *= 10;
+        i++;
+        digits++;
+      }
+    }
+    // A number must end at whitespace or a delimiter, and have a digit.
+    if (digits === 0 || (i < this.end && !WS.has(b[i]!) && !DELIM.has(b[i]!))) return null;
+    this.pos = i;
+    const v = int + frac / scale;
+    return neg ? -v : v;
   }
 
   private name(): PdfName {
@@ -256,10 +302,12 @@ export class Lexer {
 
 function indexOfBytes(buf: Uint8Array, needle: string, from: number): number {
   const n0 = needle.charCodeAt(0);
-  outer: for (let i = from; i <= buf.length - needle.length; i++) {
-    if (buf[i] !== n0) continue;
-    for (let j = 1; j < needle.length; j++) if (buf[i + j] !== needle.charCodeAt(j)) continue outer;
-    return i;
+  const last = buf.length - needle.length;
+  // Native indexOf jumps to each candidate first byte; only those are checked.
+  for (let i = buf.indexOf(n0, from); i !== -1 && i <= last; i = buf.indexOf(n0, i + 1)) {
+    let j = 1;
+    while (j < needle.length && buf[i + j] === needle.charCodeAt(j)) j++;
+    if (j === needle.length) return i;
   }
   return -1;
 }

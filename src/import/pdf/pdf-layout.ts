@@ -46,6 +46,8 @@ export interface PdfLine {
   size: number;
   /** Largest glyph on the line: Word grows a line's height to fit it. */
   maxSize: number;
+  /** Framed by long rules above and below (the Pocket style's box). */
+  boxed: boolean;
   /** Width of the line's first word: whether it would have fit at the
    *  end of the previous line says if that line wrapped or ended. */
   firstWordWidth: number;
@@ -81,34 +83,72 @@ function dominantSize(chars: { text: string; size: number }[]): number {
   return best || (chars[0]?.size ?? 0);
 }
 
+/** Rectangles bucketed by vertical position, so a glyph looks only at the
+ *  few near its own line instead of every rule on the page. */
+class YIndex {
+  private static readonly BAND = 12;
+  private buckets = new Map<number, PdfRect[]>();
+  constructor(rects: PdfRect[]) {
+    for (const r of rects) {
+      for (let b = Math.floor(r.y0 / YIndex.BAND); b <= Math.floor(r.y1 / YIndex.BAND); b++) {
+        const list = this.buckets.get(b);
+        if (list) list.push(r);
+        else this.buckets.set(b, [r]);
+      }
+    }
+  }
+  /** Each rect overlapping [y0, y1] once (a tall rect sits in several bands). */
+  each(y0: number, y1: number, fn: (r: PdfRect) => boolean | void): void {
+    const lo = Math.floor(y0 / YIndex.BAND), hi = Math.floor(y1 / YIndex.BAND);
+    const seen = lo === hi ? null : new Set<PdfRect>();
+    for (let b = lo; b <= hi; b++) {
+      const list = this.buckets.get(b);
+      if (!list) continue;
+      for (const r of list) {
+        if (seen) {
+          if (seen.has(r)) continue;
+          seen.add(r);
+        }
+        if (r.y1 < y0 || r.y0 > y1) continue;
+        if (fn(r) === true) return;
+      }
+    }
+  }
+}
+
 /** Style each char from the rectangles around it. */
 function styleChars(page: PdfPageContent): { c: PdfChar; s: StyledChar }[] {
   const rects = page.rects.filter((r) => !isBackground(r, page));
-  // Thin horizontal rules (underlines) vs area fills (highlights).
-  const rules = rects.filter((r) => r.y1 - r.y0 <= 2.6 && r.x1 - r.x0 > (r.y1 - r.y0) * 2);
-  const fills = rects.filter((r) => r.kind === 'fill' && r.y1 - r.y0 > 2.6 && r.color !== '#000000');
-  const sides = rects.filter((r) => r.x1 - r.x0 <= 2.6 && r.y1 - r.y0 > (r.x1 - r.x0) * 2);
+  // Thin horizontal rules (underlines, box edges), area fills (highlights),
+  // thin vertical rules (box sides).
+  const rules = new YIndex(rects.filter((r) => r.y1 - r.y0 <= 2.6 && r.x1 - r.x0 > (r.y1 - r.y0) * 2));
+  const fills = new YIndex(rects.filter((r) => r.kind === 'fill' && r.y1 - r.y0 > 2.6 && r.color !== '#000000'));
+  const sides = new YIndex(rects.filter((r) => r.x1 - r.x0 <= 2.6 && r.y1 - r.y0 > (r.x1 - r.x0) * 2));
   return page.chars.map((c) => {
     const mid = (c.x0 + c.x1) / 2;
-    const under = rules.filter(
-      (r) => r.x0 - 0.5 <= mid && r.x1 + 0.5 >= mid && r.y0 >= c.y - 0.5 && r.y0 <= c.y + c.size * 0.45,
-    );
+    const spans = (r: PdfRect): boolean => r.x0 - 0.5 <= mid && r.x1 + 0.5 >= mid;
+    let under = 0;
+    rules.each(c.y - 0.5, c.y + c.size * 0.45, (r) => {
+      if (spans(r) && r.y0 >= c.y - 0.5 && r.y0 <= c.y + c.size * 0.45) under++;
+    });
     // A box: a rule just above the glyph with a vertical side inside its
     // extent spanning the glyph (the line above's underline has no sides).
     // Its bottom edge sits with the underline, so that isn't a second one.
-    const boxTop = rules.some(
-      (r) =>
-        r.x0 - 0.5 <= mid &&
-        r.x1 + 0.5 >= mid &&
-        r.y1 <= c.y - c.size * 0.55 &&
-        r.y1 >= c.y - c.size * 1.4 &&
-        sides.some(
-          (v) => v.x1 >= r.x0 - 2 && v.x0 <= r.x1 + 2 && v.y0 <= c.y - c.size * 0.5 && v.y1 >= c.y && v.y0 >= r.y0 - 2,
-        ),
-    );
-    const hi = fills.find(
-      (r) => r.x0 - 0.5 <= mid && r.x1 + 0.5 >= mid && r.y0 <= c.y - c.size * 0.3 && r.y1 >= c.y - 0.5,
-    );
+    let boxTop = false;
+    rules.each(c.y - c.size * 1.4, c.y - c.size * 0.55, (r) => {
+      if (!spans(r) || r.y1 > c.y - c.size * 0.55 || r.y1 < c.y - c.size * 1.4) return false;
+      sides.each(c.y - c.size * 0.5, c.y, (v) => {
+        boxTop = v.x1 >= r.x0 - 2 && v.x0 <= r.x1 + 2 && v.y0 <= c.y - c.size * 0.5 && v.y1 >= c.y && v.y0 >= r.y0 - 2;
+        return boxTop;
+      });
+      return boxTop;
+    });
+    let hi: PdfRect | null = null;
+    fills.each(c.y - c.size * 0.3, c.y - 0.5, (r) => {
+      if (spans(r) && r.y0 <= c.y - c.size * 0.3 && r.y1 >= c.y - 0.5) hi = r;
+      return hi !== null;
+    });
+    const highlight = (hi as PdfRect | null)?.color ?? null;
     return {
       c,
       s: {
@@ -116,8 +156,8 @@ function styleChars(page: PdfPageContent): { c: PdfChar; s: StyledChar }[] {
         size: c.size,
         bold: c.font.bold,
         italic: c.font.italic,
-        underline: boxTop ? (under.length ? 1 : 0) : under.length >= 2 ? 2 : under.length === 1 ? 1 : 0,
-        highlight: hi ? hi.color : null,
+        underline: boxTop ? (under ? 1 : 0) : under >= 2 ? 2 : under === 1 ? 1 : 0,
+        highlight,
         color: c.color,
         superscript: false,
         boxed: boxTop,
@@ -126,13 +166,30 @@ function styleChars(page: PdfPageContent): { c: PdfChar; s: StyledChar }[] {
   });
 }
 
-function buildLines(page: PdfPageContent, pageIndex: number): PdfLine[] {
+/** One page's lines. Everything later steps need from the page's glyphs and
+ *  rules is on the lines, so the caller can drop the page right after: a
+ *  long PDF never holds every page's raw glyphs at once. */
+export function pageLines(page: PdfPageContent, pageIndex: number): PdfLine[] {
+  // Long rules (over ~45% of the page width) frame a Pocket's box.
+  const longRules = page.rects.filter((r) => r.y1 - r.y0 <= 3 && r.x1 - r.x0 > page.width * 0.45);
+  const boxedAt = (y: number, size: number): boolean =>
+    longRules.some((r) => r.y1 <= y - size * 0.6 && r.y1 >= y - size * 2.2) &&
+    longRules.some((r) => r.y0 >= y && r.y0 <= y + size * 1.2);
   const styled = styleChars(page).sort((a, b) => a.c.y - b.c.y || a.c.x0 - b.c.x0);
   // 1. Cluster by baseline.
   type Line = { y: number; size: number; items: { c: PdfChar; s: StyledChar }[] };
   const raw: Line[] = [];
   for (const it of styled) {
-    const line = raw.find((l) => Math.abs(l.y - it.c.y) <= Math.max(1, Math.min(l.size, it.c.size) * 0.3));
+    // Chars arrive sorted by y: the matching line is one of the last few.
+    let line: Line | undefined;
+    for (let k = raw.length - 1; k >= 0; k--) {
+      const l = raw[k]!;
+      if (l.y < it.c.y - 40) break;
+      if (Math.abs(l.y - it.c.y) <= Math.max(1, Math.min(l.size, it.c.size) * 0.3)) {
+        line = l;
+        break;
+      }
+    }
     if (line) {
       line.items.push(it);
       line.size = Math.max(line.size, it.c.size);
@@ -142,18 +199,28 @@ function buildLines(page: PdfPageContent, pageIndex: number): PdfLine[] {
   //    that line's superscripts ("8th", footnote numbers). Only a few: a
   //    whole line of shrunk text can sit that close above a normal one.
   const lines: Line[] = [];
-  for (const l of raw) {
+  const minX = new Map<Line, number>();
+  for (const l of raw) minX.set(l, l.items.reduce((m, it) => Math.min(m, it.c.x0), Infinity));
+  raw.sort((a, b) => a.y - b.y);
+  for (let li = 0; li < raw.length; li++) {
+    const l = raw[li]!;
     const visible = l.items.filter((it) => it.c.text.trim()).length;
-    const host =
-      visible <= 8 &&
-      raw.find(
-        (h) =>
-          h !== l &&
+    let host: Line | undefined;
+    if (visible <= 8) {
+      // Candidates sit just below (larger y), within one line height.
+      for (let k = li + 1; k < raw.length && raw[k]!.y - l.y < 40; k++) {
+        const h = raw[k]!;
+        if (
           l.size < h.size * 0.8 &&
           l.y < h.y - h.size * 0.15 &&
           l.y > h.y - h.size * 0.8 &&
-          l.items.every((it) => it.c.x0 >= Math.min(...h.items.map((x) => x.c.x0)) - 1),
-      );
+          minX.get(l)! >= minX.get(h)! - 1
+        ) {
+          host = h;
+          break;
+        }
+      }
+    }
     if (host) {
       for (const it of l.items) it.s.superscript = true;
       host.items.push(...l.items);
@@ -184,6 +251,7 @@ function buildLines(page: PdfPageContent, pageIndex: number): PdfLine[] {
     }
     const firstWordWidth = visible.length && firstWordEnd >= 0 ? l.items[firstWordEnd]!.c.x1 - visible[0]!.c.x0 : 0;
     return {
+      boxed: boxedAt(l.y, dominantSize(l.items.map((it) => it.c))),
       firstWordWidth,
       maxSize: visible.length ? Math.max(...visible.filter((it) => !it.s.superscript).map((it) => it.c.size), 0) || l.size : l.size,
       page: pageIndex,
@@ -287,10 +355,20 @@ export function layoutParagraphs(
   /** Diagnostics: called with each paragraph break and its reason. */
   debug?: (reason: string, prev: string, next: string) => void,
 ): { paragraphs: PdfParagraph[]; bodySize: number } {
-  const perPage = dropHeadersFooters(
-    pages.map((p, i) => buildLines(p, i)),
+  return layoutLines(
+    pages.map((p, i) => pageLines(p, i)),
     pages.map((p) => p.height),
+    debug,
   );
+}
+
+/** Paragraphs from every page's lines (`pageLines`) and page heights. */
+export function layoutLines(
+  linesPerPage: PdfLine[][],
+  heights: number[],
+  debug?: (reason: string, prev: string, next: string) => void,
+): { paragraphs: PdfParagraph[]; bodySize: number } {
+  const perPage = dropHeadersFooters(linesPerPage, heights);
   const all = perPage.flat();
   // Body size: from underlined text when there's enough of it. Shrinking
   // (Verbatim's condense-for-reading) only ever applies to non-underlined
@@ -308,15 +386,6 @@ export function layoutParagraphs(
   const right = bodyEnds.length ? bodyEnds[Math.floor(bodyEnds.length * 0.9)]! : 540;
   const leftEdges = all.filter((l) => lineText(l).trim()).map((l) => l.x0).sort((a, b) => a - b);
   const left = leftEdges.length ? leftEdges[Math.floor(leftEdges.length * 0.1)]! : 72;
-
-  // Boxes (Pocket): long horizontal rules above and below a line.
-  const boxedLine = (l: PdfLine): boolean => {
-    const page = pages[l.page]!;
-    const rules = page.rects.filter((r) => r.y1 - r.y0 <= 3 && r.x1 - r.x0 > (right - left) * 0.6);
-    const above = rules.some((r) => r.y1 <= l.y - l.size * 0.6 && r.y1 >= l.y - l.size * 2.2);
-    const below = rules.some((r) => r.y0 >= l.y && r.y0 <= l.y + l.size * 1.2);
-    return above && below;
-  };
 
   /** Lines → one paragraph: joined with a space where a line wrapped
    *  (not after a hyphen or slash), trimmed. Null when there's no text. */
@@ -336,7 +405,7 @@ export function layoutParagraphs(
     const first = lines[0]!;
     const mid = (first.x0 + first.x1) / 2;
     const centered = lines.length <= 3 && Math.abs(mid - (left + right) / 2) < (right - left) * 0.08 && first.x0 > left + 20;
-    return { lines, chars, size: dominantSize(chars), centered, boxed: boxedLine(first) };
+    return { lines, chars, size: dominantSize(chars), centered, boxed: first.boxed };
   };
 
   const paragraphs: PdfParagraph[] = [];
