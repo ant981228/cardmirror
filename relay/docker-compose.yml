@@ -1,10 +1,13 @@
 # One-command self-hosted CardMirror relay:
 #   RELAY_TOKEN=$(openssl rand -hex 24) docker compose up -d
-# Then set Settings → Card Sharing → Custom relay URL to
-# http://<host>:8410/relay and Custom relay token to the same token.
+# The relay listens on 127.0.0.1:8410 only (see `ports` below). Front it
+# with an HTTPS reverse proxy, then set Settings → Collaboration → Custom
+# relay URL to https://<your-domain>/relay and Custom relay token to the
+# same token.
 services:
   postgres:
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: relay
       POSTGRES_USER: relay
@@ -18,6 +21,7 @@ services:
 
   relay:
     build: .
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -28,8 +32,12 @@ services:
       # (comma-separated owner/repo). Plugins are full-trust code —
       # curate deliberately. Defaults to the app's baked list.
       RELAY_PLUGIN_ALLOWLIST: ${RELAY_PLUGIN_ALLOWLIST:-shreerammodi/ebb,shreerammodi/cardmirror-ebb-plugin}
+    # Loopback only: Docker's published ports bypass ufw, so a bare
+    # "8410:8000" would serve plain HTTP to the internet. Put an HTTPS
+    # reverse proxy (Caddy, nginx) on this host in front of it. To reach
+    # it from other machines on a trusted LAN instead, drop "127.0.0.1:".
     ports:
-      - "8410:8000"
+      - "127.0.0.1:8410:8000"
 
 volumes:
   relay_pgdata:

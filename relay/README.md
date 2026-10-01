@@ -21,10 +21,26 @@ cd relay
 RELAY_TOKEN=$(openssl rand -hex 24) docker compose up -d
 ```
 
+The relay listens on `127.0.0.1:8410` only, so nothing reaches it over
+plain HTTP from outside the host (Docker's published ports bypass
+`ufw`). Put an HTTPS reverse proxy on the same host in front of it, e.g.
+this Caddyfile, which also fetches the certificate:
+
+```
+relay.example.org {
+    reverse_proxy 127.0.0.1:8410 {
+        flush_interval -1
+    }
+}
+```
+
 Then in CardMirror on every machine: **Settings → Collaboration** →
-**Custom relay URL** = `http://<your-host>:8410/relay`, **Custom relay
-token** = the same token. Use HTTPS (a reverse proxy such as Caddy or
-your platform's TLS) for anything beyond a LAN.
+**Custom relay URL** = `https://relay.example.org/relay`, **Custom relay
+token** = the same token. For a trusted LAN without HTTPS, change the
+port mapping to `"8410:8000"` and use `http://<your-host>:8410/relay`.
+
+Keep the token in a `.env` file next to `docker-compose.yml`
+(`RELAY_TOKEN=...`) so it stays the same across restarts.
 
 ## Running it elsewhere
 
