@@ -135,6 +135,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
    *  "you're on the latest" and "couldn't check" dialogs — only
    *  the "Update available" modal fires. No-op in dev builds. */
   triggerAutoUpdateCheck: () => ipcRenderer.invoke('host:trigger-auto-update-check'),
+  /** Release stream for auto-update (Settings → General → Update source):
+   *  a GitHub `owner/repo` override, or blank for the build's default. */
+  getUpdateSource: () =>
+    ipcRenderer.invoke('host:get-update-source') as Promise<{
+      active: string;
+      defaultSource: string;
+      overridden: boolean;
+    }>,
+  setUpdateSource: (input: string) =>
+    ipcRenderer.invoke('host:set-update-source', input) as Promise<
+      { ok: true; active: string } | { ok: false; error: string }
+    >,
   getUpdateChipState: () => ipcRenderer.invoke('host:update-chip-state'),
   updateChipAction: () => ipcRenderer.invoke('host:update-chip-action'),
   onUpdateChip(handler: (payload: { state: 'available' | 'ready'; version: string } | null) => void): () => void {

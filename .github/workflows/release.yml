@@ -251,7 +251,16 @@ jobs:
           # electron-builder's "always" publish mode finds and
           # uploads to it instead of racing to create a new draft.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm --prefix apps/desktop run release
+        # Publish to the repo this workflow runs in rather than the
+        # package.json default, so a fork's tags release to the fork —
+        # and its builds' baked app-update.yml follows the fork's stream
+        # (see apps/desktop/src/update-source.ts). On the main repo this
+        # is the same owner/repo as package.json.
+        shell: bash
+        run: |
+          npm --prefix apps/desktop run release -- \
+            -c.publish.owner="${GITHUB_REPOSITORY%%/*}" \
+            -c.publish.repo="${GITHUB_REPOSITORY#*/}"
 
       - name: Build and upload CardMirror Lite installer
         # The no-AI / no-internet build variant (src/editor/lite.ts),

@@ -484,6 +484,13 @@ interface ElectronAPI {
    *  fires. No-op in dev (non-packaged) builds. Called from the
    *  renderer at boot iff `checkForUpdatesOnLaunch` is enabled. */
   triggerAutoUpdateCheck(): Promise<void>;
+  /** The GitHub `owner/repo` auto-update follows: `active` is what's in
+   *  effect, `defaultSource` the build's own stream, `overridden` whether
+   *  the user picked another one. */
+  getUpdateSource(): Promise<{ active: string; defaultSource: string; overridden: boolean }>;
+  /** Follow another release stream (`owner/repo` or a GitHub URL); blank
+   *  returns to the build's default. */
+  setUpdateSource(input: string): Promise<{ ok: true; active: string } | { ok: false; error: string }>;
   /** Update chip (install-on-confirm): current staged/available update
    *  state (null = none), a subscription for changes, and the chip's
    *  click action (ready → restart-install; available → release page).
@@ -1410,6 +1417,16 @@ export class ElectronHost implements Host {
 
   async triggerAutoUpdateCheck(): Promise<void> {
     await api().triggerAutoUpdateCheck();
+  }
+
+  async getUpdateSource(): Promise<{ active: string; defaultSource: string; overridden: boolean }> {
+    return api().getUpdateSource();
+  }
+
+  async setUpdateSource(
+    input: string,
+  ): Promise<{ ok: true; active: string } | { ok: false; error: string }> {
+    return api().setUpdateSource(input);
   }
 
   async getUpdateChipState(): Promise<{ state: 'available' | 'ready'; version: string } | null> {

@@ -2022,6 +2022,7 @@ function buildInstallInfoSection(): HTMLElement {
     // manual Check button, then the tournament-pause area.
     wrap.appendChild(actions);
     wrap.appendChild(pauseWrap);
+    wrap.appendChild(buildUpdateSourceRow(electronHost));
   }
 
   if (electronHost && isLiteBuild()) {
@@ -2037,6 +2038,80 @@ function buildInstallInfoSection(): HTMLElement {
   }
 
   return wrap;
+}
+
+/** "Update source": which GitHub release stream auto-update follows. Blank
+ *  means the build's own stream; anything else (a coach's or a fork's
+ *  `owner/repo`) is a machine-local override held by the main process.
+ *  Updates only move forward — following a stream whose newest version is
+ *  older than this install just finds nothing new. */
+function buildUpdateSourceRow(electronHost: NonNullable<ReturnType<typeof getElectronHost>>): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'pmd-update-pause pmd-update-source';
+  const title = document.createElement('div');
+  title.className = 'pmd-update-pause-status';
+  title.textContent = 'Update source';
+  const desc = document.createElement('div');
+  desc.className = 'pmd-update-pause-desc';
+  const controls = document.createElement('div');
+  controls.className = 'pmd-install-info-actions';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'pmd-update-source-input';
+  input.spellcheck = false;
+  input.setAttribute('aria-label', 'Update source (GitHub owner/repo)');
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'pmd-install-info-btn';
+  saveBtn.textContent = 'Use this source';
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'pmd-install-info-btn';
+  resetBtn.textContent = 'Reset to default';
+
+  const render = (state: { active: string; defaultSource: string; overridden: boolean }): void => {
+    input.placeholder = state.defaultSource;
+    input.value = state.overridden ? state.active : '';
+    resetBtn.hidden = !state.overridden;
+    desc.textContent = state.overridden
+      ? `Getting updates from github.com/${state.active} instead of this build's default (${state.defaultSource}).`
+      : `Getting updates from github.com/${state.defaultSource}. To follow another CardMirror release stream (for example your coach's builds), enter its GitHub repository as owner/repo.`;
+  };
+  const refresh = (): void => {
+    electronHost.getUpdateSource().then(render).catch(() => {
+      // Main process older than the renderer (dev hot-reload): no handler.
+      row.hidden = true;
+    });
+  };
+  const apply = (value: string): void => {
+    electronHost.setUpdateSource(value).then((result) => {
+      if (!result.ok) {
+        showToast(result.error);
+        return;
+      }
+      showToast(`Update source: ${result.active}. Use Check for updates to look now.`);
+      refresh();
+    }).catch((err: unknown) => {
+      showToast(`Couldn't change the update source: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  };
+  saveBtn.addEventListener('click', () => apply(input.value));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      apply(input.value);
+    }
+  });
+  resetBtn.addEventListener('click', () => apply(''));
+
+  controls.appendChild(input);
+  controls.appendChild(saveBtn);
+  controls.appendChild(resetBtn);
+  row.appendChild(title);
+  row.appendChild(desc);
+  row.appendChild(controls);
+  refresh();
+  return row;
 }
 
 /** Crash-dumps section — its own header between About this install and

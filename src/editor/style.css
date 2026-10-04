@@ -6328,6 +6328,18 @@ html.pmd-nav-flat .pmd-nav-type-analytic:hover .pmd-nav-label {
   font-size: 0.8rem;
   color: var(--pmd-c-text-muted);
 }
+.pmd-update-source-input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  background: var(--pmd-c-bg);
+  border: 1px solid var(--pmd-c-border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  color: var(--pmd-c-text);
+}
+.pmd-update-source .pmd-install-info-actions { align-self: stretch; }
 
 .pmd-install-info-actions {
   display: flex;

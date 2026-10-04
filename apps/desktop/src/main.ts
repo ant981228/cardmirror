@@ -43,6 +43,15 @@ import {
   readAccessibilityTreeEnabled,
   writeAccessibilityTreeEnabled,
 } from './accessibility-pref.js';
+import {
+  formatUpdateSource,
+  parseUpdateSource,
+  readBakedUpdateSource,
+  readUpdateSourceOverride,
+  sameUpdateSource,
+  writeUpdateSourceOverride,
+  type UpdateSource,
+} from './update-source.js';
 import { installMacAccessibilitySuppression } from './ax-suppress-mac.js';
 import { resolveCmirCandidates, isWithin } from './transclusion-path.js';
 import {
@@ -3085,9 +3094,61 @@ ipcMain.handle(
 // `app.isPackaged`) the check is a no-op so we don't 404 against a
 // missing config file. Failures are logged, never alerted.
 
-/** Public GitHub Releases page — fallback link surfaced in update
- *  dialogs so users always have a manual-download path. */
-const RELEASES_URL = 'https://github.com/ant981228/cardmirror/releases';
+/** The release stream this install follows: the user's override from
+ *  Settings → General, else the repo baked into `app-update.yml` at build
+ *  time (see update-source.ts). */
+function activeUpdateSource(): UpdateSource {
+  return (
+    readUpdateSourceOverride(app.getPath('userData')) ??
+    readBakedUpdateSource(process.resourcesPath)
+  );
+}
+
+/** Point electron-updater at the active stream. Without an override it
+ *  keeps reading `app-update.yml` as before; an override (or clearing one
+ *  set earlier this session) swaps the feed in place. */
+let updateFeedOverridden = false;
+function applyUpdateSource(): void {
+  const override = readUpdateSourceOverride(app.getPath('userData'));
+  if (!override && !updateFeedOverridden) return;
+  const src = override ?? readBakedUpdateSource(process.resourcesPath);
+  autoUpdater.setFeedURL({ provider: 'github', owner: src.owner, repo: src.repo });
+  updateFeedOverridden = override !== null;
+}
+
+/** Public GitHub Releases page of the active stream — fallback link
+ *  surfaced in update dialogs so users always have a manual-download
+ *  path. */
+function releasesUrl(): string {
+  return `https://github.com/${formatUpdateSource(activeUpdateSource())}/releases`;
+}
+
+/** Settings → General "Update source". `get` reports the active stream,
+ *  whether it's an override, and the build's own default; `set` takes
+ *  `owner/repo` or a GitHub URL (blank, or the build default, clears the
+ *  override) and re-points the updater immediately. */
+ipcMain.handle('host:get-update-source', () => {
+  const baked = readBakedUpdateSource(process.resourcesPath);
+  const override = readUpdateSourceOverride(app.getPath('userData'));
+  return {
+    active: formatUpdateSource(override ?? baked),
+    defaultSource: formatUpdateSource(baked),
+    overridden: override !== null,
+  };
+});
+ipcMain.handle('host:set-update-source', (_event, input: unknown) => {
+  const text = typeof input === 'string' ? input.trim() : '';
+  const baked = readBakedUpdateSource(process.resourcesPath);
+  let next: UpdateSource | null = null;
+  if (text) {
+    next = parseUpdateSource(text);
+    if (!next) return { ok: false as const, error: 'Enter a GitHub repository as owner/repo or its URL.' };
+    if (sameUpdateSource(next, baked)) next = null;
+  }
+  writeUpdateSourceOverride(app.getPath('userData'), next);
+  if (app.isPackaged && !LITE_BUILD) applyUpdateSource();
+  return { ok: true as const, active: formatUpdateSource(next ?? baked) };
+});
 
 /** The user manual (MANUAL.md), rendered on GitHub. Linked from the Help
  *  menu so the full guide is one click away. */
@@ -3153,7 +3214,7 @@ function showUpdateAvailableDialog(info: { version: string }): void {
     })
     .then((result) => {
       if (result.response === openIdx) {
-        void shell.openExternal(`${RELEASES_URL}/tag/v${info.version}`);
+        void shell.openExternal(`${releasesUrl()}/tag/v${info.version}`);
       }
     });
 }
@@ -3238,7 +3299,7 @@ function runUpdateCheck(opts: UpdateCheckOpts): void {
       type: 'warning',
       title: "Couldn't check for updates",
       message: "Couldn't check for updates.",
-      detail: `${err.message || String(err)}\n\nYou can grab the latest build manually from:\n${RELEASES_URL}`,
+      detail: `${err.message || String(err)}\n\nYou can grab the latest build manually from:\n${releasesUrl()}`,
     });
   };
 
@@ -3540,7 +3601,7 @@ ipcMain.handle('host:update-chip-action', () => {
         return;
       }
       // Staged artifact vanished — degrade to the release page.
-      void shell.openExternal(`${RELEASES_URL}/tag/v${updateChip.version}`);
+      void shell.openExternal(`${releasesUrl()}/tag/v${updateChip.version}`);
       return;
     }
     // (silent, forceRunAfter): the NSIS installer runs with no UI and
@@ -3549,7 +3610,7 @@ ipcMain.handle('host:update-chip-action', () => {
     // install feel.
     autoUpdater.quitAndInstall(true, true);
   } else {
-    void shell.openExternal(`${RELEASES_URL}/tag/v${updateChip.version}`);
+    void shell.openExternal(`${releasesUrl()}/tag/v${updateChip.version}`);
   }
 });
 
@@ -3562,6 +3623,7 @@ function startAutoUpdate(): void {
   // (mac-swap-update.ts) on the chip click. autoDownload stays off on
   // mac (we trigger the download ourselves after the writability
   // check); install-on-quit is Windows/Linux-only.
+  applyUpdateSource();
   const isMac = process.platform === 'darwin';
   autoUpdater.autoDownload = !isMac;
   autoUpdater.autoInstallOnAppQuit = !isMac;
