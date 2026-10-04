@@ -27,6 +27,13 @@ export interface UpdateSource {
   repo: string;
 }
 
+/** A user-chosen stream, pinned to the public key its releases are signed
+ *  with (SPKI DER, base64). Updates from it must verify against this key;
+ *  a key change is never accepted silently. */
+export interface PinnedUpdateSource extends UpdateSource {
+  spki: string;
+}
+
 /** The official CardMirror release stream — used when the packaged app has
  *  no readable `app-update.yml` (it always should). */
 export const DEFAULT_UPDATE_SOURCE: UpdateSource = { owner: 'ant981228', repo: 'cardmirror' };
@@ -60,19 +67,22 @@ export function sameUpdateSource(a: UpdateSource, b: UpdateSource): boolean {
 }
 
 /** The user's override, or null (follow the baked source) on a missing,
- *  corrupt, or wrong-shaped file. */
-export function readUpdateSourceOverride(userDataDir: string): UpdateSource | null {
+ *  corrupt, or wrong-shaped file — including one with no pinned key, which
+ *  an unsigned stream can't have. */
+export function readUpdateSourceOverride(userDataDir: string): PinnedUpdateSource | null {
   try {
-    const parsed = JSON.parse(readFileSync(join(userDataDir, UPDATE_SOURCE_FILE), 'utf8')) as Partial<UpdateSource>;
+    const parsed = JSON.parse(readFileSync(join(userDataDir, UPDATE_SOURCE_FILE), 'utf8')) as Partial<PinnedUpdateSource>;
     if (typeof parsed?.owner !== 'string' || typeof parsed?.repo !== 'string') return null;
-    return parseUpdateSource(`${parsed.owner}/${parsed.repo}`);
+    if (typeof parsed.spki !== 'string' || !/^[A-Za-z0-9+/=]{40,200}$/.test(parsed.spki)) return null;
+    const src = parseUpdateSource(`${parsed.owner}/${parsed.repo}`);
+    return src ? { ...src, spki: parsed.spki } : null;
   } catch {
     return null;
   }
 }
 
 /** Persist the override (atomic temp + rename); null removes it. */
-export function writeUpdateSourceOverride(userDataDir: string, src: UpdateSource | null): void {
+export function writeUpdateSourceOverride(userDataDir: string, src: PinnedUpdateSource | null): void {
   const target = join(userDataDir, UPDATE_SOURCE_FILE);
   if (!src) {
     rmSync(target, { force: true });
@@ -80,7 +90,7 @@ export function writeUpdateSourceOverride(userDataDir: string, src: UpdateSource
   }
   mkdirSync(userDataDir, { recursive: true });
   const tmp = `${target}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ owner: src.owner, repo: src.repo }));
+  writeFileSync(tmp, JSON.stringify({ owner: src.owner, repo: src.repo, spki: src.spki }));
   renameSync(tmp, target);
 }
 

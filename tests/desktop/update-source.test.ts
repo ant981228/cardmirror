@@ -45,9 +45,11 @@ describe('update source override', () => {
     expect(readUpdateSourceOverride(dir)).toBeNull();
   });
 
-  it('round-trips, and null clears it', () => {
-    writeUpdateSourceOverride(dir, { owner: 'brian-cai', repo: 'cardmirror' });
-    expect(readUpdateSourceOverride(dir)).toEqual({ owner: 'brian-cai', repo: 'cardmirror' });
+  const SPKI = 'MCowBQYDK2VwAyEAdO1qH+c7c/2+RpQqdyAsoeYeJWptaOkQvmoiDQjfins=';
+
+  it('round-trips with its pinned key, and null clears it', () => {
+    writeUpdateSourceOverride(dir, { owner: 'brian-cai', repo: 'cardmirror', spki: SPKI });
+    expect(readUpdateSourceOverride(dir)).toEqual({ owner: 'brian-cai', repo: 'cardmirror', spki: SPKI });
     writeUpdateSourceOverride(dir, null);
     expect(existsSync(path.join(dir, UPDATE_SOURCE_FILE))).toBe(false);
     expect(readUpdateSourceOverride(dir)).toBeNull();
@@ -58,7 +60,11 @@ describe('update source override', () => {
     expect(readUpdateSourceOverride(dir)).toBeNull();
     writeFileSync(path.join(dir, UPDATE_SOURCE_FILE), JSON.stringify({ owner: 'x' }));
     expect(readUpdateSourceOverride(dir)).toBeNull();
-    writeFileSync(path.join(dir, UPDATE_SOURCE_FILE), JSON.stringify({ owner: 'a b', repo: 'c' }));
+    writeFileSync(path.join(dir, UPDATE_SOURCE_FILE), JSON.stringify({ owner: 'a b', repo: 'c', spki: SPKI }));
+    expect(readUpdateSourceOverride(dir)).toBeNull();
+    // A source with no pinned key is never followed: an unsigned stream
+    // can't be an override.
+    writeFileSync(path.join(dir, UPDATE_SOURCE_FILE), JSON.stringify({ owner: 'brian-cai', repo: 'cardmirror' }));
     expect(readUpdateSourceOverride(dir)).toBeNull();
   });
 });

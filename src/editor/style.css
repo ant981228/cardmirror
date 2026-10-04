@@ -6340,6 +6340,8 @@ html.pmd-nav-flat .pmd-nav-type-analytic:hover .pmd-nav-label {
   color: var(--pmd-c-text);
 }
 .pmd-update-source .pmd-install-info-actions { align-self: stretch; }
+/* A non-default update source is worth noticing every time Settings opens. */
+.pmd-update-source-overridden .pmd-update-pause-desc { color: var(--pmd-c-warning); }
 
 .pmd-install-info-actions {
   display: flex;

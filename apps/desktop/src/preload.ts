@@ -142,10 +142,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       active: string;
       defaultSource: string;
       overridden: boolean;
+      fingerprint: string | null;
+      ownFingerprint: string | null;
     }>,
   setUpdateSource: (input: string) =>
     ipcRenderer.invoke('host:set-update-source', input) as Promise<
-      { ok: true; active: string } | { ok: false; error: string }
+      { ok: true; active: string } | { ok: false; error: string; cancelled?: boolean }
     >,
   getUpdateChipState: () => ipcRenderer.invoke('host:update-chip-state'),
   updateChipAction: () => ipcRenderer.invoke('host:update-chip-action'),

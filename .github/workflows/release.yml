@@ -310,3 +310,25 @@ jobs:
           fi
           echo "uploading: ${files[@]}"
           gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
+
+      - name: Sign release artifacts
+        # Optional for this repo: without an UPDATE_SIGNING_KEY secret this
+        # does nothing and releases work exactly as before. With one, every
+        # installer / update file gets a detached Ed25519 signature
+        # (`<file>.sig`) and the release carries `update-signing-key.pub`, so
+        # people who point Update source at this repository can pin its key.
+        # A repo that sets the REQUIRE_UPDATE_SIGNING variable to "true"
+        # fails here instead of publishing unsigned.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          REQUIRE_UPDATE_SIGNING: ${{ vars.REQUIRE_UPDATE_SIGNING }}
+        run: |
+          out=()
+          while IFS= read -r line; do out+=("$line"); done < <(node apps/desktop/scripts/sign-release.cjs "${GITHUB_REF_NAME#v}")
+          if [ ${#out[@]} -eq 0 ]; then
+            echo "Release not signed (no UPDATE_SIGNING_KEY)."
+            exit 0
+          fi
+          gh release upload "${GITHUB_REF_NAME}" "${out[@]}" --clobber

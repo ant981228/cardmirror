@@ -2069,13 +2069,22 @@ function buildUpdateSourceRow(electronHost: NonNullable<ReturnType<typeof getEle
   resetBtn.className = 'pmd-install-info-btn';
   resetBtn.textContent = 'Reset to default';
 
-  const render = (state: { active: string; defaultSource: string; overridden: boolean }): void => {
+  const render = (state: {
+    active: string;
+    defaultSource: string;
+    overridden: boolean;
+    fingerprint: string | null;
+    ownFingerprint: string | null;
+  }): void => {
     input.placeholder = state.defaultSource;
     input.value = state.overridden ? state.active : '';
     resetBtn.hidden = !state.overridden;
+    row.classList.toggle('pmd-update-source-overridden', state.overridden);
     desc.textContent = state.overridden
-      ? `Getting updates from github.com/${state.active} instead of this build's default (${state.defaultSource}).`
-      : `Getting updates from github.com/${state.defaultSource}. To follow another CardMirror release stream (for example your coach's builds), enter its GitHub repository as owner/repo.`;
+      ? `\u26a0 Getting updates from github.com/${state.active} (key ${state.fingerprint ?? '?'}) instead of this build's default (${state.defaultSource}). Only keep this if you trust whoever runs it.`
+      : `Getting updates from github.com/${state.defaultSource}.` +
+        (state.ownFingerprint ? ` This build's release key: ${state.ownFingerprint}.` : '') +
+        ' To follow another signed CardMirror release stream (for example your coach\u2019s builds), enter its GitHub repository as owner/repo; you\u2019ll be asked to confirm its key code.';
   };
   const refresh = (): void => {
     electronHost.getUpdateSource().then(render).catch(() => {
@@ -2086,7 +2095,8 @@ function buildUpdateSourceRow(electronHost: NonNullable<ReturnType<typeof getEle
   const apply = (value: string): void => {
     electronHost.setUpdateSource(value).then((result) => {
       if (!result.ok) {
-        showToast(result.error);
+        if (!result.cancelled) showToast(result.error);
+        refresh();
         return;
       }
       showToast(`Update source: ${result.active}. Use Check for updates to look now.`);
