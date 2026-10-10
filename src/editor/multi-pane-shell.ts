@@ -361,7 +361,9 @@ function scheduleAutosaveForRecord(record: DocRecord): void {
  * surface. Scroll does NOT live in the retained view: the scroller
  * is the slot's shared `.pmd-pane-body`, which clamps to 0 the
  * moment the editor detaches — so the viewport is carried per-doc
- * via `savedScrollTop` across detach / mount instead.
+ * via `savedScrollTop` across detach / mount instead. The outline is
+ * the same story one column over (shared `.pmd-multi-nav-body`,
+ * carried via `savedNavScrollTop`).
  */
 interface DocRecord {
   uid: string;
@@ -386,6 +388,11 @@ interface DocRecord {
    *  clamps it against the doc's height). 0 for fresh docs, so a
    *  doc opened on top of another starts at the top. */
   savedScrollTop: number;
+  /** Same as `savedScrollTop`, for the slot's outline scroller
+   *  (`.pmd-multi-nav-body`) — without it, switching docs in a slot
+   *  dropped the outline back to the top (or to wherever the other
+   *  doc's outline happened to clamp). */
+  savedNavScrollTop: number;
   navPanel: NavigationPanel;
   /** The slot this record currently lives in — maintained by
    *  `Slot.push`. The record's dispatchTransaction refreshes THIS
@@ -1135,6 +1142,8 @@ class Slot {
       this.bodyEl.removeChild(rec.editorEl);
     }
     if (rec.navEl.parentElement === this.navBodyEl) {
+      // Same capture-before-detach as the editor scroller above.
+      this.captureNavScroll();
       this.navBodyEl.removeChild(rec.navEl);
     }
     // Closing the last doc in a slot needs to drop that filename
@@ -1154,6 +1163,7 @@ class Slot {
     // browser clamps against.
     this.bodyEl.scrollTop = rec.savedScrollTop;
     this.navBodyEl.appendChild(rec.navEl);
+    this.restoreNavScroll();
     this.chipNameEl.textContent = rec.filename;
     this.refreshChip();
     this.refreshWordCount();
@@ -1166,6 +1176,24 @@ class Slot {
     // multi-pane mode — refresh it on every mount so opening a new
     // doc in a non-focused slot still updates the title bar.
     refreshWindowTitle();
+  }
+
+  /** Record the visible doc's outline scroll offset. A hidden section
+   *  reads 0 whatever its real offset was, so it keeps the last value
+   *  captured while it showed. */
+  captureNavScroll(): void {
+    const rec = this.visible;
+    if (!rec || this.navSectionEl.hidden) return;
+    rec.savedNavScrollTop = this.navBodyEl.scrollTop;
+  }
+
+  /** Put the visible doc's outline back where `captureNavScroll` left
+   *  it. A no-op while the section is hidden — `reconcileNavRail`
+   *  calls this again once it shows. */
+  restoreNavScroll(): void {
+    const rec = this.visible;
+    if (!rec) return;
+    this.navBodyEl.scrollTop = rec.savedNavScrollTop;
   }
 
   /** Update the chip's stack-dropdown trigger visibility based on
@@ -1898,9 +1926,15 @@ class MultiPaneShell {
    *  individually closed (`navHidden`). */
   reconcileNavRail(): void {
     const visible: Slot[] = [];
+    const reshown: Slot[] = [];
     for (const id of SLOT_IDS) {
       const slot = this.slots[id];
       const show = this.slotShown(slot) && !slot.navHidden;
+      // Hiding a section zeroes its scroller, so carry the outline's
+      // place across a hide / show (outline toggle, expand mode, a doc
+      // sent to an empty slot) the same way a doc switch does.
+      if (show && slot.navSectionEl.hidden) reshown.push(slot);
+      if (!show) slot.captureNavScroll();
       slot.navSectionEl.hidden = !show;
       if (show) visible.push(slot);
     }
@@ -1935,6 +1969,9 @@ class MultiPaneShell {
     if (anyDocOpen && settings.get('navPaneVisible') === railEmpty) {
       settings.set('navPaneVisible', !railEmpty);
     }
+    // After the rail, the flex weights and the `pmd-nav-hidden` class are
+    // settled, so the offset clamps against the section's real height.
+    for (const slot of reshown) slot.restoreNavScroll();
     this.scheduleSyncAllCardIntrinsicWidths();
   }
 
@@ -3806,6 +3843,7 @@ function buildDocRecord(
     dragSurface,
     owner: slot, // re-pointed by Slot.push on every move
     savedScrollTop: 0,
+    savedNavScrollTop: 0,
 
     heavyUpdateTimer: null,
     journalTimer: null,
