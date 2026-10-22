@@ -82,6 +82,79 @@ describe('countReadAloudSplit', () => {
   });
 });
 
+describe('words split across formatting runs', () => {
+  const hl = (color = 'yellow') => m['highlight']!.create({ color });
+  const body = (...runs: PMNode[]) =>
+    n['doc']!.create(null, [
+      n['card']!.create(null, [
+        n['tag']!.create({ id: 'T' }, schema.text('T')),
+        n['card_body']!.create(null, runs),
+      ]),
+    ]);
+  const bodyWords = (doc: PMNode) => countReadAloudSplit(doc).body;
+
+  it('a word whose underline ends mid-word counts once', () => {
+    const doc = body(
+      schema.text('re', [m['underline_mark']!.create(), hl()]),
+      schema.text('highlight', [hl()]),
+    );
+    expect(bodyWords(doc)).toBe(1);
+  });
+
+  it('a word whose highlight color changes mid-word counts once', () => {
+    const doc = body(schema.text('Ameri', [hl('yellow')]), schema.text('ca', [hl('green')]));
+    expect(bodyWords(doc)).toBe(1);
+  });
+
+  it('partial-word highlighting still counts each highlighted fragment', () => {
+    const doc = body(
+      schema.text('U', [hl()]),
+      schema.text('nited '),
+      schema.text('S', [hl()]),
+      schema.text('tates of '),
+      schema.text('A', [hl()]),
+      schema.text('merica'),
+    );
+    expect(bodyWords(doc)).toBe(3);
+  });
+
+  it('a word split between highlighted and shaded counts only the unlocked piece', () => {
+    const doc = body(
+      schema.text('Ame', [hl()]),
+      schema.text('rica', [hl(), m['shading']!.create()]),
+    );
+    expect(bodyWords(doc)).toBe(1);
+  });
+
+  it('a cite word half cite-marked, half highlighted counts once in total', () => {
+    const doc = n['doc']!.create(null, [
+      n['card']!.create(null, [
+        n['tag']!.create({ id: 'T' }, schema.text('T')),
+        n['cite_paragraph']!.create(null, [
+          schema.text('Bro', [m['cite_mark']!.create()]),
+          schema.text('oks', [hl()]),
+        ]),
+      ]),
+    ]);
+    const counts = countReadAloudSplit(doc);
+    // 1 tag word + the single cite word, kept in the first piece's bucket.
+    expect(counts).toEqual({ body: 0, other: 2 });
+  });
+
+  it('a space at the run boundary keeps two words apart', () => {
+    const doc = body(schema.text('foo ', [hl()]), schema.text('bar', [hl('green')]));
+    expect(bodyWords(doc)).toBe(2);
+  });
+
+  it('the split-word fix carries through to read time', () => {
+    const doc = body(
+      schema.text('re', [m['underline_mark']!.create(), hl()]),
+      schema.text('highlight', [hl()]),
+    );
+    expect(readTimeSeconds({ body: bodyWords(doc), other: 0 }, { wpm: 60 })).toBe(1);
+  });
+});
+
 describe('countCards', () => {
   function cardDoc(): PMNode {
     const card = (id: string, text: string) =>

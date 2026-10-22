@@ -18,6 +18,12 @@
  * Shading (the D2D2D2 protected-highlight via `HighlightToBackgroundColor`)
  * is excluded — that text is reference-style and not read aloud.
  *
+ * Words are counted across text runs, not per run. When some formatting
+ * change falls inside a word (for example, underlining ending mid-highlighting, or a highlight color changing), 
+ * it's now counted as a single word. The two pieces are counted in the first piece's bucket.
+ * An uncounted piece WILL break the join, so partial-word highlighting
+ * (`*U*nited *S*tates`) still counts each highlighted fragment properly.
+ *
  * Readers (settings `ReaderConfig`) carry a required `wpm` and an
  * optional `tagWpm`: with `tagWpm` set, `body` words read at `wpm` and
  * `other` words at `tagWpm`; left blank, `wpm` covers everything —
@@ -76,17 +82,37 @@ function countWholeDoc(doc: PMNode): ReadAloudCounts {
 function countRange(doc: PMNode, lo: number, hi: number): ReadAloudCounts {
   const counts: ReadAloudCounts = { body: 0, other: 0 };
   if (lo >= hi) return counts;
+  // A formatting change inside a word splits it across two text runs;
+  // when both pieces are read aloud it still counts as a single word.
+  // To spot that, the script remembers whether the preceeding run was counted and
+  // whether it ended mid-word. An unread run in between does clear this, so
+  // in a phrase like "*U*nited *S*tates" (only U and S highlighted), U and S still
+  // count as two words.
+  let prevCounted = false;
+  let prevEndsMidWord = false;
   doc.nodesBetween(lo, hi, (node, pos, parent) => {
-    if (!node.isText) return true;
+    if (!node.isText) {
+      prevCounted = false; // new block, hard_break, etc.: words will never join across it
+      return true;
+    }
     if (!parent) return false;
     const bucket = readAloudBucket(node, parent);
-    if (!bucket) return false;
+    if (!bucket) {
+      prevCounted = false; // an unread piece breaks any word join
+      return false;
+    }
     const text = node.text ?? '';
     // Slice the text to the [lo, hi] window.
     const start = Math.max(0, lo - pos);
     const end = Math.min(text.length, hi - pos);
     if (end <= start) return false;
-    counts[bucket] += countWords(text.slice(start, end));
+    const slice = text.slice(start, end);
+    const words = countWords(slice);
+    // Continuing the previous run's word: that word is already counted there.
+    const continuesWord = prevCounted && prevEndsMidWord && !/^\s/.test(slice);
+    counts[bucket] += continuesWord && words > 0 ? words - 1 : words;
+    prevCounted = words > 0;
+    prevEndsMidWord = !/\s$/.test(slice);
     return false;
   });
   return counts;
