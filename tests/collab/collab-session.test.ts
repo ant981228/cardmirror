@@ -1058,6 +1058,45 @@ describe('large documents (413 avoidance via chunked updates)', () => {
   }, 25_000);
 });
 
+describe('oversized single-op updates', () => {
+  it('P15b: an indivisible single-op update over the cap posts once instead of re-chunking forever', async () => {
+    const mock = await startRoomsMock();
+    const client = new RoomsClient({ baseUrl: () => mock.url, token: () => mock.token });
+    try {
+      const { session: host, shareCode } = await CollabSession.host({
+        pmDoc: simpleDoc('small seed'),
+        client,
+        flushMs: 40,
+        minBackoffMs: 30,
+        maxBackoffMs: 60,
+        updateByteLimit: 400,
+      });
+      const roomId = decodeShareCode(shareCode)!.roomId;
+      const hostView = mkView(host.plugins());
+      await settle();
+      host.start();
+      await sleep(150);
+      const before = mock.updateCount(roomId);
+      // One map `set` is ONE op (one counter): exportChunks cannot halve
+      // it, so the 2 KB blob stays over the 400-byte cap. Before the
+      // `chunked` guard the drain re-split it into itself forever.
+      host.loroDoc.getMap('meta').set('blob', 'X'.repeat(2000));
+      host.loroDoc.commit();
+      host.flush();
+      await sleep(400);
+      expect(mock.updateCount(roomId) - before).toBe(1);
+      // The queue drained and the session is not stuck.
+      host.flush();
+      await sleep(150);
+      expect(mock.updateCount(roomId) - before).toBe(1);
+      await host.stop();
+      hostView.destroy();
+    } finally {
+      await mock.close();
+    }
+  }, 15_000);
+});
+
 describe('delivery-cursor discipline (shed frames must not create gaps)', () => {
   it('P16: a shed push is recovered by catch-up even when later frames arrive', async () => {
     const mock = await startRoomsMock();

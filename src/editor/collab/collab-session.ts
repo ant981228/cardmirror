@@ -271,6 +271,10 @@ export class CollabSession {
     /** The drain's encryption of `blob`, kept so a retry and — the point
      *  — the unload path can post it without waiting on WebCrypto. */
     encrypted?: Uint8Array;
+    /** Produced by chunkQueueHead. A chunk is never re-split: a single
+     *  op cannot be halved, and re-chunking one into itself spun the
+     *  drain forever (synchronously — a 100% CPU wedge, 2026-11-01). */
+    chunked?: boolean;
   }[] = [];
   private sending = false;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
@@ -1014,10 +1018,13 @@ export class CollabSession {
       // those merges them back into the oversized blob (chunk → merge →
       // chunk, forever).
       this.coalesceQueue();
+      // Backstop against any re-chunk loop: a drain may split heads at
+      // most this many times before oversized entries just get posted.
+      let chunkAttempts = 0;
       while (this.outQueue.length > 0) {
         const entry = this.outQueue[0]!;
         try {
-          if (entry.blob.length > this.updateByteLimit) {
+          if (entry.blob.length > this.updateByteLimit && !entry.chunked && chunkAttempts++ < 64) {
             // Oversized diff (huge paste, or the audit's full-history
             // repost on a big doc): split it into cap-sized update
             // chunks and keep draining.
@@ -1079,7 +1086,13 @@ export class CollabSession {
             this.sendRetryMs = 30_000;
             this.notifyAuthRejected();
           }
-          if (err instanceof RoomsError && err.status === 413 && entry.blob.length > 1024) {
+          if (
+            err instanceof RoomsError &&
+            err.status === 413 &&
+            entry.blob.length > 1024 &&
+            !entry.chunked &&
+            chunkAttempts++ < 64
+          ) {
             // Server-side cap disagreement (backstop for the proactive
             // size check above): force a re-chunk by treating the
             // server's cap as authoritative for this entry.
@@ -1758,6 +1771,7 @@ export class CollabSession {
       blob,
       version: i === chunks.length - 1 ? entry.version : entry.from,
       from: entry.from,
+      chunked: true,
     }));
     this.outQueue.splice(0, 1, ...replacements);
     this.emitStatus();
