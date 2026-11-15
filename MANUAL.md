@@ -2991,10 +2991,11 @@ How things look. None of these change the file — only your view (see
   the body text color whatever color the words are, including the
   underline of hats and blocks. On draws it in the text's color, the way
   Word does. Display-only; the file and exports are unchanged.
-  To give underlines their own color instead (say, yellow lines under
-  blue text), pick one under Accessibility → Color overrides → Document
-  text → Underline. It recolors only the line of underlined, emphasized,
-  and underlined-cite text, never the words, and is display-only too.
+  To give the underlines in analytics their own color (say, yellow
+  lines under blue analytic text), pick one under Accessibility → Color
+  overrides → Document text → Analytic underline. It recolors only the
+  line, never the words, leaves underlines outside analytics alone, and
+  is display-only too.
 - **Body font** — the editor's content font, including dyslexia-friendly
   options.
 - **Line spacing** — the line-height multiplier, per paragraph type.
