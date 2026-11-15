@@ -5,6 +5,20 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Added: `dragSelectsWholeWords` setting (single-click drag word snap is optional)
+
+A single-click drag upgrades from character to word granularity once the
+pointer leaves the word the drag started in (Word's "automatically select
+entire word"), so a drag could not end mid-word without backing up toward
+the anchor. The new toggle (Settings → General → Editor behavior, on by
+default) gates that upgrade in `extendActiveEndTo`: when off, the dynamic
+(single-click) branch dispatches exactly `anchor.point..activePos`.
+Shift+click after a single click goes through the same branch, so it is
+exact too. Fixed-granularity anchors (double-click word drag, triple-click
+paragraph drag) and Ctrl/Cmd discontinuous selection are unchanged.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

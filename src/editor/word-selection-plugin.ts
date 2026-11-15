@@ -12,7 +12,9 @@
  *     anchor (the drag's extension direction) snaps word-by-word;
  *     moving back TOWARD the anchor is always character-precise —
  *     so a long word-by-word sweep terminates mid-word by simply
- *     backing up to the exact endpoint, in one gesture.
+ *     backing up to the exact endpoint, in one gesture. The
+ *     `dragSelectsWholeWords` setting turns the upgrade off (the
+ *     drag stays character-precise throughout).
  *   - Double click: anchor = the word unit (Layer 1 query with
  *     trailing-space absorption), granularity = word (fixed).
  *     Drag extends word-by-word; the anchor unit stays fully
@@ -52,6 +54,7 @@ import { Plugin, TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import { classifyChar } from './word-break.js';
+import { settings } from './settings.js';
 import {
   similarSelectionKey,
   setManualShadowSelection,
@@ -551,6 +554,11 @@ export function extendActiveEndTo(
   }
 
   // Dynamic granularity (single-click anchors).
+  if (!settings.get('dragSelectsWholeWords')) {
+    // Word snap turned off: exact anchor.point..activePos throughout.
+    dispatchSelection(view, anchor.point, activePos, anchor);
+    return;
+  }
   const W0 = anchor.W0;
   const insideW0 =
     W0 !== null && activePos >= W0.from && activePos <= W0.to;

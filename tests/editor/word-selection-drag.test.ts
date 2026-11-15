@@ -21,6 +21,7 @@ import {
   createPointAnchor,
   extendActiveEndTo,
 } from '../../src/editor/word-selection-plugin.js';
+import { settings } from '../../src/editor/settings.js';
 
 // One card body: "alpha bravo charlie delta echo"
 const TEXT = 'alpha bravo charlie delta echo';
@@ -149,5 +150,19 @@ describe('direction-based head during single-click drags', () => {
     expect(view.state.selection.$head.parent.inlineContent).toBe(true);
     expect(view.state.selection.$anchor.parent.inlineContent).toBe(true);
     view.destroy();
+  });
+
+  it('with dragSelectsWholeWords off, a drag past the first word stays character-precise', () => {
+    settings.set('dragSelectsWholeWords', false);
+    try {
+      const view = makeView();
+      const p = (o: number): number => bodyPos(view, o);
+      const anchor = createPointAnchor(view, p(2)); // mid-"alpha"
+      extendActiveEndTo(view, anchor, p(15)); // mid-"charlie", moving away
+      expect(sel(view)).toEqual([p(2), p(15)]);
+      view.destroy();
+    } finally {
+      settings.set('dragSelectsWholeWords', true);
+    }
   });
 });
