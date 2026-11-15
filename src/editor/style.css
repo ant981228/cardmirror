@@ -2176,11 +2176,13 @@ html.pmd-numbering-hidden #numbering-panel {
 .pmd-cite-underlined #ribbon .ribbon-cite-panel.style-preview .formatting-panel-cite {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-underline, currentColor);
 }
 
 #ribbon .ribbon-cite-panel.style-preview .formatting-panel-underline {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-underline, currentColor);
 }
 
 /* Emphasis preview: always underlined (matches .pmd-emphasis); the
@@ -2189,6 +2191,7 @@ html.pmd-numbering-hidden #numbering-panel {
 #ribbon .ribbon-cite-panel.style-preview .formatting-panel-emphasis {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-underline, currentColor);
   font-weight: normal;
   font-style: normal;
 }
@@ -3408,9 +3411,18 @@ code {
 /* StyleUnderline: just an underline. Per-style font size is driven
    by `--pmd-size-underline` (settings.displaySizes.underline), set
    on documentElement by `applyDisplaySizes` in index.ts. */
+/* Underline color: `--pmd-c-underline` is unset by default, so every
+   use falls back to what the line was before (the text color, or the
+   band foreground over a highlight). Accessibility -> Color overrides ->
+   "Underline" sets it, recoloring the line only, never the text.
+   Display-only. Hat / block heading underlines keep the heading color. */
+.ProseMirror u {
+  text-decoration-color: var(--pmd-c-underline, currentColor);
+}
 .pmd-underline {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-underline, currentColor);
   font-size: var(--pmd-run-font-size, var(--pmd-size-underline));
 }
 
@@ -3420,6 +3432,7 @@ code {
 .pmd-emphasis {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-underline, currentColor);
   font-size: var(--pmd-run-font-size, var(--pmd-size-emphasis));
 }
 
@@ -3490,6 +3503,7 @@ code {
 #editor.pmd-cite-underlined .pmd-cite {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-underline, currentColor);
 }
 
 #editor.pmd-underline-bold .pmd-underline {
@@ -3993,13 +4007,13 @@ body.pmd-override-shading [data-shading] {
   :is([data-highlight-band="light"], [data-shading-band="light"]) {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-c-band-fg-light);
+  text-decoration-color: var(--pmd-c-underline, var(--pmd-c-band-fg-light));
 }
 :is(.pmd-underline, .pmd-emphasis, #editor.pmd-cite-underlined .pmd-cite)
   :is([data-highlight-band="dark"], [data-shading-band="dark"]) {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-c-band-fg-dark);
+  text-decoration-color: var(--pmd-c-underline, var(--pmd-c-band-fg-dark));
 }
 
 /* Underlines follow font color (Appearance → Document typography; OFF by
@@ -12892,6 +12906,7 @@ html.pmd-undertag-bold .pmd-pane-editor .pmd-undertag-mark {
 }
 html.pmd-cite-underlined .pmd-pane-editor .pmd-cite {
   text-decoration: underline;
+  text-decoration-color: var(--pmd-c-underline, currentColor);
 }
 html.pmd-underline-bold .pmd-pane-editor .pmd-underline {
   font-weight: bold;
