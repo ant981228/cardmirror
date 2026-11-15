@@ -3019,6 +3019,8 @@ How things look. None of these change the file — only your view (see
 - **Format nav pane entries by type** — style navigation entries by
   heading level and type (on), or as a uniform list where only
   indentation shows hierarchy (off).
+- **Nav pane text size (%)** - make the text of navigation-pane entries
+  larger or smaller, from 50 to 200 percent of the default size.
 - **Cite preview on hover** — show a card's cite-formatted text beside its
   navigation-pane entry when you hover.
 - **Flashcards-due dot** — show a red dot on the ribbon's Manage

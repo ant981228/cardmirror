@@ -2940,6 +2940,13 @@ function applyFormatNavPaneByType(on: boolean): void {
 }
 applyFormatNavPaneByType(settings.get('formatNavPaneByType'));
 
+/** Apply the `navFontScalePct` setting: the nav-entry font sizes in
+ *  `style.css` multiply by `--pmd-nav-font-scale`. */
+function applyNavFontScale(pct: number): void {
+  document.documentElement.style.setProperty('--pmd-nav-font-scale', String(pct / 100));
+}
+applyNavFontScale(settings.get('navFontScalePct'));
+
 // Speech-doc buttons — shown in multi-doc / multi-window modes
 // (CSS-gated; hidden otherwise). All four route through the ctx
 // commands. The new-speech button uses ribbonContext directly
@@ -4147,6 +4154,7 @@ settings.subscribe((s) => {
   }
   applyNavPaneVisible(s.navPaneVisible);
   applyFormatNavPaneByType(s.formatNavPaneByType);
+  applyNavFontScale(s.navFontScalePct);
   // Body zoom is NOT re-applied on settings change — it's per-editor and
   // transient, and `defaultZoomPct` only governs what NEW editors open at,
   // never re-zooms an already-open one. Chrome scale stays a synced global.
