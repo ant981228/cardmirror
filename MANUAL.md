@@ -882,7 +882,9 @@ Mouse selection mirrors Word too:
   paragraph at a time.
 - **Click and drag** selects by character — but once you drag past the
   first word it snaps up to selecting whole words (and back to characters
-  if you drag back inside that first word), again matching Word.
+  if you drag back inside that first word), again matching Word. To
+  select exactly what you drag over instead, turn off **Dragging selects
+  whole words** in Settings → General.
 - **Shift-click** extends the current selection to where you click, using
   whatever unit you last selected by: Shift-click after a double-click
   extends by word, after a triple-click by paragraph.
@@ -2776,6 +2778,11 @@ headers shown inside each tab.
   Redo still comes first whenever there is something to redo. Any key
   bound to Redo behaves this way (Mod-Y and Mod-Shift-Z by default; see
   Settings → Keyboard shortcuts). Off by default.
+- **Dragging selects whole words** — a click-and-drag that leaves the
+  word it started in snaps to whole words, like Word. Turn it off to
+  select exactly the characters you drag over, so a selection can start
+  or stop mid-word. Double-click and triple-click drags still go by word
+  and by paragraph. On by default.
 - **Read mode: keep entire cite** — when on, read mode shows the whole of
   any cite that has read-aloud text in it — qualifications, source, date
   and all — instead of only its cite-marked and highlighted words. A cite

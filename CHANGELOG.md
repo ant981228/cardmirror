@@ -5,6 +5,17 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **Dragging selects whole words can be turned off.** A click-and-drag
+  that leaves the word it started in snaps to whole words, so dragging
+  to the middle of "technology" selects the whole word. New setting
+  **Dragging selects whole words** (Settings → General, on by default):
+  turn it off and a drag selects exactly the characters you drag over.
+  Double-click drags still extend word by word.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed

@@ -1056,6 +1056,11 @@ export interface Settings {
    *  paste). Applies to every key bound to Redo. Off by default: Redo is
    *  plain Redo. */
   repeatWithModY: boolean;
+  /** Single-click drag (and shift+click after a single click) snaps to
+   *  whole words once it leaves the word it started in
+   *  (word-selection-plugin.ts). Off = character-precise throughout;
+   *  double- and triple-click drags are unaffected. On by default. */
+  dragSelectsWholeWords: boolean;
   /** When true, tint every run of card body text that falls AFTER a
    *  reading-position marker red, a visual record of what you didn't reach
    *  in a round. Bounded per-card; display-only (a decoration, never a doc
@@ -1990,6 +1995,7 @@ const DEFAULTS: Settings = {
   readModeShowBackground: false,
   readModeCopyVisible: true,
   repeatWithModY: false,
+  dragSelectsWholeWords: true,
   markUnreadAfterMarker: false,
   defaultZoomPct: 100,
   chromeScalePct: 100,
@@ -2633,6 +2639,16 @@ export const SETTING_METADATA: SettingMeta[] = [
     category: 'general',
     section: 'Editor behavior',
     aliases: ['repeat', 'repeat last action', 'mod-y', 'ctrl y', 'cmd y', 'word repeat', 'f4'],
+  },
+  {
+    key: 'dragSelectsWholeWords',
+    label: 'Dragging selects whole words',
+    description:
+      'Word-style drag selection. When on, a click-and-drag that leaves the word it started in snaps to whole words as you move away from the starting point (dragging back toward it is always exact). Turn it off to select exactly the characters you drag over, so a drag can start or stop in the middle of a word. Double-click drags still go word by word and triple-click drags paragraph by paragraph either way. On by default.',
+    kind: 'toggle',
+    category: 'general',
+    section: 'Editor behavior',
+    aliases: ['word selection', 'snap to word', 'select whole word', 'automatically select entire word', 'drag selection', 'mouse selection', 'character selection'],
   },
   // ─── General ────────────────────────────────────────────────────
   {
@@ -5120,6 +5136,7 @@ function sanitize(s: Settings): Settings {
     readModeShowBackground: !!s.readModeShowBackground,
     readModeCopyVisible: s.readModeCopyVisible !== false,
     repeatWithModY: !!s.repeatWithModY,
+    dragSelectsWholeWords: s.dragSelectsWholeWords === false ? false : true,
     markUnreadAfterMarker: !!s.markUnreadAfterMarker,
     // A legacy persisted `zoomPct` is deliberately ignored — live body
     // zoom is transient; documents open at this default.
