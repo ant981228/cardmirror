@@ -762,6 +762,11 @@ export interface Settings {
    *  hierarchy. Display-only; doesn't touch the underlying doc.
    *  Symmetric in single-doc and multi-pane layouts. */
   formatNavPaneByType: boolean;
+  /** Text size of nav pane entries, as a percentage of the built-in
+   *  size (50-200). Scales the entry text only; indentation and the
+   *  pane header are unchanged. Applied as the `--pmd-nav-font-scale`
+   *  CSS variable (see `applyNavFontScale`). */
+  navFontScalePct: number;
   /** Built-in countdown timer settings. (Panel visibility lives
    *  in `timer-state.ts`, not here — shared via BroadcastChannel
    *  so toggling the timer on in one window opens it in every
@@ -1918,6 +1923,7 @@ const DEFAULTS: Settings = {
   customColorOverrides: {},
   navPaneVisible: true,
   formatNavPaneByType: true,
+  navFontScalePct: 100,
   timerProfile: 'college',
   timerProfiles: {
     highSchool: { speechPresets: [3, 5, 8, 10], prepMinutes: 8 },
@@ -2361,6 +2367,11 @@ export interface SettingMeta {
   /** Floor for `kind: 'number'` editors — the input's `min` and the
    *  clamp applied on change. Defaults to 0 when unset. */
   min?: number;
+  /** Ceiling for `kind: 'number'` editors. Unbounded when unset. */
+  max?: number;
+  /** Spinner / arrow-key increment for `kind: 'number'` editors
+   *  (typed values need not be multiples). Defaults to 1. */
+  step?: number;
   /** Extra search terms for the command palette. The label often
    *  uses one name for a thing the user might search by another
    *  ("Theme" vs "dark mode", "Line spacing" vs "line height"); these
@@ -3502,6 +3513,19 @@ export const SETTING_METADATA: SettingMeta[] = [
     kind: 'toggle',
     category: 'appearance',
     section: 'Nav pane & indicators',
+  },
+  {
+    key: 'navFontScalePct',
+    label: 'Nav pane text size (%)',
+    description:
+      'Make the text of nav pane entries larger or smaller, as a percentage of the default size (50-200).',
+    kind: 'number',
+    category: 'appearance',
+    section: 'Nav pane & indicators',
+    min: 50,
+    max: 200,
+    step: 10,
+    aliases: ['sidebar font size', 'outline font size', 'nav font size'],
   },
   {
     key: 'showCitePreview',
@@ -5007,6 +5031,8 @@ function sanitize(s: Settings): Settings {
     navPaneVisible: s.navPaneVisible === false ? false : true,
     // Default-on: only an explicit `false` disables it.
     formatNavPaneByType: s.formatNavPaneByType === false ? false : true,
+    navFontScalePct:
+      typeof s.navFontScalePct === 'number' ? clamp(Math.round(s.navFontScalePct), 50, 200) : 100,
     timerProfile:
       s.timerProfile === 'highSchool' || s.timerProfile === 'pomodoro'
         ? s.timerProfile
