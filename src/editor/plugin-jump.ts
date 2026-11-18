@@ -1,39 +1,23 @@
 /**
  * Shared jump resolution for plugin provenance tokens — used by
  * api.jumpToSource (local window) and the inbound /jump host.
- * Resolution order per spec 4.3: heading UUID, then text anchor.
+ * Resolution is `resolveSourceRange`, shared with /replace and /insert-after.
  */
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
-import { collectHeadings } from './headings.js';
-import { resolveDescriptor } from './learn-anchor.js';
-import { inMirroredContent } from './plugin-source-range.js';
+import { resolveSourceRange } from './plugin-source-range.js';
 import { parseSourceToken, type SourcePayload } from './plugin-source-token.js';
 import { scrollToHeadingId } from './precise-scroll.js';
 import type { JumpResult } from './plugin-api.js';
 
 export function resolveJumpInView(view: EditorView, payload: SourcePayload): boolean {
-  const { doc } = view.state;
-  if (payload.headingId) {
-    const entry = collectHeadings(doc, { skipCite: true }).find(
-      (h) => h.id === payload.headingId,
-    );
-    if (entry) {
-      select(view, entry.pos + 1, payload.headingId);
-      return true;
-    }
-  }
-  if (payload.anchor) {
-    const r = resolveDescriptor(doc, payload.anchor);
-    // Never land inside a `self_ref` or `transclusion_ref`: their children
-    // are read-only mirrored text, so a match there is a coincidence, not
-    // the real source. Treat it as unresolved and fall through to not-found.
-    if (r && !inMirroredContent(doc, r.from)) {
-      select(view, r.from);
-      return true;
-    }
-  }
-  return false;
+  // The same resolution /replace and /insert-after use, so a jump always
+  // lands on the line those routes would write.
+  const range = resolveSourceRange(view.state.doc, payload);
+  if (!range) return false;
+  const id = view.state.doc.resolve(range.from).parent.attrs['id'];
+  select(view, range.from, payload.headingId && id === payload.headingId ? id : undefined);
+  return true;
 }
 
 function select(view: EditorView, pos: number, headingId?: string): void {

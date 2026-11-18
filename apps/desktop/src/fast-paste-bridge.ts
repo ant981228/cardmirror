@@ -667,13 +667,16 @@ async function broadcastReplace(
     // that silently stops accepting edits.
     return { ok: false, error: 'internal' };
   }
-  // Precedence: a real complaint from any window beats the absence of
-  // an answer. `not-mine` is per-window bookkeeping (this window does
-  // not hold the token's doc) and never reaches the wire.
-  // `body-text` sits ahead of `not-found`: a window that holds the doc
-  // and refuses the target is a definite answer about that target, while
-  // another window's `not-found` is only the absence of one.
-  for (const code of ['bad-request', 'doc-readonly', 'body-text', 'not-found'] as const) {
+  // Precedence: `internal` leads, because the renderer sends it from a
+  // catch-all that also covers a throw after the edit landed; any other
+  // code would tell the caller nothing changed and invite a retry. Then a
+  // real complaint from any window beats the absence of an answer.
+  // `not-mine` is per-window bookkeeping (this window does not hold the
+  // token's doc) and never reaches the wire. `body-text` sits ahead of
+  // `not-found`: a window that holds the doc and refuses the target is a
+  // definite answer about that target, while another window's
+  // `not-found` is only the absence of one.
+  for (const code of ['internal', 'bad-request', 'doc-readonly', 'body-text', 'not-found'] as const) {
     const hit = acks.find((a) => a.error === code);
     if (hit) {
       return { ok: false, error: code, ...(hit.docTitle ? { docTitle: hit.docTitle } : {}) };

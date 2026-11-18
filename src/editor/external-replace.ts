@@ -135,7 +135,15 @@ export function replaceTokenInView(
   if (!tr) return { ok: false, error: 'bad-request' };
   // Dispatch ONCE: the view's own `dispatchTransaction` override is the
   // single choke point for undo history, collab sync and autosave.
+  const before = view.state.doc;
   view.dispatch(tr);
+  // `view.editable` does not cover every lock: read mode, reader view and
+  // AI edit leases keep the view editable and drop edits in
+  // `filterTransaction`. A dropped edit leaves the doc untouched, and
+  // answering ok would hand back a token minted over the old text.
+  if (tr.docChanged && view.state.doc === before) {
+    return { ok: false, error: 'doc-readonly' };
+  }
   // The replacement is one text node, so it spans `from .. from + length`
   // in the doc that just landed. Re-anchor there; see the header on why
   // the caller has to keep this token.

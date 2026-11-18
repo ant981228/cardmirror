@@ -427,10 +427,15 @@ What a token survives, and what it does not:
 - **A token names one line, never its heading.** An undertag's token
   addresses that undertag, and a cite's addresses that cite - `/replace`
   and `/insert-after` act on the line you were given, not on the tag above
-  it. Tokens minted by earlier builds conflated the two; they are still
-  accepted and resolve to the right line, and a `/replace` through one
-  hands back a corrected token - which is one more reason to store every
-  token a route returns.
+  it. Tokens minted by earlier builds conflated the two and do not say
+  which kind of line they named, so CardMirror tells them apart by the
+  text around the line. They are still accepted and resolve to the right
+  line, and a `/replace` through one hands back a corrected token - which
+  is one more reason to store every token a route returns. Where the
+  surroundings no longer settle it (an undertag or cite rewritten since
+  the token was minted, or a heading renamed while the text just before
+  it also changed), such a token answers `not-found` rather than risk
+  writing to the tag above.
 - **Deleting the line loses it**, which is the honest answer:
   `not-found`.
 - **A move to a DIFFERENT document loses it.** A token names one
@@ -831,7 +836,7 @@ Error responses:
 | --- | --- | --- | --- |
 | `doc-not-open` | 200 | The token's document is not open in any window. | `docTitle` - show "open `<docTitle>` first". |
 | `not-found` | 200 | The document is open, but the token no longer resolves - the text was edited elsewhere or deleted. (A match inside a read-only mirrored copy does not count, same rule as `/jump`.) | none |
-| `doc-readonly` | 200 | The document is open in a read-only view. | none |
+| `doc-readonly` | 200 | The document is open in a read-only view, or in read mode. | none |
 | `body-text` | 200 | The token resolves to a card body or a loose paragraph. Card body text is never rewritten; see above. | `docTitle` |
 | `internal` | 200 or 500 | CardMirror could not apply the edit, or applied it and could not mint the replacement token. | none |
 | `bad-request` | 400 | The body is not JSON or exceeds 64 KiB; `source` is missing or is not a `cmsrc1` token; `text` is missing, empty after trimming, longer than 8192 characters, or contains a carriage return or line feed. | none |
@@ -940,7 +945,7 @@ Error responses:
 | --- | --- | --- | --- |
 | `doc-not-open` | 200 | Every window answered, and none of them holds the token's document. | `docTitle` - show "open `<docTitle>` first". |
 | `not-found` | 200 | The document is open, but the token no longer resolves, so there is no line to add after. | none |
-| `doc-readonly` | 200 | The document is open in a read-only view. | none |
+| `doc-readonly` | 200 | The document is open in a read-only view, or in read mode. | none |
 | `body-text` | 200 | The token resolves to a card body or a loose paragraph; see above. | `docTitle` |
 | `internal` | 200 or 500 | CardMirror could not add the line, **or added it and could not mint a token for it, or a window holding the document did not answer in time.** Anything that might have changed the document without reporting a token is reported here rather than as a definite refusal. | none |
 | `bad-request` | 400 | The body is not JSON or exceeds 64 KiB; `source` is missing or is not a `cmsrc1` token; `text` is missing, empty after trimming, longer than 8192 characters, or contains a carriage return or line feed. | none |

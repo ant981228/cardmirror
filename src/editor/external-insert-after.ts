@@ -168,7 +168,12 @@ export function insertAfterTokenInView(
   if (!plan) return { ok: false, error: 'bad-request' };
   // Dispatch ONCE: the view's own `dispatchTransaction` override is the
   // single choke point for undo history, collab sync and autosave.
+  const before = view.state.doc;
   view.dispatch(plan.tr);
+  // A lock that filters transactions rather than clearing `editable`
+  // (read mode, reader view, an AI edit lease) drops the insert. Nothing
+  // landed, so this is a definite refusal, not `internal`.
+  if (view.state.doc === before) return { ok: false, error: 'doc-readonly' };
   // Mint against the landed document, never the arithmetic alone: slice
   // fitting is free to move or wrap an inserted node, and a token minted
   // over the wrong range would name a line the caller never wrote. If the
