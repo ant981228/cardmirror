@@ -51,7 +51,10 @@ interface ExternalReplaceBridge {
 
 export interface ExternalReplaceHostOpts {
   /** Return a live view for `docId` if any pane in this window has that
-   *  doc open (focused or not), else null. */
+   *  doc open (focused or not), else null. The one-parameter signature is
+   *  deliberate: the shell's resolver can also RAISE a background pane, and
+   *  this route promises no focus, no scrolling and no caret movement, so it
+   *  must not be able to ask. `/jump` takes the wider signature. */
   findViewForDocId: (docId: string) => EditorView | null;
 }
 

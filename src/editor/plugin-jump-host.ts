@@ -27,8 +27,12 @@ interface JumpBridge {
 
 export interface PluginJumpHostOpts {
   /** Return a live view for `docId` if any pane in this window has that
-   *  doc open (focused or not), else null. */
-  findViewForDocId: (docId: string) => EditorView | null;
+   *  doc open (focused or not), else null. `raise` surfaces a background
+   *  pane; the jump is the ONE route that asks for it, because landing the
+   *  caret somewhere the user cannot see is the same as doing nothing. The
+   *  silent routes (`/replace`, `/insert-after`) call the same
+   *  resolver without it. */
+  findViewForDocId: (docId: string, opts?: { raise?: boolean }) => EditorView | null;
 }
 
 export function installPluginJumpHost(opts: PluginJumpHostOpts): () => void {
@@ -43,7 +47,7 @@ export function installPluginJumpHost(opts: PluginJumpHostOpts): () => void {
       bridge.sendExternalJumpResult({ requestId, ok: false, error: 'bad-request' });
       return;
     }
-    const view = opts.findViewForDocId(payload.docId);
+    const view = opts.findViewForDocId(payload.docId, { raise: true });
     if (!view) {
       bridge.sendExternalJumpResult({ requestId, ok: false, error: 'not-mine' });
       return;

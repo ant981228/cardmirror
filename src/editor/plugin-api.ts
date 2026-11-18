@@ -101,8 +101,10 @@ export interface PluginApiDeps {
   getView(): EditorView | null;
   /** Live view of any pane in this window holding `docId` (focused or
    *  not), or null. Lets a jump land locally without the IPC hop even
-   *  when the target doc is in an unfocused pane. */
-  findViewForDocId(docId: string): EditorView | null;
+   *  when the target doc is in an unfocused pane. `raise` surfaces a
+   *  background pane, which a jump wants and the silent bridge routes
+   *  (`/replace`, `/insert-after`) must never ask for. */
+  findViewForDocId(docId: string, opts?: { raise?: boolean }): EditorView | null;
   /** Identity of the focused doc; docId null until minted. */
   getDocIdentity(): { docId: string | null; docTitle: string } | null;
   /** Mint + stamp a docId for the focused doc; null when no doc. */
@@ -142,7 +144,7 @@ export function createPluginApi(pluginId: string, deps: PluginApiDeps): CardMirr
     async jumpToSource(token) {
       const payload = parseSourceToken(token);
       if (!payload) return { ok: false, error: 'bad-request' };
-      const view = deps.findViewForDocId(payload.docId);
+      const view = deps.findViewForDocId(payload.docId, { raise: true });
       // A matched view always carries payload.docId, so the local jump is
       // authoritative — jumpToTokenInView can't answer 'not-mine' here.
       if (view) {

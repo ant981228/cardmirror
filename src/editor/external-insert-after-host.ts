@@ -51,7 +51,10 @@ interface ExternalInsertAfterBridge {
 
 export interface ExternalInsertAfterHostOpts {
   /** Return a live view for `docId` if any pane in this window has that
-   *  doc open (focused or not), else null. */
+   *  doc open (focused or not), else null. One parameter on purpose: the
+   *  shell's resolver can also RAISE a background pane, and this route
+   *  inherits `/replace`'s promise to leave the screen alone, so it must
+   *  not be able to ask. `/jump` takes the wider signature. */
   findViewForDocId: (docId: string) => EditorView | null;
 }
 

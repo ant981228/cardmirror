@@ -356,6 +356,36 @@ and `/insert-after` both placing its line and naming it correctly. Four
 assertions in `plugin-extract.test.ts` moved from `headingId` to `scopeId`
 - they encoded the conflation.
 
+### Changed: only `/jump` may raise a background pane
+
+`Shell.findViewForDocId` (`src/editor/multi-pane-shell.ts`) resolved a
+doc by scanning every slot's full stack and called `slot.showRecord(rec)`
+before returning it. That was written for `/jump`, where raising a
+stacked-but-hidden record is the request: its view stays memory-resident
+while hidden but its `editorEl` is detached, so landing a caret in it
+would show the user nothing. `/replace` and `/insert-after` share that
+resolver and document the opposite promise - "no focus, no scrolling, no
+caret movement" - which a raising resolver would break: `showRecord`
+runs `detachVisible()` + `mountVisible()` + `focusSlot()`, so a consented
+app editing a line in a stacked, non-visible document would pull that
+document to the front, and if it shared a slot with the document the
+user was typing in, that document's `editorEl` would leave the DOM
+mid-keystroke.
+
+The resolver now takes `findViewForDocId(docId, opts?: { raise?: boolean })`
+and defaults to quiet; only `installPluginJumpHost` and the plugin API's
+`jumpToSource` pass `{ raise: true }`. All three routes keep the same
+resolver, so they cannot disagree about which pane owns a document -
+only the raising differs. The two silent hosts take a ONE-PARAMETER
+resolver type, so asking to raise is a type error there rather than a
+convention someone has to remember. The two raising install sites hand
+over the module function by reference instead of through a wrapper: a
+wrapper that drops `opts` typechecks, and would silently un-raise
+`/jump`. `tests/editor/pane-raise-contract.test.ts` pins who asks. The
+shell's own branch is not reachable from a test (`Shell` and `Slot` are
+module-private and `mountMultiPaneShell()` is the only export), which is
+what the one-parameter types are standing in for.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)
