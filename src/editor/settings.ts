@@ -5655,6 +5655,10 @@ export const CUSTOMIZABLE_COLOR_TOKENS: readonly CustomizableColorToken[] = [
   { group: 'Document text', name: 'pmd-color-analytic', label: 'Analytic text' },
   { group: 'Document text', name: 'pmd-color-undertag', label: 'Undertag text' },
   { group: 'Document text', name: 'pmd-color-reading-marker', label: 'Reading marker & unread text' },
+  // The underline LINE inside analytics only, never the text. A plain
+  // override (not displayColors-backed); unset in style.css, so with no
+  // pick the line keeps following the text color.
+  { group: 'Document text', name: 'pmd-c-analytic-underline', label: 'Analytic underline' },
 
   // Live-zone chrome — also backed by displayColors (linked to the Appearance
   // Style-colors picker), grouped apart from document text.

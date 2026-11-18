@@ -3408,9 +3408,33 @@ code {
 /* StyleUnderline: just an underline. Per-style font size is driven
    by `--pmd-size-underline` (settings.displaySizes.underline), set
    on documentElement by `applyDisplaySizes` in index.ts. */
+/* Analytic underline color: Accessibility -> Color overrides ->
+   "Analytic underline" sets `--pmd-c-analytic-underline` on the root;
+   it is unset by default. Analytics re-publish it as the inherited
+   `--pmd-analytic-underline`, so the underline rules below pick it up
+   only inside an analytic and fall back everywhere else (and when
+   unset) to what the line was before: the text color, or the band
+   foreground over a highlight. Recolors the line only, never the text.
+   Display-only. */
+.pmd-analytic,
+.pmd-analytic-mark {
+  --pmd-analytic-underline: var(--pmd-c-analytic-underline);
+}
+.ProseMirror u {
+  text-decoration-color: var(--pmd-analytic-underline, currentColor);
+}
+/* An analytic-styled run in body text sits INSIDE its underline span,
+   which paints the line, so the run re-declares the line over it (the
+   band technique below); transparent, i.e. no change, when unset. */
+:is(.pmd-underline, .pmd-emphasis, u) .pmd-analytic-mark {
+  text-decoration: underline;
+  text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-c-analytic-underline, transparent);
+}
 .pmd-underline {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-analytic-underline, currentColor);
   font-size: var(--pmd-run-font-size, var(--pmd-size-underline));
 }
 
@@ -3420,6 +3444,7 @@ code {
 .pmd-emphasis {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-analytic-underline, currentColor);
   font-size: var(--pmd-run-font-size, var(--pmd-size-emphasis));
 }
 
@@ -3993,13 +4018,13 @@ body.pmd-override-shading [data-shading] {
   :is([data-highlight-band="light"], [data-shading-band="light"]) {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-c-band-fg-light);
+  text-decoration-color: var(--pmd-analytic-underline, var(--pmd-c-band-fg-light));
 }
 :is(.pmd-underline, .pmd-emphasis, #editor.pmd-cite-underlined .pmd-cite)
   :is([data-highlight-band="dark"], [data-shading-band="dark"]) {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-c-band-fg-dark);
+  text-decoration-color: var(--pmd-analytic-underline, var(--pmd-c-band-fg-dark));
 }
 
 /* Underlines follow font color (Appearance → Document typography; OFF by
