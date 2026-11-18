@@ -30,6 +30,13 @@
  *     `analytic`) — one heading node per line, snapped to the
  *     outline slot a drag would drop it at. See below.
  *
+ * The result reports WHERE each heading went in, not just the
+ * transaction: a heading is addressable text (`/replace`, `/jump`,
+ * `/insert-after` all reach one), so the caller that just dictated it
+ * has to be able to get a token for it — and only this function knows
+ * the slot it chose and the id it stamped. Body-ish roles report
+ * nothing; see `ExternalInsertPlan.headings`.
+ *
  * No equation-marker handling (§4.4) in v1 — the spec lets v1
  * insert the placeholder as plain body text.
  */
@@ -77,8 +84,13 @@ export interface ExternalInsertOpts {
  * doc root. Pocket / hat / block stand alone; `tag` is only ever a card's
  * first child and `analytic` only ever an analytic_unit's, which is why
  * sending one of those inserts a whole (single-heading) card or unit.
+ *
+ * Exported for `/insert-after` (`external-insert-after.ts`), which needs
+ * the same wrapping rule to put a tag or an analytic next to one. A
+ * present-but-undefined entry means "heading kind, stands alone", so the
+ * heading test is `Object.hasOwn`, not a truthy read.
  */
-const HEADING_CONTAINER: Record<string, 'card' | 'analytic_unit' | undefined> = {
+export const HEADING_CONTAINER: Record<string, 'card' | 'analytic_unit' | undefined> = {
   pocket: undefined,
   hat: undefined,
   block: undefined,
@@ -92,51 +104,98 @@ function isHeadingRole(role: ExternalInsertRole): boolean {
   return Object.hasOwn(HEADING_CONTAINER, role);
 }
 
-/** One heading node (in its required container) per line, or null when the
- *  schema doesn't carry the types — same defensive rail as the body path. */
+/** One heading textblock this insert creates, as the transaction was
+ *  BUILT. Positions are arithmetic over the pre-insert doc, so a caller
+ *  that mints provenance from them re-resolves each one against the doc
+ *  the transaction produced first (see `external-insert-host.ts`). */
+export interface InsertedHeading {
+  /** Content start of the heading: the insert position plus one token to
+   *  enter each level the line was wrapped in. */
+  contentStart: number;
+  /** Textblock type the line became - the role. */
+  type: string;
+  /** The line the heading was built from; what the landed textblock's
+   *  `textContent` must equal. */
+  text: string;
+  /** Id stamped on the heading (`newHeadingId`). */
+  headingId: string;
+}
+
+export interface ExternalInsertPlan {
+  tr: Transaction;
+  /** One entry per inserted heading, in document order. EMPTY for the
+   *  body-ish roles and for inline mode: those land as `card_body` or a
+   *  doc-level `paragraph`, which `/replace` and `/insert-after` refuse
+   *  as `body-text`, so a provenance token over one would name a line no
+   *  caller could ever write back to. */
+  headings: InsertedHeading[];
+}
+
+/** One heading node (in its required container) per line, with the id
+ *  stamped on each, or null when the schema doesn't carry the types —
+ *  same defensive rail as the body path. The ids come back out because
+ *  the `/insert` ack names each heading by its own id, and re-reading
+ *  them off the landed doc would have to guess which nodes were ours. */
 function buildHeadingNodes(
   state: EditorState,
   role: ExternalInsertRole,
   lines: string[],
-): PMNode[] | null {
+): { nodes: PMNode[]; ids: string[] } | null {
   const headingType = state.schema.nodes[role];
   if (!headingType) return null;
   const containerName = HEADING_CONTAINER[role];
   const containerType = containerName ? state.schema.nodes[containerName] : undefined;
   if (containerName && !containerType) return null;
-  return lines.map((line) => {
+  const ids: string[] = [];
+  const nodes = lines.map((line) => {
     // Heading nodes carry a stable id (schema/ids.ts); one built without it
     // is invisible to the nav pane, so stamp it here rather than relying on
     // the load-time repair walk.
-    const heading = headingType.create(
-      { id: newHeadingId() },
-      line ? state.schema.text(line) : null,
-    );
+    const id = newHeadingId();
+    ids.push(id);
+    const heading = headingType.create({ id }, line ? state.schema.text(line) : null);
     return containerType ? containerType.create(null, heading) : heading;
   });
+  return { nodes, ids };
 }
 
-/** Build the insertion transaction for an external `/insert` call.
- *  Returns `null` only when the schema doesn't carry the body type
- *  we need — never happens in our schema; the null is a defensive
- *  rail for callers in other host contexts. */
+/** Build the insertion transaction for an external `/insert` call, plus
+ *  where each heading it created went in. Returns `null` only when the
+ *  schema doesn't carry the body type we need — never happens in our
+ *  schema; the null is a defensive rail for callers in other host
+ *  contexts. */
 export function buildExternalInsertTransaction(
   state: EditorState,
   opts: ExternalInsertOpts,
-): Transaction | null {
+): ExternalInsertPlan | null {
   const { text, newParagraph } = opts;
   const role = opts.role ?? 'card';
 
   if (isHeadingRole(role)) {
     // A heading is never inline, so the role outranks `newParagraph`.
-    const nodes = buildHeadingNodes(state, role, text.split(/\r\n|\r|\n/));
-    if (!nodes) return null;
-    const content = Fragment.fromArray(nodes);
+    const lines = text.split(/\r\n|\r|\n/);
+    const built = buildHeadingNodes(state, role, lines);
+    if (!built) return null;
+    const content = Fragment.fromArray(built.nodes);
     // Dropping a doc-level object at a raw caret inside a card makes PM split
     // the card and leave a phantom blank-tag sibling behind; snap to the
     // outline slot a drag would use instead (mirrors the receive-pill insert).
     const at = insertAtCursorPos(state.doc, state.selection.head, content);
-    return state.tr.insert(at, content);
+    // One token to enter a bare heading, two when the line arrived inside a
+    // fresh card / analytic_unit.
+    const inset = HEADING_CONTAINER[role] ? 2 : 1;
+    const headings: InsertedHeading[] = [];
+    let pos = at;
+    built.nodes.forEach((node, i) => {
+      headings.push({
+        contentStart: pos + inset,
+        type: role,
+        text: lines[i]!,
+        headingId: built.ids[i]!,
+      });
+      pos += node.nodeSize;
+    });
+    return { tr: state.tr.insert(at, content), headings };
   }
 
   if (!newParagraph) {
@@ -147,7 +206,7 @@ export function buildExternalInsertTransaction(
     // the user types.
     const tr = state.tr.insertText(text);
     tr.setStoredMarks([]);
-    return tr;
+    return { tr, headings: [] };
   }
 
   // `card` / `cite` mode: build sibling body paragraphs from the
@@ -213,7 +272,7 @@ export function buildExternalInsertTransaction(
       }
     }
   }
-  return tr;
+  return { tr, headings: [] };
 }
 
 

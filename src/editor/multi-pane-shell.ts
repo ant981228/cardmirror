@@ -2560,24 +2560,31 @@ class MultiPaneShell {
   }
 
   /** View of any pane holding `docId` — every slot's full stack (visible
-   *  AND background), so an inbound jump reaches a doc open in an
-   *  unfocused pane. A background (stacked-but-hidden) record is RAISED
-   *  to its slot's visible position first: its view stays memory-resident
-   *  while hidden but its `editorEl` is detached, so jumping into it would
-   *  select in an invisible editor and the user would see nothing.
-   *  `showRecord` mounts synchronously (appendChild), so on return the
-   *  view's DOM is attached and `scrollToHeadingId` has an element to hit.
-   *  Returns null when no open doc has that id. */
-  findViewForDocId(docId: string): EditorView | null {
+   *  AND background), so an inbound request reaches a doc open in an
+   *  unfocused pane. Returns null when no open doc has that id.
+   *
+   *  `raise` decides whether finding the doc is allowed to CHANGE what the
+   *  user is looking at. A background (stacked-but-hidden) record keeps its
+   *  view memory-resident but its `editorEl` detached, so `/jump` must
+   *  raise it: selecting in an invisible editor shows the user nothing, and
+   *  `showRecord` mounts synchronously (appendChild) so on return
+   *  `scrollToHeadingId` has an element to hit. Raising before resolution
+   *  means a jump that then fails `not-found` leaves the record visible
+   *  anyway - accepted, the doc was explicitly requested.
+   *
+   *  It defaults OFF because every other route through here is a silent
+   *  one. `/replace` promises no focus, no scrolling and no caret movement,
+   *  and `/insert-after` inherits that promise. `showRecord` runs
+   *  `detachVisible()` + `mountVisible()` + `focusSlot()`, so a raising
+   *  resolution on either path would let a companion app's edit swap what
+   *  is on screen, and would pull the `editorEl` of a document being typed
+   *  in out of the DOM when the edited doc shares its slot. */
+  findViewForDocId(docId: string, opts?: { raise?: boolean }): EditorView | null {
     for (const id of SLOT_IDS) {
       const slot = this.slots[id];
       for (const rec of slot.stack) {
         if (rec.docId === docId) {
-          // Raised before resolution: if the jump then fails not-found, the
-          // raised record stays visible anyway. Accepted - the doc was
-          // explicitly requested, so surfacing it is reasonable regardless.
-          // Revisit if failed jumps raising docs turns out to be noisy.
-          slot.showRecord(rec); // no-op when already visible
+          if (opts?.raise) slot.showRecord(rec); // no-op when already visible
           return rec.view;
         }
       }
@@ -4051,7 +4058,7 @@ export function mountMultiPaneShell(): void {
     setFileForUid: (uid, f) => shell!.setFileForUid(uid, f),
     setFocusedDocId: (id) => shell!.setFocusedDocId(id),
     setDocIdForUid: (uid, id) => shell!.setDocIdForUid(uid, id),
-    findViewForDocId: (id) => shell!.findViewForDocId(id),
+    findViewForDocId: (id, opts) => shell!.findViewForDocId(id, opts),
     getAllFilenames: () => shell!.getAllFilenames(),
     getFilenameForUid: (uid) => shell!.filenameForUid(uid),
     getDocIdForUid: (uid) => shell!.docIdForUid(uid),

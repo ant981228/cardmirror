@@ -13,7 +13,7 @@
  *     returns the right error if no editable doc is available /
  *     the doc is in read mode), and sends an
  *     `external:insert-result` IPC back with
- *     `{ requestId, ok, error?, docTitle? }`.
+ *     `{ requestId, ok, error?, docTitle?, sources? }`.
  *
  * Insertion itself goes through `buildExternalInsertTransaction`
  * (`./external-insert.ts`) so the renderer-side primitive is
@@ -21,6 +21,11 @@
  * route through `applyPlainPasteFromText` / `buildPlainTextSlice` /
  * PM's contextual fitting — the FDP spec is explicit on that
  * because that's the path the historical stray-tags bug came from.
+ *
+ * `sources` is the provenance half, and it is minted HERE rather
+ * than in the primitive: a token names a document, and only the
+ * host knows which one the insert landed in. See `mintSources` for
+ * when the field is answered and why it is all-or-nothing.
  */
 
 import type { EditorView } from 'prosemirror-view';
@@ -29,7 +34,10 @@ import {
   buildExternalRichInsertTransaction,
   EXTERNAL_INSERT_HTML_MAX_BYTES,
   type ExternalInsertRole,
+  type InsertedHeading,
 } from './external-insert.js';
+import { createDescriptorBuilder } from './learn-anchor.js';
+import { mintSourceToken } from './plugin-source-token.js';
 
 interface InsertRequest {
   requestId: string;
@@ -55,6 +63,9 @@ interface InsertResult {
   ok: boolean;
   error?: 'no-target-doc' | 'doc-readonly' | 'bad-request' | 'internal' | 'target-not-found';
   docTitle?: string;
+  /** One provenance token per inserted textblock, in document order.
+   *  Heading roles only, and all-or-nothing — see `mintSources`. */
+  sources?: string[];
 }
 
 /** Preload-exposed API surface this module reads. Defined here as
@@ -79,6 +90,14 @@ export interface ExternalInsertHostOpts {
    *  doc has been saved, otherwise the synthesized title. May
    *  return null when no doc is open. */
   getFocusedDocTitle: () => string | null;
+  /** Identity of the doc an insert landed in, for the provenance tokens
+   *  on the ack: `uid` names the addressed pane on a targeted insert,
+   *  and is absent for the focused one. `docId` is minted on demand the
+   *  way `/extract` does it, since a never-saved doc carries none yet and
+   *  a token without one addresses no document. Null — or an absent hook,
+   *  on a host with no doc registry — answers no `sources` rather than
+   *  tokens nothing can resolve. */
+  getDocIdentity?: (uid?: string) => { docId: string; docTitle: string } | null;
 }
 
 /** Mount the external-insert handler. Returns an unsubscribe
@@ -148,29 +167,102 @@ function handle(req: InsertRequest, opts: ExternalInsertHostOpts): InsertResult 
     const citeTokens = Array.isArray(req.citeTokens)
       ? req.citeTokens.filter((t): t is string => typeof t === 'string' && t.length > 0)
       : undefined;
-    const tr = buildExternalInsertTransaction(view.state, {
+    const plan = buildExternalInsertTransaction(view.state, {
       text: req.text,
       role: req.role,
       newParagraph: req.newParagraph,
       ...(citeTokens && citeTokens.length > 0 ? { citeTokens } : {}),
     });
-    if (!tr) {
+    if (!plan) {
       // schema didn't carry the body type we asked for — should never
       // happen on our schema; defensive rail only.
       return { requestId, ok: false, error: 'internal' };
     }
-    view.dispatch(tr.scrollIntoView());
+    view.dispatch(plan.tr.scrollIntoView());
     const result: InsertResult = { requestId, ok: true };
-    if (typeof req.target === 'string' && req.target) {
+    const targetUid = typeof req.target === 'string' && req.target ? req.target : undefined;
+    if (targetUid) {
       // Targeted acks skip the focused-doc title (wrong doc); main
       // fills the addressed doc's name from its directory.
     } else {
       const docTitle = opts.getFocusedDocTitle();
       if (docTitle) result.docTitle = docTitle;
     }
+    // Identity is resolved only once something addressable landed: the
+    // hook may MINT a docId for a never-saved doc, and an insert that
+    // reports no headings has nothing to stamp one for.
+    if (plan.headings.length > 0) {
+      const ident = opts.getDocIdentity?.(targetUid);
+      const sources = ident ? mintSources(view, plan.headings, ident) : undefined;
+      if (sources) result.sources = sources;
+    }
     return result;
   } catch {
     return { requestId, ok: false, error: 'internal' };
+  }
+}
+
+/**
+ * A provenance token per inserted heading, in document order, or
+ * undefined when the caller can be handed none.
+ *
+ * Heading roles only, and that is the plan's doing: `body` / `card` /
+ * `cite` and inline mode land as `card_body` or a doc-level `paragraph`,
+ * which `/replace` and `/insert-after` refuse as `body-text`, so they
+ * report no headings and this answers nothing. A token over one would
+ * promise a link the caller could never use.
+ *
+ * Verified against the doc that LANDED, never the plan's arithmetic
+ * alone: slice fitting is free to move or wrap an inserted node, and a
+ * token minted over the wrong range names a line the caller never sent.
+ * One heading per line is predictable, so a mismatch means the placement
+ * rules changed - which must surface as lost provenance here rather than
+ * as a caller silently editing its neighbour's text.
+ *
+ * All-or-nothing, and never fatal: one entry that doesn't verify drops
+ * the whole field. The text is already in the document, so a caller that
+ * loses `sources` has lost a handle, while a caller handed a short or
+ * lying list would corrupt what it writes back to next.
+ */
+function mintSources(
+  view: EditorView,
+  headings: readonly InsertedHeading[],
+  ident: { docId: string; docTitle: string },
+): string[] | undefined {
+  const doc = view.state.doc;
+  try {
+    const buildDescriptor = createDescriptorBuilder(doc); // flatten once, not per heading
+    const sources: string[] = [];
+    for (const h of headings) {
+      if (h.contentStart + h.text.length > doc.content.size) return undefined;
+      const $at = doc.resolve(h.contentStart);
+      if (
+        $at.parent.type.name !== h.type ||
+        $at.parentOffset !== 0 ||
+        $at.parent.textContent !== h.text
+      ) {
+        return undefined;
+      }
+      sources.push(
+        mintSourceToken({
+          docId: ident.docId,
+          docTitle: ident.docTitle,
+          // Every line `/insert` creates is a heading kind, so it names
+          // itself and is its own scope.
+          headingId: h.headingId,
+          scopeId: h.headingId,
+          // No anchor for a blank line: the heading id resolves it, and an
+          // empty quote would match anywhere (`plugin-extract.ts` guards
+          // its zero-length ranges the same way).
+          anchor: h.text
+            ? buildDescriptor(h.contentStart, h.contentStart + h.text.length)
+            : null,
+        }),
+      );
+    }
+    return sources;
+  } catch {
+    return undefined;
   }
 }
 

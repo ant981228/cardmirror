@@ -918,6 +918,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ok: boolean;
     error?: string;
     docTitle?: string;
+    /** One provenance token per textblock the insert created, in
+     *  document order. Heading roles only: a body line lands as card
+     *  body text, which the write-back routes refuse, so there is
+     *  nothing to hand back for it. */
+    sources?: string[];
   }): void => {
     ipcRenderer.send('external:insert-result', result);
   },
@@ -1010,6 +1015,61 @@ contextBridge.exposeInMainWorld('electronAPI', {
     error?: string;
   }): void => {
     ipcRenderer.send('external:jump-result', result);
+  },
+
+  /** Edit push-back (`POST /replace`) - receive an `external:replace-text`
+   *  request from the main-process HTTP bridge and send the ack back via
+   *  `external:replace-result`. Same shape as the jump pair above; the
+   *  ack carries a freshly minted `source` token on success, because the
+   *  caller's stored token anchors on the text that was just replaced. */
+  onExternalReplaceRequest(handler: (req: {
+    requestId: string;
+    source: string;
+    text: string;
+  }) => void): () => void {
+    const listener = (
+      _evt: unknown,
+      req: { requestId: string; source: string; text: string },
+    ): void => handler(req);
+    ipcRenderer.on('external:replace-text', listener);
+    return () => ipcRenderer.removeListener('external:replace-text', listener);
+  },
+  sendExternalReplaceResult: (result: {
+    requestId: string;
+    ok: boolean;
+    error?: string;
+    docTitle?: string;
+    source?: string;
+  }): void => {
+    ipcRenderer.send('external:replace-result', result);
+  },
+
+  /** Anchored line add (`POST /insert-after`) - receive an
+   *  `external:insert-after` request from the main-process HTTP bridge
+   *  and send the ack back via `external:insert-after-result`. Same
+   *  shape as the replace pair above; here the ack's `source` names a
+   *  line that did not exist before the call, which is the only handle
+   *  the caller will ever get to it. */
+  onExternalInsertAfterRequest(handler: (req: {
+    requestId: string;
+    source: string;
+    text: string;
+  }) => void): () => void {
+    const listener = (
+      _evt: unknown,
+      req: { requestId: string; source: string; text: string },
+    ): void => handler(req);
+    ipcRenderer.on('external:insert-after', listener);
+    return () => ipcRenderer.removeListener('external:insert-after', listener);
+  },
+  sendExternalInsertAfterResult: (result: {
+    requestId: string;
+    ok: boolean;
+    error?: string;
+    docTitle?: string;
+    source?: string;
+  }): void => {
+    ipcRenderer.send('external:insert-after-result', result);
   },
 
   /** Card-cutter local plugin (experimental). `pick` opens the native

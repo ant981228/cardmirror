@@ -3487,18 +3487,24 @@ doesn't cut that connection. That's what **External apps** below is
 for.
 
 **External apps.** Companion apps on your computer can insert text
-into your documents (and jump you to sources) over a local
-connection. The External apps section of this tab controls who may:
-the first time an app sends, CardMirror asks — **Always Allow / Allow
-Once / Deny** — naming the app, and remembers your answer in a list
-here where you can flip a decision or forget an app (it will ask
-again next time). The policy dropdown above the list sets the overall
-stance: **Ask for each app** (default), **Allow all** — every sender
-accepted, including older apps that don't identify themselves — or
-**Block all**. Under the default policy, an app too old to identify
-itself is turned away and CardMirror tells you to update it. Like
-Verbatim Flow, this section works regardless of the Enable plugins
-switch.
+into your documents, jump you to sources, and update the text of a
+card they previously took from you - all over a local connection. The
+External apps section of this tab controls who may: the first time an
+app sends, CardMirror asks — **Always Allow / Allow Once / Deny** —
+naming the app, and remembers your answer in a list here where you
+can flip a decision or forget an app (it will ask again next time).
+The policy dropdown above the list sets the overall stance: **Ask for
+each app** (default), **Allow all** — every sender accepted,
+including older apps that don't identify themselves — or **Block
+all**. Under the default policy, an app too old to identify itself is
+turned away and CardMirror tells you to update it. An update to a
+card arrives quietly - it changes the text in place without raising a
+window or moving your cursor - and Undo reverses it like any edit of
+your own. It can only reach a tag, analytic, undertag or cite: the
+body of a card is never rewritten from outside, the same way its
+quoted text is never what a companion app is given in the first
+place. Like Verbatim Flow, this section works regardless of the
+Enable plugins switch.
 
 **Connecting Ebb.** [Ebb](https://github.com/shreerammodi/ebb) is a
 flowing app with a two-way CardMirror integration: send what you're

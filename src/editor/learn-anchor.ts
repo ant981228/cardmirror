@@ -20,14 +20,14 @@ import type { Node as PMNode } from 'prosemirror-model';
  *  disambiguate repeats AND to tell a real match (surroundings intact)
  *  from a coincidental hit on the quote substring after the original
  *  text was deleted/edited (see the context gate in `resolveDescriptor`). */
-const CONTEXT = 60;
+export const CONTEXT = 60;
 
 /** A candidate match must overlap the stored context by at least this
  *  fraction of what's available, or it's rejected (→ unanchored) rather
  *  than grounding the annotation onto unrelated text. A third tolerates
  *  heavy edits to one side (the other side alone clears the bar) while
  *  still rejecting a hit whose surroundings don't match at all. */
-const MIN_CONTEXT_FRACTION = 1 / 3;
+export const MIN_CONTEXT_FRACTION = 1 / 3;
 
 export interface AnchorDescriptor {
   quote: string;
@@ -143,7 +143,7 @@ export function buildDescriptor(doc: PMNode, from: number, to: number): AnchorDe
 
 /** Length of the common suffix of `a` and the trailing of `b` (how well a
  *  candidate's preceding text matches the stored prefix). */
-function backMatch(a: string, b: string): number {
+export function backMatch(a: string, b: string): number {
   let n = 0;
   while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++;
   return n;

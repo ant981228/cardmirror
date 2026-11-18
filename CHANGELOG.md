@@ -5,6 +5,75 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **A companion app can now update the text of a card it previously
+  received from you.** A flowing app already asks CardMirror for a
+  passage and can jump you back to where it came from; one can now
+  also send back an edited version of a line it took, and the
+  document changes in place. It happens quietly on purpose: no window
+  is raised, nothing scrolls, and your cursor does not move. **The body
+  of a card is never touched** - only tags, analytics, undertags and
+  cites can be updated this way, which is also all a companion app is
+  ever given: the quoted text of a card doesn't leave your document,
+  and nothing can rewrite it from outside. You grant nothing new: the
+  existing permission for that app governs it - the same **Always
+  Allow / Deny** decision that already covers sending text and
+  jumping, listed and changeable under Settings → Plugins → External
+  apps. An app you never allowed still cannot touch a document, and
+  nothing changes at all if you don't use a companion app. Whether an
+  app offers this is its own choice; ebb, for one, keeps it behind a
+  setting that starts off.
+
+- **A companion app can now add a line next to one it received from
+  you.** The same flow, one step further. When the app's user writes a
+  new line beside a passage they took from your document - another
+  reason under a tag, a second cite under a card - the app can put that
+  line into the document too, immediately after the line it belongs
+  after. It arrives the way an update does: quietly, with no window
+  raised, nothing scrolled, and your cursor where you left it. It only
+  ever adds - the line it was anchored to is left exactly as it was,
+  and **the body of a card is never touched.** A new tag arrives as a
+  new card of its own; an undertag or a cite lands inside the card it
+  belongs to. Governed by the permission you already gave that app -
+  the same **Always Allow / Deny** decision under Settings → Plugins →
+  External apps - so an app you never allowed still cannot put anything
+  in a document, and nothing changes at all if you don't use a
+  companion app.
+
+- **A companion app can now keep track of the lines it sends into your
+  document.** Sending a tag, an analytic or a pocket/hat/block from
+  another app already puts it in your outline; the app is now told where
+  each line went, so from then on it can update that line, add under it,
+  or take you to it - the same way it can for a passage it received from
+  you. Nothing about the insert itself changes: the text lands in the
+  same place, one line per line you sent, and this only concerns what
+  the sending app is told afterwards. Lines that arrive as card body
+  text - the everyday "send this passage" case - are not tracked, since
+  the body of a card is never editable from outside anyway. Governed by
+  the permission you already gave that app under Settings → Plugins →
+  External apps, and nothing changes at all if you don't use a companion
+  app.
+
+### Fixed
+
+- **An edit a companion app makes to an undertag or a cite no longer
+  overwrites the card's tag.** Every line CardMirror hands a flowing app
+  came with a note about which card it belonged to, and for anything that
+  is not itself a heading - an undertag, a cite - that note was mistaken
+  for the line's own address. So when the app sent back an edited
+  qualifier, the tag above it was rewritten instead: silently, with no
+  window raised and nothing scrolled, destroying the tag you wrote. The
+  same confusion put an added line after the tag rather than after the
+  line it belonged to, and jumped you to the tag when you asked for the
+  qualifier. A line's address now names that line, and the card it sits in
+  is only used to look inside the right card - which also means two cards
+  worded the same are never mistaken for each other. Anything a companion
+  app already stored still works and is corrected the first time it is
+  used.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed

@@ -73,6 +73,8 @@ import { installExternalConsent } from './external-consent-ui.js';
 import { maybeSnapshotVersion } from './version-history.js';
 import { awaitWithSaveWatchdog, warnIfSlow } from './save-watchdog.js';
 import { installExternalInsertHost } from './external-insert-host.js';
+import { installExternalReplaceHost } from './external-replace-host.js';
+import { installExternalInsertAfterHost } from './external-insert-after-host.js';
 import { installPluginRegistry } from './plugin-registry.js';
 import { createPluginApi } from './plugin-api.js';
 import { installPluginJumpHost } from './plugin-jump-host.js';
@@ -1137,7 +1139,9 @@ let multiDocSetDocIdForUid: ((uid: string, docId: string) => void) | null = null
  *  DocRecord carries `docId`, else null. Backs the inbound-jump host and
  *  the plugin API's local-first jump, so a doc open in an unfocused pane
  *  jumps without the main-process broadcast hop. */
-let multiDocFindViewForDocId: ((docId: string) => EditorView | null) | null = null;
+let multiDocFindViewForDocId:
+  | ((docId: string, opts?: { raise?: boolean }) => EditorView | null)
+  | null = null;
 /** Crash-recovery hook: clear the focused pane's journal after a
  *  successful save in multi-doc mode. The shell knows the
  *  DocRecord's uid; the editor only knows it has a focused doc. */
@@ -1225,8 +1229,10 @@ export function enableMultiDocMode(opts: {
   setDocIdForUid?: (uid: string, docId: string) => void;
   anyDirty?: () => boolean;
   flushJournals?: () => void;
-  /** Live view of any pane holding `docId` (focused or background), or null. */
-  findViewForDocId?: (docId: string) => EditorView | null;
+  /** Live view of any pane holding `docId` (focused or background), or null.
+   *  `raise` surfaces a background pane so the user can see the landing
+   *  spot; only `/jump` asks for it (see `findViewForDocId` below). */
+  findViewForDocId?: (docId: string, opts?: { raise?: boolean }) => EditorView | null;
   getAllFilenames?: () => (string | null)[];
   /** Filename of the open doc with `uid` (across all panes + stacks), or null.
    *  Lets collab publish/label a session with its OWNER doc's name rather than
@@ -6500,9 +6506,15 @@ function activeDocIdentity(): { docId: string | null; sessionUid: string } {
 
 /** Find the live view for a doc open anywhere in THIS window — any pane
  *  in multi-pane, the single view in single-doc — regardless of focus.
- *  Returns null when no open doc has that id. */
-function findViewForDocId(docId: string): EditorView | null {
-  if (multiDocActive && multiDocFindViewForDocId) return multiDocFindViewForDocId(docId);
+ *  Returns null when no open doc has that id.
+ *
+ *  `raise` is what separates `/jump` from every other route that resolves
+ *  a pane: raising surfaces a background record so the user can see where
+ *  the jump landed, which is the user's own request, whereas `/replace`
+ *  and `/insert-after` both promise not to disturb what is on screen. It defaults off so a new caller is quiet unless it says
+ *  otherwise. Single-doc has nothing to raise and ignores it. */
+function findViewForDocId(docId: string, opts?: { raise?: boolean }): EditorView | null {
+  if (multiDocActive && multiDocFindViewForDocId) return multiDocFindViewForDocId(docId, opts);
   return currentDocId === docId ? getActiveView() : null;
 }
 
@@ -10130,12 +10142,47 @@ installExternalInsertHost({
   // registry resolves a uid to its live view in this window, three-
   // pane aware, focused or not.
   resolveViewForUid: (uid) => getSpeechDocResolver().viewForUid(uid),
+  // The doc a heading-role insert is minting provenance tokens against.
+  // Focused path mints the docId if the doc has never been saved (same
+  // step `/extract` takes on its first emit) — the caller's token has to
+  // survive the save. A targeted pane's id is read, not minted: stamping
+  // an id onto a doc the user isn't looking at belongs to that pane's own
+  // first save, so an unsaved one simply reports no identity and the
+  // insert answers without `sources`.
+  getDocIdentity: (uid) => {
+    if (uid) {
+      const docId = resolveDocPersistentId(uid);
+      return docId ? { docId, docTitle: resolveDocFilename(uid) || 'Untitled' } : null;
+    }
+    return { docId: ensureActiveDocId(), docTitle: activeFile().filename || 'Untitled' };
+  },
 });
 // Inbound /jump handler — core-owned surface (spec 6): the fast-paste
 // bridge advertises schema 2 unconditionally, so a window must always
 // answer `external:jump`, regardless of the `pluginsEnabled` switch.
 // No-ops when the preload bridge is absent (web / old shells).
 installPluginJumpHost({
+  // Passed by REFERENCE, not wrapped: the jump host asks to raise a
+  // background pane, and a wrapper is one edit away from un-raising it
+  // silently. `findViewForDocId: (docId) => findViewForDocId(docId)`
+  // typechecks here - a one-parameter arrow is assignable - so dropping
+  // `opts` compiles clean, lints clean, and lands the caret in a detached
+  // editor with nothing on screen. A reference can neither drop nor invent
+  // an argument. Do not tidy this back into an arrow. The two quiet
+  // hosts below keep their argument-dropping wrappers deliberately.
+  findViewForDocId,
+});
+// Inbound /replace handler - the same per-window token resolution the
+// jump host does, but silent: it mutates the addressed range and never
+// focuses, raises or scrolls anything (a flowing app calls it on every
+// settled keystroke). No-ops when the preload bridge is absent.
+installExternalReplaceHost({
+  findViewForDocId: (docId) => findViewForDocId(docId),
+});
+// Inbound /insert-after handler - same silent, per-window token
+// resolution as the replace host, but it adds a line rather than
+// rewriting one, and answers with a token for the line it created.
+installExternalInsertAfterHost({
   findViewForDocId: (docId) => findViewForDocId(docId),
 });
 // External-app consent: mirror the toggle + per-app decisions to main
@@ -10173,7 +10220,11 @@ async function initPlugins(): Promise<void> {
     createPluginApi(pluginId, {
       appVersion,
       getView: () => getActiveView(),
-      findViewForDocId: (docId) => findViewForDocId(docId),
+      // Passed by reference for the same reason as the jump host above: the
+      // only consumer is `jumpToSource`, which raises a background pane, and
+      // a wrapper that dropped `opts` would un-raise it with no error
+      // anywhere.
+      findViewForDocId,
       getDocIdentity: () => {
         const a = activeDocIdentity();
         return { docId: a.docId, docTitle: activeFile().filename || 'Untitled' };

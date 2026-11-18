@@ -65,16 +65,20 @@ function enclosingSectionRange(
   return null;
 }
 
-/** The governing heading id at `pos` - for selections that start
- *  mid-card (undertag selected without its tag). */
-function governingHeadingId(doc: PMNode, pos: number): string | null {
-  const headings = collectHeadings(doc, { skipCite: true });
-  let best: HeadingEntry | null = null;
-  for (const h of headings) {
-    if (h.pos <= pos) best = h;
-    else break;
+/** The id of the nearest heading whose section CONTAINS content position
+ *  `pos`, walking outward like `enclosingSectionRange`. This is the
+ *  token's scope, and the resolver searches only inside it, so a heading
+ *  that merely comes earlier (a card that ended before a doc-level
+ *  undertag) would mint a token that can never resolve. */
+function scopeHeadingId(doc: PMNode, headings: HeadingEntry[], pos: number): string | null {
+  for (let i = headings.length - 1; i >= 0; i--) {
+    const h = headings[i]!;
+    if (h.pos >= pos) continue;
+    const r = computeHeadingRange(doc, h);
+    // An id-less heading cannot scope a token; keep walking outward.
+    if (h.id && r && pos >= r.from && pos < r.to) return h.id;
   }
-  return best?.id ?? null;
+  return null;
 }
 
 function collectItems(
@@ -84,7 +88,7 @@ function collectItems(
   ident: { docId: string; docTitle: string },
 ): ExtractedItem[] {
   const items: ExtractedItem[] = [];
-  let lastHeadingId = governingHeadingId(doc, from);
+  const headings = collectHeadings(doc, { skipCite: true }); // once, not per item
   const buildDescriptor = createDescriptorBuilder(doc); // flatten once, not per item
   doc.nodesBetween(from, to, (node, pos) => {
     // Live-view / linked-copy containers hold DERIVED, id-less mirror content
@@ -101,11 +105,13 @@ function collectItems(
     const type = node.type.name;
     let kind: ExtractedKind | null = null;
     let text = '';
+    /** The heading this item IS, as opposed to the one it lives under. */
+    let ownHeadingId: string | null = null;
     if (type in TYPE_TO_LEVEL) {
       kind = type as ExtractedKind;
       text = node.textContent;
       const id = node.attrs['id'];
-      lastHeadingId = typeof id === 'string' && id ? id : lastHeadingId;
+      ownHeadingId = typeof id === 'string' && id ? id : null;
     } else if (type === 'undertag') {
       kind = 'undertag';
       text = node.textContent;
@@ -125,7 +131,13 @@ function collectItems(
       source: mintSourceToken({
         docId: ident.docId,
         docTitle: ident.docTitle,
-        headingId: lastHeadingId,
+        // An undertag or a cite names no heading: its governing heading is
+        // SCOPE for the anchor, and naming it as the target is what used to
+        // resolve those items to the tag above them.
+        headingId: ownHeadingId,
+        // A heading is its own scope; anything else lives in the section
+        // that contains it.
+        scopeId: ownHeadingId ?? scopeHeadingId(doc, headings, contentFrom),
         anchor,
       }),
     });

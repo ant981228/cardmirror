@@ -10,6 +10,7 @@ const payload: SourcePayload = {
   docId: 'doc-123',
   docTitle: 'AT Cap K — «weird» título.docx',
   headingId: 'a1b2c3d4-0000-0000-0000-000000000000',
+  scopeId: 'a1b2c3d4-0000-0000-0000-000000000000',
   anchor: { quote: 'Perm solves', prefix: 'before ', suffix: ' after', approxPos: 42 },
 };
 
@@ -20,7 +21,13 @@ describe('source token', () => {
     expect(parseSourceToken(token)).toEqual(payload);
   });
   it('round-trips null headingId and null anchor', () => {
-    const p: SourcePayload = { docId: 'd', docTitle: '', headingId: null, anchor: null };
+    const p: SourcePayload = {
+      docId: 'd',
+      docTitle: '',
+      headingId: null,
+      scopeId: null,
+      anchor: null,
+    };
     expect(parseSourceToken(mintSourceToken(p))).toEqual(p);
   });
   it('rejects a wrong prefix', () => {
@@ -42,7 +49,13 @@ describe('source token', () => {
       Buffer.from(
         JSON.stringify({ docId: 'doc-123', docTitle: 't', headingId: null, anchor }),
       ).toString('base64url');
-    const expected = { docId: 'doc-123', docTitle: 't', headingId: null, anchor: null };
+    const expected = {
+      docId: 'doc-123',
+      docTitle: 't',
+      headingId: null,
+      scopeId: null,
+      anchor: null,
+    };
     // Inner fields are validated, not cast: a null quote fails the check.
     expect(
       parseSourceToken(mint({ quote: null, prefix: 'a', suffix: 'b', approxPos: 1 })),
@@ -55,6 +68,7 @@ describe('source token', () => {
       docId: 'd',
       docTitle: 'Fire 🔥 doc',
       headingId: null,
+      scopeId: null,
       anchor: { quote: '🧊❤️‍🔥 quote', prefix: '𝔭', suffix: '𐐷', approxPos: 1 },
     };
     expect(parseSourceToken(mintSourceToken(p))).toEqual(p);

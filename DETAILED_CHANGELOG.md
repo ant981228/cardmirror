@@ -5,6 +5,387 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Added: `POST /replace` - edit push-back from a flowing app
+
+The bridge could hand an item out and steer the user back to it
+(`/jump`), but nothing could change it: a flowing app whose user
+edited a card they had received held the only corrected copy, and the
+document stayed wrong. New route in
+`apps/desktop/src/fast-paste-bridge.ts` (body `{ source, text }`),
+renderer side in new `src/editor/external-replace.ts`,
+`src/editor/external-replace-host.ts`, and
+`src/editor/plugin-source-range.ts`, carried over the preload pair
+(`apps/desktop/src/preload.ts`) as `external:replace-text` /
+`external:replace-result`; installed from `src/editor/index.ts`, and
+`src/editor/plugin-jump.ts` is a refactor-only edit. Tests:
+`tests/desktop/fast-paste-bridge.test.ts` (route, caps, consent),
+plus new `tests/editor/plugin-source-range.test.ts`,
+`tests/editor/external-replace.test.ts`, and
+`tests/editor/external-replace-host.test.ts`.
+
+Main broadcasts to every doc window; the window holding the token's
+`docId` answers, the rest answer `not-mine`, and `not-mine` never
+reaches the wire - an all-`not-mine` outcome IS `doc-not-open`, which
+is the answer the caller can act on. The route is additive, so
+`/ping`'s `schema` stays 2 (an older build answers 404 on the path,
+which is a serviceable probe) and the frozen §5 contract is extended
+rather than changed. Consent is the existing per-app decision: no new
+consent code, no second prompt, and a denied app can no more replace
+than it can insert.
+
+**The reply re-mints the token, and that is load-bearing.** The stored
+descriptor QUOTES the text it anchors on (`learn-anchor.ts`), so a
+successful replace invalidates the very token that named the target -
+`resolveDescriptor` then looks for an occurrence of a quote that no
+longer exists, and the context gate rejects any coincidental hit. Had
+the success body been a bare `{ ok: true }`, every integration would
+have landed exactly one edit per item and seen `not-found` for the
+rest of the session: a failure that appears on the SECOND edit, i.e.
+after shipping, and reads to the user as "the connection broke".
+`buildDescriptor` runs against the post-write document and the fresh
+token goes back in the 200 with a spec obligation on the caller to
+store it in place of the one it sent.
+
+**Resolution is shared with `/jump`, not duplicated.**
+`resolveSourceRange` and `inMirroredContent` now live in
+`plugin-source-range.ts` and both routes import them, so the
+heading-then-anchor ladder, the context gate, and the
+self-transclusion exclusion (a hit inside read-only mirrored text is a
+coincidence, not the source) cannot drift apart between "show me this
+passage" and "rewrite this passage". Two copies agreeing on the day
+they are written diverge the first time either is tuned, and
+divergence here does not mean a missed scroll - it means rewriting a
+sentence the caller did not name.
+
+**No CRDT-aware code, deliberately.** The write is one
+`view.dispatch` of one transaction. `LoroSyncPlugin` is an ordinary
+entry in the view's plugin list (`collab/collab-session.ts`
+`plugins()`), so it observes an externally originated transaction
+exactly as it observes a keystroke and mirrors it into the CRDT as one
+step batch. Nothing in the route knows whether a co-editing session
+exists, and one transaction per call also means one Cmd-Z undoes the
+whole write.
+
+**The route refuses to focus, raise, or scroll.** It is built to be
+called on every settled edit in the companion app, so `/jump`'s
+behavior - raise the window, scroll to the range, select it - would
+hand a keystroke in one app control of another app's viewport, which
+is the difference between push-back being useful and being unusable.
+The transaction carries no `scrollIntoView`, no selection change, and
+no stored marks; main never calls `show`, `focus`, or `restore` on the
+route's path; and a test pins that silence so a later convenience
+cannot quietly add it back.
+
+**Card bodies are refused (`body-text`).** The accepted set is a
+whitelist in `external-replace.ts` of exactly what `/extract` emits -
+`pocket`, `hat`, `block`, `tag`, `analytic`, `undertag`,
+`cite_paragraph` - checked on the parent of the resolved range's
+`from`, ahead of building the transaction. `card_body` and doc-level
+`paragraph` are absent, and a schema addition is refused until someone
+decides it may travel. The symmetry with `/extract` is the argument:
+card bodies never leave the document (`plugin-extract.ts`, "spec rule,
+no override"), so no honest caller can hold a token naming one. A
+token that resolves to body text got there by anchor drift, and
+applying it would rewrite quoted evidence - the one class of text in
+the document whose value is that it is verbatim. That is a corrupted
+card rather than a stale one, and it would be invisible: no window is
+raised and nothing scrolls, so the user would not see it happen.
+`/jump` is untouched and still steers into card bodies; the shared
+`resolveSourceRange` stays kind-agnostic, because the restriction is
+about what may be WRITTEN, not about which textblock a token names.
+`broadcastReplace` ranks `body-text` above `not-found`: a window that
+holds the doc and refuses the target has answered, while another
+window's `not-found` is the absence of an answer. 200 with
+`ok: false`, and `docTitle` rides along as it does for `not-found`.
+
+### Added: `POST /insert-after` - anchored line adds from a flowing app
+
+`/extract` hands an item out, `/replace` rewrites one, `/jump` steers
+to one - and none of them can put text in the document that was never
+there. A flowing app whose user writes a NEW line between two items
+they received held that line alone: `/replace` only overwrites text
+that already exists, and `/insert` writes at the caret of a focused
+document, which is neither anchored nor silent. New route in
+`apps/desktop/src/fast-paste-bridge.ts` (body `{ source, text }`,
+`dispatchInsertAfterTo` / `broadcastInsertAfter` / the
+`pendingInsertAfterAcks` map beside the replace trio), renderer side in
+new `src/editor/external-insert-after.ts` and
+`src/editor/external-insert-after-host.ts`, carried over a new preload
+pair (`apps/desktop/src/preload.ts`) as `external:insert-after` /
+`external:insert-after-result` and installed from
+`src/editor/index.ts`, and `plugin-source-range.ts`'s header now names
+all three routes it serves. Tests: new
+`tests/editor/external-insert-after.test.ts` and
+`tests/editor/external-insert-after-host.test.ts`, plus route,
+precedence and consent cases in
+`tests/desktop/fast-paste-bridge.test.ts`. Additive like `/replace`, so
+`/ping`'s `schema` stays 2 and the frozen §5 contract is extended
+rather than changed; consent is the existing per-app decision, with no
+new consent code and no second prompt.
+
+**The reply token is the ONLY handle to the new line.** `/replace`
+re-mints a token for text the caller already had one for; here the
+token names text that did not exist when the request was sent, so a
+bare `{ ok: true }` would leave the caller having written a line into
+the user's document that it can never edit, jump to, or insert after -
+findable only by hand. `insertAfterTokenInView` therefore mints against
+the LANDED document rather than the arithmetic: slice fitting is free
+to move or wrap an inserted node, and a token minted over the wrong
+range would name a line the caller never wrote. If the computed content
+start does not hold exactly the text that was sent, the answer is
+`internal`, and `broadcastInsertAfter` turns an `ok` ack without a
+token into `internal` too. There is deliberately no fallback: unlike a
+failed re-mint, there is no older token to keep.
+
+**`internal` leads the error precedence, and that is a duplicate-write
+argument, not a tidiness one.** Every other code (`bad-request`,
+`doc-readonly`, `body-text`, `not-found`, `doc-not-open`) is a definite
+refusal that changed nothing and is safe for a caller to retry.
+`internal` is the one outcome where a line may be in the document with
+no token naming it, so a caller told anything retryable would send the
+request again and add the line twice - and the user, not the caller,
+finds the duplicate. `broadcastInsertAfter` therefore ranks `internal`
+ahead of every definite complaint before falling through to
+`doc-not-open`, and the reference docs tell callers to bar that line at
+that anchor for the session.
+
+**The same argument moves the ack timeout.** `dispatchInsertAfterTo`
+resolves a renderer that misses `RENDERER_ACK_TIMEOUT_MS` as
+`internal`, where the replace and jump dispatchers resolve `not-mine`.
+A wedged window may be the one holding the doc, may have inserted the
+line, and simply never answered; `not-mine` from every window is
+`doc-not-open`, which is definite, which is retried, which writes the
+line into the user's evidence file twice. So the slow-window case is
+priced deliberately: a merely slow renderer costs that line staying in
+the flowing app, and the alternative costs a duplicate in the document.
+`/replace` and `/jump` keep `not-mine` and are right to - a retried
+replace still leaves one node, and a retried jump moves a viewport.
+Draining `pendingInsertAfterAcks` at shutdown answers `internal` for
+the same reason. `doc-not-open` on this route now means every window
+actually answered and none held the doc.
+
+Status codes follow `/replace` exactly rather than being made
+stricter: two write-back routes disagreeing about the same error code
+is worse than either choice, and ebb reads the JSON body.
+
+**The new block's kind is READ, not sent.** An outside app names a
+line, never a structure, so the sibling takes the anchor's own type.
+`tag` is only ever a `card`'s first child and `analytic` only ever an
+`analytic_unit`'s (`schema/nodes.ts`), so those two arrive wrapped in a
+fresh single-heading container placed after the anchor's container,
+while every other accepted kind goes in beside the anchor node itself,
+which the `card` / `analytic_unit` content expressions allow. The
+wrapping rule is `HEADING_CONTAINER`, now exported from
+`external-insert.ts` instead of copied, so `/insert`'s roles and this
+route cannot come to disagree about where a tag is legal. Heading kinds
+get a fresh `newHeadingId()` - one built without an id is invisible to
+the nav pane - and the reply token carries that id, so it resolves by
+UUID rather than by quote; an undertag or cite reply resolves through
+its descriptor and carries the anchor's governing heading id.
+
+**Text arrives plain, and one line only.** `/replace` inherits the
+marks of the run it overwrites, which is the right guess when replacing
+that exact run. Here there is no run to inherit from: this is text
+nobody styled, and dressing it in a neighbour's marks would be a guess
+about intent rather than a carry-over. A `\r` or `\n` is `bad-request`
+rather than a node split, for the same reason as `/replace`: the caller
+described one line, and splitting it would build a structure it never
+asked for. Structure still goes through `/insert`'s roles.
+
+**The accepted anchor kinds are `/replace`'s whitelist, shared not
+copied.** `REPLACEABLE_TYPES` became the exported
+`EXTERNAL_WRITABLE_TYPES` in `external-replace.ts`, so the two
+write-back routes cannot drift apart about which text in the document
+an outside app may author. A `card_body` anchor is refused `body-text`:
+`/extract` never emits card bodies, so such a token can only come from
+anchor drift, and a `card_body` sibling would mean an outside app
+authoring evidence rather than commentary beside it.
+
+**Silent, and pinned as silent.** One `view.dispatch` of one
+transaction with no `scrollIntoView`, no selection change and no stored
+marks; main never calls `show`, `focus` or `restore` on this path. The
+editor test asserts one transaction and an unmoved selection, and the
+route test asserts a minimized window stays minimized - the flowing app
+calls this while its user types, so a window coming forward per line
+would fight the reader for their own screen. One transaction also means
+one Cmd-Z removes the whole insert and `LoroSyncPlugin` mirrors it into
+a co-editing session as one step batch.
+
+**A queued insert lands unaddressed, and the docs say so.** Consent
+`ask` enqueues the broadcast and answers `{ ok: true, pending:
+"consent" }` exactly as `/replace` does, so an Allow applies the held
+insert and the user's click is the redo. The token the renderer mints
+for it then has nobody to go to: the HTTP response is long since sent.
+That is the honest cost of queueing rather than dropping the request,
+and the reference docs state the consequence - `pending` is not a
+success, and re-sending after an allow adds the line twice.
+
+### Added: `POST /insert` reports where its text landed (`sources`)
+
+`/extract` hands an item out with a token, `/replace` re-mints one,
+`/insert-after` mints one for the line it adds - and `/insert`, the
+oldest write route, answered `{ ok, inserted, docTitle }` and named
+nothing. So a flowing app that pushed a tag or an analytic into a
+document had written text it could not address: no `/replace` on it, no
+`/insert-after` under it, no `/jump` to it, and no way to show its user
+that the line is linked. The one route that CREATES outline structure
+was the one route whose result was unaddressable. The success reply now
+carries `sources`: one `cmsrc1` token per inserted textblock, in
+document order, as many entries as `text` had lines.
+
+Purely additive: no field changes meaning, no error changes code,
+`/ping`'s `schema` stays 2, and a caller that ignores `sources` behaves
+exactly as before. `buildExternalInsertTransaction`
+(`src/editor/external-insert.ts`) now returns an `ExternalInsertPlan`
+(`{ tr, headings }`) rather than a bare `Transaction` - one way to build
+the transaction, not two - minting happens in
+`src/editor/external-insert-host.ts`, and the field rides the existing
+`external:insert-result` ack (`apps/desktop/src/preload.ts`,
+`apps/desktop/src/fast-paste-bridge.ts`). Tests:
+`tests/editor/external-insert.test.ts`,
+`tests/editor/external-insert-host.test.ts`,
+`tests/desktop/fast-paste-bridge.test.ts`.
+
+**Heading roles only, and the reason is what the other routes refuse.**
+`body` / `card` / `cite`, and inline mode (`newParagraph: false` outside
+a heading role, which outranks the flag), land as `card_body` or a
+doc-level `paragraph`, and both `/replace` and `/insert-after`
+refuse those as `body-text` (`EXTERNAL_WRITABLE_TYPES`) - quoted source
+text is the one thing in the document an outside app must never rewrite.
+A token there would be a handle to a line the caller can never use: it
+would resolve, look valid, and fail on first use. So the plan reports no
+headings for those paths and the field is ABSENT rather than empty - "we
+don't link this kind" and "this CardMirror doesn't mint tokens" read the
+same to a caller that tests for the field, which is the only test that
+works across versions.
+
+**Minted against the landed document, never the arithmetic.** The plan
+reports each heading's computed content start, and the host re-resolves
+every one against the doc the dispatch produced: the parent must be that
+heading type, `parentOffset` must be 0, and `textContent` must equal the
+line that was sent - the same verification `insertAfterTokenInView`
+does. One node per line is predictable arithmetic today, so this rail
+will not fire; it exists because the day `nearestValidInsertPos` or the
+slice fitting changes, a token minted over the wrong range would name a
+neighbour's line, and the caller's next `/replace` would rewrite text
+the user wrote. The failure has to land as lost provenance here, not as
+silent corruption three routes later.
+
+**All-or-nothing, and never fatal.** A single heading that doesn't
+verify drops the whole field, because a caller has no way to tell which
+entry of a short list belongs to which line. What it never does is fail
+the insert: the text is in the document, so the reply stays
+`ok: true, inserted: true` and simply carries no handle - a missing
+`sources` is a caller losing provenance, never a write that didn't
+happen. Main applies the same rule to the ack it relays (every entry
+must be a `cmsrc1` token, or the list is dropped), so the two halves
+cannot disagree about a partial list.
+
+**Identity comes from the host, because only the host knows which
+document took the insert.** A token names a `docId`, and the primitive
+is doc-blind, so `ExternalInsertHostOpts.getDocIdentity(uid?)` answers
+for the focused doc or for an addressed pane. The focused path mints a
+docId for a never-saved document the way `/extract` does on its first
+emit - without it the everyday "fresh file" case would silently lose
+provenance - and it is called only once a heading actually landed, so an
+insert with nothing to name never stamps an identity. A targeted
+background pane's id is READ, not minted: stamping an identity (and
+rekeying that doc's Learn annotations) onto a document the user is not
+looking at belongs to that document's own first save, so an unsaved
+addressed pane answers no `sources`. The heading id in each token is the
+`newHeadingId()` the primitive stamped, so tokens resolve by UUID and
+survive the line being retyped; the text anchor is the fallback, and is
+omitted for a blank line, where an empty quote would match anywhere.
+
+**A queued insert carries none.** Consent `ask` answers
+`{ ok: true, inserted: false, pending: "consent" }` before anything has
+happened, and the tokens the renderer mints when the user's Allow
+replays the insert have no reply left to travel on - the same honest
+cost `/insert-after` documents for its queued adds.
+
+### Fixed: a token names its own line, not the heading above it
+
+`/extract` mints every item's token with the GOVERNING heading in
+`headingId` (`plugin-extract.ts`, and the field's own doc comment said
+"governing"), while `resolveSourceRange` treated a resolvable `headingId`
+as naming the target and returned final on it - deliberately, so a renamed
+heading could not retarget a stale quote. The two never agreed about what
+the field meant, and for every item that is not itself a heading the
+editor resolved the wrong line:
+
+- `/replace` on an undertag or a cite **overwrote the card's tag** -
+  silently, since the route raises no window and scrolls nothing. A
+  qualifier edited in the flow destroyed the tag the debater wrote.
+- `/insert-after` on one added its line after the tag instead of after the
+  line it was anchored to.
+- `/jump` to one selected the tag.
+- The API doc's promise that undertags and cites "resolve by text anchor"
+  was false: the anchor was minted and then never consulted while the
+  governing heading still existed.
+
+The payload now separates the two meanings. `headingId` is the TARGET and
+is set only for heading kinds; `scopeId` is the governing heading and is
+scope only - it says where the anchor may resolve, never what it names.
+`resolveSourceRange` reads them in that order: a target heading wins
+outright, otherwise the anchor decides inside the scope's section.
+
+Scope earns its keep beyond the fix: a living scope is AUTHORITATIVE, so an
+undertag worded identically in two cards resolves inside its own, and when
+the named line is gone the answer is `not-found` rather than a look-alike
+in another card - the same "a coincidental match is not the source"
+reasoning that already excludes mirrored `self_ref` content. Only a scope
+whose heading is itself gone falls back to a whole-document search.
+
+**Tokens already stored in companion apps keep working.** They carry a
+governing `headingId` and no `scopeId`, and that absence is what marks
+them: for such a token the resolver tries the anchor inside that heading's
+section first, and when it lands on a different line inside the section,
+that line is what the token named. A heading's own token quotes its own
+text, so the shim cannot retarget one. `/replace` re-mints in the
+corrected shape (a non-heading target comes back with `headingId: null`
+and the governing heading as `scopeId`), so a caller that stores what the
+route returns leaves the legacy shape behind after one edit.
+
+`tests/editor/source-token-targets.test.ts` is the regression, and it
+failed on eight assertions before the fix, every one resolving to the tag:
+the undertag and cite targets, the payload shape, scope authority when the
+named line is deleted, the legacy shim, `/replace` leaving the tag alone,
+and `/insert-after` both placing its line and naming it correctly. Four
+assertions in `plugin-extract.test.ts` moved from `headingId` to `scopeId`
+- they encoded the conflation.
+
+### Changed: only `/jump` may raise a background pane
+
+`Shell.findViewForDocId` (`src/editor/multi-pane-shell.ts`) resolved a
+doc by scanning every slot's full stack and called `slot.showRecord(rec)`
+before returning it. That was written for `/jump`, where raising a
+stacked-but-hidden record is the request: its view stays memory-resident
+while hidden but its `editorEl` is detached, so landing a caret in it
+would show the user nothing. `/replace` and `/insert-after` share that
+resolver and document the opposite promise - "no focus, no scrolling, no
+caret movement" - which a raising resolver would break: `showRecord`
+runs `detachVisible()` + `mountVisible()` + `focusSlot()`, so a consented
+app editing a line in a stacked, non-visible document would pull that
+document to the front, and if it shared a slot with the document the
+user was typing in, that document's `editorEl` would leave the DOM
+mid-keystroke.
+
+The resolver now takes `findViewForDocId(docId, opts?: { raise?: boolean })`
+and defaults to quiet; only `installPluginJumpHost` and the plugin API's
+`jumpToSource` pass `{ raise: true }`. All three routes keep the same
+resolver, so they cannot disagree about which pane owns a document -
+only the raising differs. The two silent hosts take a ONE-PARAMETER
+resolver type, so asking to raise is a type error there rather than a
+convention someone has to remember. The two raising install sites hand
+over the module function by reference instead of through a wrapper: a
+wrapper that drops `opts` typechecks, and would silently un-raise
+`/jump`. `tests/editor/pane-raise-contract.test.ts` pins who asks. The
+shell's own branch is not reachable from a test (`Shell` and `Slot` are
+module-private and `mountMultiPaneShell()` is the only export), which is
+what the one-parameter types are standing in for.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

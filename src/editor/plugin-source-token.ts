@@ -13,9 +13,19 @@ export interface SourcePayload {
   docId: string;
   /** For user-facing "open <title> first" messages when the doc isn't open. */
   docTitle: string;
-  /** Stable heading UUID of the governing heading, or null. */
+  /** Stable heading UUID this token NAMES, or null. Set only for heading
+   *  kinds (pocket / hat / block / tag / analytic): an undertag or a cite
+   *  names no heading, and putting its governing heading here made
+   *  resolution answer with the tag above it. */
   headingId: string | null;
-  /** Text anchor over the item's own text, for UUID-less fallback. */
+  /** Stable heading UUID of the section the item lives in, or null. Scope,
+   *  never target: it narrows where the anchor may resolve, so an undertag
+   *  quoted identically in two cards resolves inside its own. Its presence
+   *  also marks a token minted after the target/scope split - a token
+   *  without it may carry a governing heading in `headingId`. */
+  scopeId: string | null;
+  /** Text anchor over the item's own text. The only resolver for the
+   *  id-less kinds, and the fallback for a heading whose id is gone. */
   anchor: AnchorDescriptor | null;
 }
 
@@ -53,6 +63,7 @@ export function parseSourceToken(token: string): SourcePayload | null {
       docTitle: typeof obj.docTitle === 'string' ? obj.docTitle : '',
       headingId:
         typeof obj.headingId === 'string' && obj.headingId ? obj.headingId : null,
+      scopeId: typeof obj.scopeId === 'string' && obj.scopeId ? obj.scopeId : null,
       anchor: isAnchorDescriptor(obj.anchor)
         ? {
             quote: obj.anchor.quote,

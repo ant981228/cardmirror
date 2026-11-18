@@ -8,10 +8,13 @@ The sources of truth are `src/editor/plugin-api.ts`,
 
 Stability: **sections 4 and 5 (the cardmirror-bridge handshake and the
 HTTP routes) are FROZEN** — flowing apps ship against them, and changes
-must stay backward compatible. **Sections 1 to 3 and 6 (the renderer
-plugin API) are a DRAFT**: v1 plugins are full-trust code (see the
-install model below), and a future sandboxed v2 may change this surface
-— write plugins against it with that expectation.
+must stay backward compatible. Adding a route is the one compatible way
+to extend the HTTP surface: no existing client calls a path it has
+never heard of, so a new route needs no schema bump, while any change
+to a route already documented here does. **Sections 1 to 3 and 6 (the
+renderer plugin API) are a DRAFT**: v1 plugins are full-trust code (see
+the install model below), and a future sandboxed v2 may change this
+surface — write plugins against it with that expectation.
 
 Audience: plugin authors and authors of flowing apps. Sections 1 to 3
 and 6 cover renderer plugins. Sections 4 and 5 cover cross-app
@@ -394,10 +397,50 @@ Each extracted item carries one provenance string in `source`. The
 current format starts with the `cmsrc1` prefix. The token is opaque:
 
 - Store it.
-- Pass it back verbatim, to `jumpToSource` or to the `/jump` route.
+- Pass it back verbatim, to `jumpToSource` or to the `/jump`,
+  `/replace` or `/insert-after` route.
+- Replace your stored copy whenever a route hands you a new one.
+  `/replace` does, because rewriting the text invalidates the token
+  that anchored on it (section 5). `/insert-after` hands back a token
+  for the line it just created: store that one as the new item's, and
+  keep the anchor's unchanged.
 - Never parse it and never build one. Only CardMirror mints and parses
   tokens. A future format change bumps the prefix, and old tokens stay
   valid.
+
+What a token survives, and what it does not:
+
+- **The line being rewritten in CardMirror.** A heading kind - pocket,
+  hat, block, tag, analytic - carries a stable id, so retyping the line
+  leaves the token resolving.
+- **A cut and paste can give the pasted heading a new id.** The token then
+  falls back to its text and the context around it, which a move
+  changes, so expect `not-found` after the user moves a line by
+  clipboard. A nav-pane drag moves the node whole and keeps the id.
+- **An undertag or a cite has no id**, so a token naming one resolves by
+  its text and the context around it, searched INSIDE the card (or
+  section) it was extracted from. Two cards worded identically therefore
+  never get confused for each other, and a token whose own line is gone
+  answers `not-found` rather than retargeting a look-alike elsewhere. A
+  rewrite of nearby text survives; a move of the line to another card does
+  not.
+- **A token names one line, never its heading.** An undertag's token
+  addresses that undertag, and a cite's addresses that cite - `/replace`
+  and `/insert-after` act on the line you were given, not on the tag above
+  it. Tokens minted by earlier builds conflated the two and do not say
+  which kind of line they named, so CardMirror tells them apart by the
+  text around the line. They are still accepted and resolve to the right
+  line, and a `/replace` through one hands back a corrected token - which
+  is one more reason to store every token a route returns. Where the
+  surroundings no longer settle it (an undertag or cite rewritten since
+  the token was minted, or a heading renamed while the text just before
+  it also changed), such a token answers `not-found` rather than risk
+  writing to the tag above.
+- **Deleting the line loses it**, which is the honest answer:
+  `not-found`.
+- **A move to a DIFFERENT document loses it.** A token names one
+  document, and the routes refuse a token whose document is not the one
+  they resolve against.
 
 ## 4. The cardmirror-bridge handshake
 
@@ -509,9 +552,10 @@ when present, else the raw id): **Always Allow / Allow Once / Deny**.
 Always/Deny are remembered and manageable under Settings → Plugins →
 External apps; dismissing records nothing and asks again next time.
 One decision covers the whole gated surface — a denied app can
-neither insert nor jump. This is consent UX for cooperating local
-apps, not a security boundary: identity is self-declared, and any
-same-user process is inside the trust line regardless.
+neither insert, jump, replace, nor add a line beside an item. This is
+consent UX for cooperating local apps, not a security boundary:
+identity is self-declared, and any same-user process is inside the
+trust line regardless.
 
 While the prompt is open, requests are **queued** (up to 10 per app,
 arrival order) and answered with:
@@ -520,10 +564,11 @@ arrival order) and answered with:
 { "ok": true, "inserted": false, "pending": "consent" }
 ```
 
-(`jumped` instead of `inserted` on `/jump`.) Do not retry — if the
-user allows, the queued actions apply immediately, so their click is
-the redo; if they deny or dismiss, the queue is discarded. Show
-something neutral like "waiting for approval in CardMirror".
+(`jumped` instead of `inserted` on `/jump`; `/replace` and
+`/insert-after` carry neither.) Do not retry — if the user allows, the
+queued actions apply immediately, so their click is the redo; if they
+deny or dismiss, the queue is discarded. Show something neutral like
+"waiting for approval in CardMirror".
 
 Consent-layer errors, all HTTP 200 with `ok: false`:
 
@@ -557,7 +602,9 @@ Liveness and capability probe. Response, schema 2:
 }
 ```
 
-`schema: 2` signals that `/jump` is available.
+`schema: 2` signals that `/jump` is available. It does not move for a
+route added after it: probe a newer route by calling it and reading
+the status code (see `/replace`).
 
 ### GET /docs (since 0.1.0-beta.23)
 
@@ -589,7 +636,8 @@ since 0.1.0-beta.23 it also requires `X-App-Id` and consent (see
 above). The full wire contract is in `cardmirror-integration-spec.md`
 in this folder. In short: the body is
 `{ "text": "...", "role": "...", "newParagraph": true, "omitted": false }`,
-and the response is `{ "ok": true, "inserted": true, "docTitle": "..." }`
+and the response is
+`{ "ok": true, "inserted": true, "docTitle": "...", "sources": ["cmsrc1..."] }`
 or `{ "ok": false, "error": "no-target-doc" | "doc-readonly" | "bad-request" }`
 — plus the consent-layer responses above.
 
@@ -629,6 +677,45 @@ own structure and marks.
 may include `"citeTokens": ["Smith", "24"]` — verbatim substrings of
 the first line styled with the cite mark on arrival. Ignored by older
 CardMirrors and when `html` is used.
+
+**Provenance: `sources`.** On success a heading-role insert also
+carries `sources` - one `cmsrc1` token per line of `text`, in document
+order, minted for the heading that line became. They are the same
+tokens `/extract` emits, so each one is a full handle to the line you
+just dictated: `/replace` rewrites it, `/insert-after` adds under it,
+`/jump` steers the user to it. Store them the way you store extracted
+items; nothing else in the reply identifies what you wrote.
+
+`sources` is ABSENT, not empty, in every other case:
+
+- **A body-ish role** - `card`, `body`, `cite`, or `inline` /
+  `newParagraph: false` with one of them. Those land as card body text
+  or a loose paragraph, and `/replace` and `/insert-after` refuse both
+  as `body-text` - so a token there would be a handle to a line you
+  could never use. The route does not link this kind of insert at all.
+  (A heading role still reports its headings under
+  `newParagraph: false`: the role outranks the flag, so what landed is
+  a heading either way.)
+- **A queued insert** (`{ "ok": true, "inserted": false, "pending":
+  "consent" }`). Nothing has landed yet, and the tokens minted when the
+  user's Allow replays it have no reply left to travel on.
+- **An older CardMirror**, which never sent the field.
+- **A doc-targeted heading insert into a document that has never been
+  saved.** A token names a document, and an unsaved one has no
+  persistent id to name yet. The focus-follow path mints that id on the
+  spot; an addressed background pane does not, because stamping an
+  identity onto a document the user is not looking at belongs to that
+  document's own first save.
+- **A heading insert CardMirror could not verify.** Every token is
+  checked against the document that actually landed; if one heading is
+  not where it was expected, the whole field is dropped rather than
+  shipped short or naming the wrong line. An absent `sources` is
+  provenance lost, never an insert that failed: `ok` and `inserted`
+  still report what happened to the text.
+
+So test for the field, never for its length, and treat "no `sources`"
+as "this line is not linked" - not as an error and not as a reason to
+re-send.
 
 **Targeting.** Two modes, the caller's choice per request:
 
@@ -677,6 +764,226 @@ Example `doc-not-open` response:
 ```json
 { "ok": false, "error": "doc-not-open", "docTitle": "AT - Cap K" }
 ```
+
+### POST /replace
+
+Update the text of an item a flowing app previously received: the
+companion app's user edits their copy, and the document follows.
+Requires `X-App-Id` and consent (see above), governed by the SAME
+per-app decision as `/insert` and `/jump` - one decision covers the
+whole gated surface, so an app allowed to insert is allowed to
+replace. Send the stored source token verbatim plus the new text:
+
+```json
+{ "source": "cmsrc1.eyJkb2NJZCI6...", "text": "The plan causes poverty." }
+```
+
+On success, CardMirror rewrites the item in place and answers with a
+token:
+
+```json
+{ "ok": true, "source": "cmsrc1.eyJkb2NJZCI6..." }
+```
+
+**Store the returned `source` in place of the one you sent.** The
+token you sent anchors on the text this call just replaced, so it
+stops resolving the instant the edit lands; the reply carries a
+freshly minted token for the same item in its new state. This is not
+decorative. A caller that ignores the reply gets exactly one
+successful edit per item and `not-found` for every edit after that -
+including from `/jump`, which reads the same tokens.
+
+**One textblock, one line.** The token names a single textblock (a tag,
+an analytic, an undertag, a cite), and the route replaces that block's
+whole content. It never edits part of a block, and it never splits,
+joins, or creates nodes: `text` is one line, and a newline in it is
+`bad-request` rather than a node split. Send structure through
+`/insert`, which has roles for it. There is also no delete - empty or
+whitespace-only `text` is rejected, so this route can never remove text
+from a document.
+
+**Card bodies are never rewritten.** The route only accepts the kinds
+`/extract` emits: pockets, hats, blocks, tags, analytics, undertags and
+cites. Card bodies and loose paragraphs are refused with `body-text`,
+because they are quoted source text - the one thing in the document that
+must stay verbatim. This matches what you were sent: card bodies do not
+leave the document through `/extract`, so a token naming one can only
+come from an anchor that drifted onto body text, and applying that edit
+would corrupt evidence rather than update your item.
+
+Marks carry, approximately. The replacement takes the styling of the
+run the replaced range starts on, so a highlighted or underlined tag
+does not come back as plain text. That is an approximation and not a
+promise: the new text has no correspondence to the old, so nothing is
+guaranteed about which words inside the block keep partial
+formatting, and marks anchored to that exact run rather than to the
+block - a link, a comment range - are dropped on purpose.
+
+The write goes in as one transaction, so the user undoes it with a
+single Cmd-Z, and a co-editing session receives it as one step.
+
+**No focus, no scrolling, no caret movement.** Unlike `/jump`, this
+route never raises or focuses a window, never scrolls the user's
+view, and never moves their caret or selection. That silence is the
+point: the route is meant to be called on every settled edit in the
+companion app, and one that stole the reader's focus or place per
+keystroke would be unusable. When you do want the user's eyes on the
+item, call `/jump` yourself.
+
+Error responses:
+
+| Error | HTTP status | Meaning | Extra field |
+| --- | --- | --- | --- |
+| `doc-not-open` | 200 | The token's document is not open in any window. | `docTitle` - show "open `<docTitle>` first". |
+| `not-found` | 200 | The document is open, but the token no longer resolves - the text was edited elsewhere or deleted. (A match inside a read-only mirrored copy does not count, same rule as `/jump`.) | none |
+| `doc-readonly` | 200 | The document is open in a read-only view, or in read mode. | none |
+| `body-text` | 200 | The token resolves to a card body or a loose paragraph. Card body text is never rewritten; see above. | `docTitle` |
+| `internal` | 200 or 500 | CardMirror could not apply the edit, or applied it and could not mint the replacement token. | none |
+| `bad-request` | 400 | The body is not JSON or exceeds 64 KiB; `source` is missing or is not a `cmsrc1` token; `text` is missing, empty after trimming, longer than 8192 characters, or contains a carriage return or line feed. | none |
+
+Do not blind-retry `internal` with the same token: the write may have
+landed, in which case the token you hold no longer resolves and every
+retry is `not-found`. Treat the item as unlinked and re-establish it.
+
+Body validation runs BEFORE the consent gate, so a malformed request
+is a 400 even from an app whose first request is still waiting for
+approval - a 400 is never a consent problem in disguise.
+
+Plus the consent-layer responses above. While the consent prompt is
+open, a replace is queued and answered with:
+
+```json
+{ "ok": true, "pending": "consent" }
+```
+
+Note what that reply does NOT carry: a `source`. It is not a success.
+Do not store anything, do not retry, and do not mark the item as
+pushed. If the user allows, the queued replace applies immediately -
+their click is the redo; if they deny or dismiss, the queue is
+discarded.
+
+Availability: `/ping`'s `schema` does not move for an additive route,
+so probe by calling. A CardMirror without `/replace` answers HTTP
+**404** with `{ "ok": false, "error": "bad-request" }` - the status
+code, not the error string, is what separates "no such route" from
+this route rejecting a malformed body with a 400.
+
+### POST /insert-after
+
+Add a line to the document, immediately after an item a flowing app
+previously received. `/extract` hands items out, `/replace` edits one
+of them, and neither can put text in the document that was never there:
+when the companion app's user types a NEW line between two items they
+took from a document, that line belongs in the document too. Requires
+`X-App-Id` and consent (see above), governed by the SAME per-app
+decision as `/insert`, `/jump` and `/replace`. Send the stored token of
+the item the new line goes after, plus the text:
+
+```json
+{ "source": "cmsrc1.eyJkb2NJZCI6...", "text": "And a second reason it fails." }
+```
+
+On success, the line is in the document and the reply carries a token
+for it:
+
+```json
+{ "ok": true, "source": "cmsrc1.eyJkb2NJZCI6..." }
+```
+
+**Store the returned `source`: it is the only handle to the line you
+just created.** Unlike `/replace`, which re-mints a token for text you
+already had one for, this reply names text that did not exist when you
+sent the request. Drop it and the line is orphaned from your side: you
+cannot edit it through `/replace`, jump to it, or insert after it in
+turn - you would have to find it by hand. A success without a token is
+not something the route ever answers; if it cannot mint one, it answers
+`internal` (see below).
+
+**What lands: one sibling of the anchor's own kind.** The kind is read
+off the item you named, never sent - an outside app names a line, not a
+structure:
+
+| Anchor kind | Result |
+| --- | --- |
+| `tag` | A new card, headed by a new tag, after the anchor's card. |
+| `analytic` | A new analytic_unit, headed by a new analytic, after the anchor's unit. |
+| `pocket`, `hat`, `block` | A new heading of the same level, after the anchor. |
+| `undertag`, `cite_paragraph` | A sibling of the same kind, inside the same card or unit, right after the anchor. |
+
+A tag is only ever a card's first child and an analytic only ever an
+analytic_unit's, which is why those two arrive wrapped in a fresh
+single-heading container rather than squeezed in beside the anchor. In
+every case **the anchor's own line is untouched** - this route only
+adds. Send structure through `/insert`, which has roles for it.
+
+**One line, and plain.** `text` is a single line: a carriage return or
+line feed is `bad-request`, not a node split, and empty or
+whitespace-only `text` is rejected, so this route can never remove or
+reshape anything. The text arrives unstyled. That is the one place it
+deliberately differs from `/replace`, which carries the styling of the
+run it overwrites: here there is no run to inherit from, and dressing
+new text in a neighbour's marks would be a guess about intent.
+
+**Card bodies are never written beside.** The anchor must be one of the
+kinds `/extract` emits: pockets, hats, blocks, tags, analytics,
+undertags and cites - the same whitelist `/replace` accepts. A token
+resolving to a card body or a loose paragraph is refused with
+`body-text`, because a card body sibling would mean an outside app
+authoring evidence.
+
+The insert goes in as one transaction, so the user undoes it with a
+single Cmd-Z, and a co-editing session receives it as one step.
+
+**No focus, no scrolling, no caret movement.** Like `/replace` and
+unlike `/jump`, this route never raises or focuses a window, never
+scrolls the user's view, and never moves their caret or selection. It is
+meant to be called while the companion app's user types.
+
+Error responses:
+
+| Error | HTTP status | Meaning | Extra field |
+| --- | --- | --- | --- |
+| `doc-not-open` | 200 | Every window answered, and none of them holds the token's document. | `docTitle` - show "open `<docTitle>` first". |
+| `not-found` | 200 | The document is open, but the token no longer resolves, so there is no line to add after. | none |
+| `doc-readonly` | 200 | The document is open in a read-only view, or in read mode. | none |
+| `body-text` | 200 | The token resolves to a card body or a loose paragraph; see above. | `docTitle` |
+| `internal` | 200 or 500 | CardMirror could not add the line, **or added it and could not mint a token for it, or a window holding the document did not answer in time.** Anything that might have changed the document without reporting a token is reported here rather than as a definite refusal. | none |
+| `bad-request` | 400 | The body is not JSON or exceeds 64 KiB; `source` is missing or is not a `cmsrc1` token; `text` is missing, empty after trimming, longer than 8192 characters, or contains a carriage return or line feed. | none |
+
+**Never retry `internal`, and never retry a transport timeout.** They
+are the outcomes where the line may already be in the user's document
+with no token coming back, so a retry writes the line a second time -
+and the user, not you, is the one who finds the duplicate. Note that
+`internal` deliberately absorbs a case `/replace` reports as
+`doc-not-open`: a window that holds the document but stops answering.
+Bar that line at that anchor for the rest of the session and treat it as
+unlinked. Every other error above is definite: nothing was added, so
+once you have fixed the cause (or the user has opened the document) the
+same request is safe to send again.
+
+Body validation runs BEFORE the consent gate, so a malformed request is
+a 400 even from an app whose first request is still waiting for
+approval - a 400 is never a consent problem in disguise.
+
+Plus the consent-layer responses above. While the consent prompt is
+open, an insert-after is queued and answered with:
+
+```json
+{ "ok": true, "pending": "consent" }
+```
+
+That is not a success and it carries no `source`. If the user allows,
+the queued insert applies immediately - their click is the redo - but
+the token minted for it has nobody left to go to, so the line lands
+unaddressed; if they deny or dismiss, the queue is discarded. Do not
+re-send after an allow: you would add the line twice. Wait for a plain
+`ok` before recording anything.
+
+Availability: `/ping`'s `schema` does not move for an additive route,
+so probe by calling. A CardMirror without `/insert-after` answers HTTP
+**404** with `{ "ok": false, "error": "bad-request" }` - the status
+code, not the error string, is what separates "no such route" from
+this route rejecting a malformed body with a 400.
 
 Any other path returns 404 with `{ "ok": false, "error": "bad-request" }`.
 

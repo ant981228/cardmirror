@@ -58,7 +58,7 @@ const doc = schema.nodes['doc']!.createChecked(null, [
 describe('jumpToTokenInView', () => {
   it('jumps to a heading by UUID', () => {
     const view = makeView(doc);
-    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'd1', docTitle: 'T', headingId: id, scopeId: id, anchor: null });
     expect(jumpToTokenInView(view, 'd1', token)).toEqual({ ok: true });
     expect(view.state.doc.resolve(view.state.selection.from).parent.textContent).toBe(
       'Target heading',
@@ -70,13 +70,14 @@ describe('jumpToTokenInView', () => {
       docId: 'd1',
       docTitle: 'T',
       headingId: newHeadingId(), // not in the doc
+      scopeId: null,
       anchor: { quote: 'Target heading', prefix: '', suffix: '', approxPos: 5 },
     });
     expect(jumpToTokenInView(view, 'd1', token)).toEqual({ ok: true });
   });
   it("reports not-mine for another doc's token", () => {
     const view = makeView(doc);
-    const token = mintSourceToken({ docId: 'other', docTitle: 'O', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'other', docTitle: 'O', headingId: id, scopeId: id, anchor: null });
     expect(jumpToTokenInView(view, 'd1', token)).toBe('not-mine');
   });
   it('reports not-found with the docTitle when nothing resolves', () => {
@@ -85,6 +86,7 @@ describe('jumpToTokenInView', () => {
       docId: 'd1',
       docTitle: 'T',
       headingId: newHeadingId(),
+      scopeId: null,
       anchor: { quote: 'absent text zzz', prefix: '', suffix: '', approxPos: 0 },
     });
     expect(jumpToTokenInView(view, 'd1', token)).toEqual({
@@ -114,7 +116,7 @@ describe('installPluginJumpHost', () => {
     installPluginJumpHost({
       findViewForDocId: (docId) => (docId === 'dB' ? viewB : docId === 'dA' ? viewA : null),
     });
-    const token = mintSourceToken({ docId: 'dB', docTitle: 'B', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'dB', docTitle: 'B', headingId: id, scopeId: id, anchor: null });
     bridge.fire(token);
     expect(bridge.acks).toEqual([{ requestId: 'r1', ok: true }]);
     expect(viewB.state.doc.resolve(viewB.state.selection.from).parent.textContent).toBe(
@@ -137,7 +139,7 @@ describe('installPluginJumpHost', () => {
         return vB;
       },
     });
-    const token = mintSourceToken({ docId: 'dB', docTitle: 'B', headingId: id, anchor: null });
+    const token = mintSourceToken({ docId: 'dB', docTitle: 'B', headingId: id, scopeId: id, anchor: null });
     bridge.fire(token);
     expect(bridge.acks).toEqual([{ requestId: 'r1', ok: true }]);
     expect(visible).toBe(vB); // the hidden doc was raised
@@ -157,6 +159,7 @@ describe('installPluginJumpHost', () => {
       docId: 'd1',
       docTitle: 'T',
       headingId: newHeadingId(), // absent — force the anchor fallback
+      scopeId: null,
       anchor: { quote: 'Mirror only quote', prefix: '', suffix: '', approxPos: 0 },
     });
     expect(jumpToTokenInView(view, 'd1', token)).toEqual({
@@ -180,6 +183,7 @@ describe('installPluginJumpHost', () => {
       docId: 'd1',
       docTitle: 'T',
       headingId: newHeadingId(), // absent — force the anchor fallback
+      scopeId: null,
       anchor: { quote: 'Mirror only quote', prefix: '', suffix: '', approxPos: 0 },
     });
     expect(jumpToTokenInView(view, 'd1', token)).toEqual({
