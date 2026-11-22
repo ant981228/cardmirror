@@ -58,6 +58,7 @@ import { generateGroupId, normalizePairingCode } from './pairing/pairing-ids.js'
 import { inboxStore, recentSenders } from './pairing/inbox-store.js';
 import { regenerateOwnCode } from './pairing/pairing-wiring.js';
 import { isFontAvailable } from './font-detect.js';
+import { attachCustomFontInput, buildOtherFontOption } from './custom-font-input.js';
 import { repointFolderRoot } from './folder-list-repoint.js';
 import {
   WORD_HIGHLIGHT_COLORS,
@@ -2296,15 +2297,11 @@ function buildBodyFontEditor(): HTMLElement {
       for (const font of available) og.appendChild(buildOption(font));
       select.appendChild(og);
     }
+    select.appendChild(buildOtherFontOption());
   }
 
   populate();
-
-  select.addEventListener('change', () => {
-    settings.set('bodyFont', select.value);
-  });
-
-  wrap.appendChild(select);
+  attachCustomFontInput(wrap, select, 'bodyFont');
 
   const unsubscribe = settings.subscribe(() => {
     if (select.value !== settings.get('bodyFont')) populate();
@@ -2361,15 +2358,11 @@ function buildUiFontEditor(): HTMLElement {
       for (const font of available) og.appendChild(buildOption(font));
       select.appendChild(og);
     }
+    select.appendChild(buildOtherFontOption());
   }
 
   populate();
-
-  select.addEventListener('change', () => {
-    settings.set('uiFont', select.value);
-  });
-
-  wrap.appendChild(select);
+  attachCustomFontInput(wrap, select, 'uiFont');
 
   const unsubscribe = settings.subscribe(() => {
     if (select.value !== settings.get('uiFont')) populate();
