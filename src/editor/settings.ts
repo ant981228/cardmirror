@@ -5692,10 +5692,15 @@ export const CUSTOMIZABLE_COLOR_TOKENS: readonly CustomizableColorToken[] = [
   { group: 'Document text', name: 'pmd-color-analytic', label: 'Analytic text' },
   { group: 'Document text', name: 'pmd-color-undertag', label: 'Undertag text' },
   { group: 'Document text', name: 'pmd-color-reading-marker', label: 'Reading marker & unread text' },
-  // The underline LINE inside analytics only, never the text. A plain
-  // override (not displayColors-backed); unset in style.css, so with no
-  // pick the line keeps following the text color.
+  // Underline LINE colors, never the text. Plain overrides (not
+  // displayColors-backed) that style.css leaves unset, so with no pick
+  // the line keeps following the text color. Each applies only inside
+  // its context: analytics; tag paragraphs; text bearing the cite MARK
+  // (not the unmarked text of a cite paragraph). Highlight and shading
+  // still force the line to the band's black/white for contrast.
   { group: 'Document text', name: 'pmd-c-analytic-underline', label: 'Analytic underline' },
+  { group: 'Document text', name: 'pmd-c-tag-underline', label: 'Tag underline' },
+  { group: 'Document text', name: 'pmd-c-cite-underline', label: 'Cite underline' },
 
   // Live-zone chrome — also backed by displayColors (linked to the Appearance
   // Style-colors picker), grouped apart from document text.

@@ -5780,7 +5780,7 @@ function buildColorOverridesEditor(): HTMLElement {
       const value = currentValue(tok.name);
       const { r, g, b, a } = parseToRgbaParts(value);
       swatch.style.background = value;
-      // A token style.css leaves unset (pmd-c-analytic-underline) has no value until picked.
+      // A token style.css leaves unset (the underline-line overrides) has no value until picked.
       hex.textContent = value || 'follows text';
       input.value = toHex(r, g, b);
       alpha.value = String(a);

@@ -3408,20 +3408,36 @@ code {
 /* StyleUnderline: just an underline. Per-style font size is driven
    by `--pmd-size-underline` (settings.displaySizes.underline), set
    on documentElement by `applyDisplaySizes` in index.ts. */
-/* Analytic underline color: Accessibility -> Color overrides ->
-   "Analytic underline" sets `--pmd-c-analytic-underline` on the root;
-   it is unset by default. Analytics re-publish it as the inherited
-   `--pmd-analytic-underline`, so the underline rules below pick it up
-   only inside an analytic and fall back everywhere else (and when
-   unset) to what the line was before: the text color, or the band
-   foreground over a highlight. Recolors the line only, never the text.
-   Display-only. */
+/* Underline color overrides: Accessibility -> Color overrides ->
+   Document text -> "Analytic underline" / "Tag underline" / "Cite
+   underline" set `--pmd-c-analytic-underline`, `--pmd-c-tag-underline`
+   and `--pmd-c-cite-underline` on the root. All three are unset by
+   default. Each context re-publishes its token as an inherited
+   variable, so a line picks it up only when it is drawn inside that
+   context:
+     - analytic: an analytic paragraph or an analytic-styled run
+     - tag:      a tag paragraph
+     - cite:     text bearing the cite MARK (`.pmd-cite`) — not the
+                 unmarked text of a cite paragraph
+   The underline rules read them innermost-first (cite, then analytic,
+   then tag — the only nestings the schema allows) and fall back to
+   what the line was before: the text color. They recolor the line
+   only, never the text, and are display-only.
+   Highlight and shading still win: the band rules further down paint
+   the line black or white over a highlight for contrast, whatever the
+   override says. */
 .pmd-analytic,
 .pmd-analytic-mark {
   --pmd-analytic-underline: var(--pmd-c-analytic-underline);
 }
+.pmd-tag {
+  --pmd-tag-underline: var(--pmd-c-tag-underline);
+}
+.pmd-cite {
+  --pmd-cite-underline: var(--pmd-c-cite-underline);
+}
 .ProseMirror u {
-  text-decoration-color: var(--pmd-analytic-underline, currentColor);
+  text-decoration-color: var(--pmd-cite-underline, var(--pmd-analytic-underline, var(--pmd-tag-underline, currentColor)));
 }
 /* An analytic-styled run in body text sits INSIDE its underline span,
    which paints the line, so the run re-declares the line over it (the
@@ -3434,7 +3450,7 @@ code {
 .pmd-underline {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-analytic-underline, currentColor);
+  text-decoration-color: var(--pmd-cite-underline, var(--pmd-analytic-underline, var(--pmd-tag-underline, currentColor)));
   font-size: var(--pmd-run-font-size, var(--pmd-size-underline));
 }
 
@@ -3444,7 +3460,7 @@ code {
 .pmd-emphasis {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-analytic-underline, currentColor);
+  text-decoration-color: var(--pmd-cite-underline, var(--pmd-analytic-underline, var(--pmd-tag-underline, currentColor)));
   font-size: var(--pmd-run-font-size, var(--pmd-size-emphasis));
 }
 
@@ -3515,6 +3531,7 @@ code {
 #editor.pmd-cite-underlined .pmd-cite {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
+  text-decoration-color: var(--pmd-cite-underline, var(--pmd-analytic-underline, var(--pmd-tag-underline, currentColor)));
 }
 
 #editor.pmd-underline-bold .pmd-underline {
@@ -4014,17 +4031,41 @@ body.pmd-override-shading [data-shading] {
    `:has()` chain, and no per-`.pmd-underline` recalc blowup on cv:auto
    cards. A run wholly INSIDE a band already inherits the band's `color`,
    so its underline is band-coloured for free (currentColor). */
-:is(.pmd-underline, .pmd-emphasis, #editor.pmd-cite-underlined .pmd-cite)
+:is(
+    .pmd-underline,
+    .pmd-emphasis,
+    .ProseMirror u,
+    #editor.pmd-cite-underlined .pmd-cite,
+    html.pmd-cite-underlined .pmd-pane-editor .pmd-cite
+  )
   :is([data-highlight-band="light"], [data-shading-band="light"]) {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-analytic-underline, var(--pmd-c-band-fg-light));
+  text-decoration-color: var(--pmd-c-band-fg-light);
 }
-:is(.pmd-underline, .pmd-emphasis, #editor.pmd-cite-underlined .pmd-cite)
+:is(
+    .pmd-underline,
+    .pmd-emphasis,
+    .ProseMirror u,
+    #editor.pmd-cite-underlined .pmd-cite,
+    html.pmd-cite-underlined .pmd-pane-editor .pmd-cite
+  )
   :is([data-highlight-band="dark"], [data-shading-band="dark"]) {
   text-decoration: underline;
   text-decoration-thickness: var(--pmd-underline-size, auto);
-  text-decoration-color: var(--pmd-analytic-underline, var(--pmd-c-band-fg-dark));
+  text-decoration-color: var(--pmd-c-band-fg-dark);
+}
+/* The reverse nesting (a line-drawing span wholly inside a band) used to
+   be band-coloured for free via currentColor. With an underline color
+   override in play it no longer is, so say it outright: over a
+   highlight the line is the band's color, never the override. */
+:is([data-highlight-band="light"], [data-shading-band="light"])
+  :is(.pmd-underline, .pmd-emphasis, u) {
+  text-decoration-color: var(--pmd-c-band-fg-light);
+}
+:is([data-highlight-band="dark"], [data-shading-band="dark"])
+  :is(.pmd-underline, .pmd-emphasis, u) {
+  text-decoration-color: var(--pmd-c-band-fg-dark);
 }
 
 /* Underlines follow font color (Appearance → Document typography; OFF by
@@ -12932,6 +12973,7 @@ html.pmd-undertag-bold .pmd-pane-editor .pmd-undertag-mark {
 }
 html.pmd-cite-underlined .pmd-pane-editor .pmd-cite {
   text-decoration: underline;
+  text-decoration-color: var(--pmd-cite-underline, var(--pmd-analytic-underline, var(--pmd-tag-underline, currentColor)));
 }
 html.pmd-underline-bold .pmd-pane-editor .pmd-underline {
   font-weight: bold;

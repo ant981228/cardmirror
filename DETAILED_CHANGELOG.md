@@ -153,6 +153,48 @@ the import clamp, the row's min/max/step, clamping at both ends, a junk
 entry restoring the stored value, and unbounded settings staying
 unbounded.
 
+### Added: underline color overrides — analytic (PR #118), tag, cite
+
+**What.** Three plain color-override tokens under Accessibility → Color
+overrides → Document text: `pmd-c-analytic-underline`, `pmd-c-tag-underline`,
+`pmd-c-cite-underline`. Each recolors the underline *line* inside its
+context and never the text. Shreeram (@shreerammodi) contributed the
+analytic one; tag and cite were added on merge.
+
+**Contexts.** Analytic = an analytic paragraph or an analytic-styled run.
+Tag = a tag paragraph. Cite = text bearing the cite *mark* (`.pmd-cite`),
+deliberately not the unmarked remainder of a cite paragraph.
+
+**How.** `style.css` leaves all three tokens undefined. Each context
+re-publishes its token as an inherited variable (`--pmd-analytic-underline`,
+`--pmd-tag-underline`, `--pmd-cite-underline`); an undefined token makes
+that variable invalid, which is what lets the fallbacks work. Every rule
+that draws a line (`u`, `.pmd-underline`, `.pmd-emphasis`, and the
+underlined-cite rules for single-doc and three-pane) reads
+`var(--pmd-cite-underline, var(--pmd-analytic-underline,
+var(--pmd-tag-underline, currentColor)))`. Separate variables, rather than
+one shared one, are what let an unset inner context fall through to an
+outer one; the order is innermost-first for the only nestings the schema
+allows (a cite mark or an analytic run inside a tag). An analytic run in
+body text sits *inside* its underline span, so it redraws the line on
+itself — transparent when unset.
+
+**Highlight wins.** PR #118 as submitted let the override replace the
+band colour over highlighted text; that was reverted on merge. The band
+rules paint the line black/white over a highlight or shading regardless,
+and now also cover `u` and the three-pane underlined cite (both were
+missing before — a small contrast fix in its own right). A second pair of
+rules handles the reverse nesting (a line-drawing span inside a band),
+which used to get the band colour for free through `currentColor`.
+
+**Settings UI.** A token with no stylesheet value shows "follows text"
+where other rows show a colour value.
+
+**Tests.** `tests/editor/underline-color-overrides.test.ts` pins the
+stylesheet structure (jsdom cannot resolve `var()`): tokens offered and
+left undefined, each context's publication, the single fallback chain in
+all five line rules, and band rules that never consult an override.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

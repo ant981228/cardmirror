@@ -34,6 +34,15 @@ see `DETAILED_CHANGELOG.md`.
   Nav pane & indicators makes the text of navigation-pane entries larger
   or smaller, from 50% to 200% of the default. Thanks to Shreeram
   (@shreerammodi)!
+- **Underline color overrides.** Three new entries under Settings →
+  Accessibility → Color overrides → Document text give underlines their
+  own color without changing the words: **Analytic underline**
+  (underlined text in analytics), **Tag underline** (underlined text in
+  tags) and **Cite underline** (text carrying the cite style). All are
+  unset by default, so nothing changes until you pick a color, and over
+  highlighted text the line stays black or white so it remains readable.
+  Display-only. Thanks to Shreeram (@shreerammodi) for the analytic
+  override!
 
 ## 1.17.2 — 2026-11-01
 
