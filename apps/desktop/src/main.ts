@@ -17,6 +17,17 @@
 
 import { arrangementRects, type ArrangeOptions } from './arrange-windows.js';
 import {
+  fallbackRestoreRect,
+  isWindowPlaceRequest,
+  matchPlacement,
+  moveStateFor,
+  nextMove,
+  placementRect,
+  rectVisibleIn,
+  type MoveOutcome,
+  type Rect as PlacementRect,
+} from './window-placement.js';
+import {
   app,
   BrowserWindow,
   Menu,
@@ -3515,8 +3526,24 @@ ipcMain.handle('host:arrange-windows', async (event, opts: ArrangeOptions) => {
   }
   const area = screen.getDisplayMatching(sender.getBounds()).workArea;
   const rects = arrangementRects(area, opts);
+  await leaveSpecialWindowStates(windows);
+  for (const w of windows) {
+    if (w.isDestroyed()) continue;
+    w.setBounds(w.id === speechWindowId ? rects.speech : rects.docs, false);
+  }
+  if (!sender.isDestroyed()) sender.focus();
+  return { speechFound: speechWindowId !== null, arranged: windows.length };
+});
+
+/** Take windows out of full-screen / minimized / maximized so a
+ *  following `setBounds` sticks (Linux window managers and macOS both
+ *  ignore it on a window that is not in the normal state). macOS
+ *  animates the exit from full-screen and drops bounds set during the
+ *  animation, so wait a beat when any window needed it. */
+async function leaveSpecialWindowStates(windows: BrowserWindow[]): Promise<void> {
   let leftFullScreen = false;
   for (const w of windows) {
+    if (w.isDestroyed()) continue;
     if (w.isFullScreen()) {
       w.setFullScreen(false);
       leftFullScreen = true;
@@ -3524,15 +3551,68 @@ ipcMain.handle('host:arrange-windows', async (event, opts: ArrangeOptions) => {
     if (w.isMinimized()) w.restore();
     if (w.isMaximized()) w.unmaximize();
   }
-  // macOS animates the exit from full-screen; bounds set during the
-  // animation are dropped. Give it a beat when any window needed it.
   if (leftFullScreen) await new Promise((r) => setTimeout(r, 700));
-  for (const w of windows) {
-    if (w.isDestroyed()) continue;
-    w.setBounds(w.id === speechWindowId ? rects.speech : rects.docs, false);
+}
+
+/** Move / Snap Window: the bounds a window had the last time one of
+ *  these commands took it out of a free (unsnapped) position, so Restore
+ *  can bring it back. Keyed by BrowserWindow id; pruned of closed
+ *  windows on each call. Deliberately not persisted — a fresh launch
+ *  starts with no history, and Restore then centres the window. */
+const freeBoundsByWindow = new Map<number, PlacementRect>();
+
+/** Move / Snap Window (one handler for both sets). `place` applies a
+ *  fixed target; `move` classifies where the window sits now and looks
+ *  the step up in the Win+Arrow-style table (window-placement.ts). A
+ *  move with no transition resolves `done: false` and touches nothing.
+ *  Acts on the invoking window only, on its own display's work area. */
+ipcMain.handle('host:place-window', async (event, req: unknown) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed() || isTimerWindow(win)) return { done: false };
+  if (!isWindowPlaceRequest(req)) return { done: false };
+  for (const id of freeBoundsByWindow.keys()) {
+    if (!BrowserWindow.fromId(id)) freeBoundsByWindow.delete(id);
   }
-  if (!sender.isDestroyed()) sender.focus();
-  return { speechFound: speechWindowId !== null, arranged: windows.length };
+  const area = screen.getDisplayMatching(win.getBounds()).workArea;
+  const maximized = win.isMaximized() || win.isFullScreen();
+  // Classify on the normal-state bounds so a maximized window still
+  // remembers (and restores to) the rectangle underneath.
+  const current = matchPlacement(win.getNormalBounds(), area);
+  let outcome: MoveOutcome;
+  if (req.kind === 'move') {
+    outcome = nextMove(moveStateFor(current, maximized), req.direction);
+    if (outcome === null) return { done: false };
+  } else {
+    outcome = req.action;
+  }
+  if (outcome === 'minimize') {
+    win.minimize();
+    return { done: true };
+  }
+  // Leaving a free position for a snapped one: remember where we were.
+  if (current === null && !maximized && outcome !== 'restore') {
+    freeBoundsByWindow.set(win.id, win.getNormalBounds());
+  }
+  await leaveSpecialWindowStates([win]);
+  if (win.isDestroyed()) return { done: false };
+  if (outcome === 'maximize') {
+    win.maximize();
+  } else if (outcome === 'restore') {
+    const saved = freeBoundsByWindow.get(win.id);
+    const usable =
+      saved && screen.getAllDisplays().some((d) => rectVisibleIn(saved, d.workArea));
+    if (usable && saved) {
+      win.setBounds(saved, false);
+    } else if (!maximized) {
+      // Snapped by hand or in an earlier session, nothing to go back to.
+      win.setBounds(fallbackRestoreRect(area), false);
+    }
+    // Maximized with nothing saved: unmaximize (above) already returned
+    // the window to the bounds underneath — leave those alone.
+  } else {
+    win.setBounds(placementRect(area, outcome), false);
+  }
+  return { done: true };
 });
 
 /** Close the pop-out when the last DOCUMENT window goes away — a

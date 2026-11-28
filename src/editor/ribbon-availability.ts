@@ -21,6 +21,7 @@
 
 import { RIBBON_COMMAND_IDS, type AnyCommandId, type RibbonCommandId } from './ribbon-commands.js';
 import { pluginCommandIds } from './plugin-registry.js';
+import { isWindowPlaceCommandId } from './window-placement-commands.js';
 import { settings } from './settings.js';
 import { collabEnabled } from './collab/collab-gate.js';
 import { isLiteBuild } from './lite.js';
@@ -93,6 +94,8 @@ export function isRibbonCommandAvailable(id: RibbonCommandId): boolean {
   }
   // Placing windows (or slots by screen share) is a desktop thing.
   if (id === 'arrangeWindows') return getElectronHost() !== null;
+  // Move / Snap Window place this OS window — desktop only, every mode.
+  if (isWindowPlaceCommandId(id)) return getElectronHost() !== null;
   if (id === 'openJournalsFolder') return getElectronHost() !== null;
   // Creating/refreshing a live zone reads other files from disk — desktop only.
   // Detach works on an already-cached zone, so it stays available everywhere.

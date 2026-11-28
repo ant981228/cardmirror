@@ -38,6 +38,7 @@ import {
   getRibbonCommand,
   type RibbonContext,
 } from '../../src/editor/ribbon-commands.js';
+import { WINDOW_PLACE_COMMAND_IDS } from '../../src/editor/window-placement-commands.js';
 import { SETTING_METADATA, settings } from '../../src/editor/settings.js';
 import {
   buildPlainTextSlice,
@@ -5009,5 +5010,53 @@ describe('tag ↔ analytic swaps preserve the numbering skeleton', () => {
     expect(card.type.name).toBe('card');
     expect(card.attrs['numRole']).toBe('sub');
     expect(card.attrs['numRestart']).toBe(true);
+  });
+});
+
+// ── Move / Snap Window commands ──────────────────────────────────────
+// Twenty-three per-window placement commands (four stateful moves, the
+// halves / corners / thirds / two-thirds / sixths snaps, maximize,
+// restore) that share ONE RibbonContext hook, `placeWindow(req)`. The
+// geometry and the move table are tested in
+// tests/desktop/window-placement.test.ts; here it is the registry
+// plumbing: registered, labeled, searchable, unbound, grouped, routed.
+describe('Move / Snap Window commands', () => {
+  it('are all registered, labeled, and unbound by default', () => {
+    for (const id of WINDOW_PLACE_COMMAND_IDS) {
+      expect(RIBBON_COMMAND_IDS).toContain(id);
+      expect(RIBBON_COMMAND_LABELS[id]).toMatch(/Window/);
+      expect(DEFAULT_RIBBON_KEYS[id]).toBe('');
+      expect(RIBBON_COMMAND_ALIASES[id]?.length ?? 0).toBeGreaterThan(0);
+    }
+    expect(WINDOW_PLACE_COMMAND_IDS).toHaveLength(23);
+  });
+
+  it('name the four moves and the two window-state verbs plainly', () => {
+    expect(RIBBON_COMMAND_LABELS.moveWindowLeft).toBe('Move Window Left');
+    expect(RIBBON_COMMAND_LABELS.moveWindowDown).toBe('Move Window Down');
+    expect(RIBBON_COMMAND_LABELS.windowLeftThird).toBe('Window: Left Third');
+    expect(RIBBON_COMMAND_LABELS.windowBottomMiddleSixth).toBe('Window: Bottom Middle Sixth');
+    expect(RIBBON_COMMAND_LABELS.maximizeWindow).toBe('Maximize Window');
+    expect(RIBBON_COMMAND_LABELS.restoreWindow).toBe('Restore Window Size');
+  });
+
+  it('route to ctx.placeWindow with the right request, only when dispatching', () => {
+    const seen: unknown[] = [];
+    const ctx = { placeWindow: (req: unknown) => { seen.push(req); } } as unknown as RibbonContext;
+    const move = getRibbonCommand('moveWindowUp', ctx);
+    expect(move(null as never, undefined)).toBe(true);
+    expect(seen).toHaveLength(0);
+    expect(move(null as never, () => {})).toBe(true);
+    expect(seen).toEqual([{ kind: 'move', direction: 'up' }]);
+    getRibbonCommand('windowRightTwoThirds', ctx)(null as never, () => {});
+    getRibbonCommand('restoreWindow', ctx)(null as never, () => {});
+    expect(seen.slice(1)).toEqual([
+      { kind: 'place', action: 'right-two-thirds' },
+      { kind: 'place', action: 'restore' },
+    ]);
+  });
+
+  it('do nothing with the default (no-op) context', () => {
+    expect(() => getRibbonCommand('windowTopLeft')(null as never, () => {})).not.toThrow();
   });
 });

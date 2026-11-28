@@ -5,6 +5,24 @@ changes in each release, written for users of the editor. For
 in-depth rationale and implementation context behind each entry,
 see `DETAILED_CHANGELOG.md`.
 
+## Unreleased
+
+### Added
+
+- **Move Window and Snap Window commands** *(desktop; unbound, no ribbon
+  buttons by default)*. **Move Window Left / Right / Up / Down** place the
+  window you are in the way Win+Arrow does on Windows, depending on where
+  it already sits: halves, corners, maximize, minimize, and restore —
+  switching sides goes through the restored middle, so it takes two
+  taps. **Window: Left Half / Right Half / the four Corners / Left,
+  Middle, Right Third / Left, Right Two Thirds / six Sixths**, plus
+  **Maximize Window** and **Restore Window Size**, snap straight to a
+  fixed place. All act on the whole CardMirror window, in the three-pane
+  workspace too. Find them in the palette, bind keys under Settings →
+  Keyboard shortcuts, add custom ribbon buttons, or use voice. The
+  shortcuts reference gains a **Window** group (Minimize Window and
+  Switch Window moved there from View).
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed

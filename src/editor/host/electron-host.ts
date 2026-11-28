@@ -11,6 +11,7 @@
 import type { LearnOp } from '../learn-store.js';
 import type { MenuRecentsPayload } from '../menu-recents.js';
 import type { UpdateChipState } from '../update-chip.js';
+import type { WindowPlaceRequest } from '../window-placement-commands.js';
 import type { DiskBase, CloudProvider } from './types.js';
 export type ClaimResult = 'fresh' | 'journaled' | 'changed' | 'unknown';
 import type {
@@ -319,6 +320,7 @@ interface ElectronAPI {
   isFirstWindow(): Promise<boolean>;
   isAppQuitting?(): boolean;
   arrangeWindows?(opts: { side: 'left' | 'right'; speechPct: number }): Promise<{ speechFound: boolean; arranged: number }>;
+  placeWindow?(req: WindowPlaceRequest): Promise<{ done: boolean }>;
   /** Report this window's workspace mode to main (multi-pane vs
    *  single-pane) so the OS "Open with…" path can reuse a multi-pane
    *  window's slot picker instead of spawning a blank window. */
@@ -1053,6 +1055,13 @@ export class ElectronHost implements Host {
   async arrangeWindows(opts: { side: 'left' | 'right'; speechPct: number }): Promise<{ speechFound: boolean; arranged: number } | null> {
     const fn = api().arrangeWindows;
     return fn ? await fn(opts) : null;
+  }
+
+  /** Move / Snap Window: place this OS window on its display. Null on an
+   *  older preload without the channel. */
+  async placeWindow(req: WindowPlaceRequest): Promise<{ done: boolean } | null> {
+    const fn = api().placeWindow;
+    return fn ? await fn(req) : null;
   }
 
   isAppQuitting(): boolean {

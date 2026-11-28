@@ -5,6 +5,72 @@ behavior, rationale, and (where useful) the implementation context
 behind a change. For a shorter, jargon-free summary of what's new
 in each release, see `CHANGELOG.md`.
 
+## Unreleased
+
+### Added: Move Window / Snap Window (per-window placement commands)
+
+**What.** Twenty-three ribbon commands that place the invoking OS window on
+its display. Two sets:
+
+- **Move Window Left / Right / Up / Down** — stateful, modeled on Win+Arrow.
+  The window's current position is classified (free, maximized, left half,
+  right half, or one of the four corners) and the step is looked up in a
+  table. Agreed semantics: pressing further into the edge you are already on
+  does nothing; pressing toward the other side from a half *restores*, so a
+  side switch takes two taps through the middle; Up/Down from a half go to
+  the corner on that side; corners cross directly; Up from a top corner
+  maximizes, Down from a bottom corner minimizes; from maximized, Down
+  restores and Up is a no-op. The full table is `MOVE_TABLE` in
+  `apps/desktop/src/window-placement.ts` and is asserted cell for cell in
+  `tests/desktop/window-placement.test.ts`.
+- **Window: …** — stateless snaps to a fixed target: left/right halves, four
+  corners, left/middle/right thirds, left/right two-thirds, six sixths
+  (thirds split top/bottom), plus Maximize Window and Restore Window Size.
+  Thirds, two-thirds and sixths are reachable only here; the move classifier
+  treats a window in one as "free".
+
+**Why two sets.** The move table is for muscle memory; the snaps are for
+"put it there" from any state — and for voice, where every command is a
+spoken phrase. Thirds/sixths were requested for the direct set only, so the
+move table was kept small enough to learn.
+
+**Geometry.** Every target is read off one 6-column × 2-row grid over the
+display's work area, with each grid line rounded once, so neighbouring
+placements share edges exactly and a row of thirds (or sixths) sums to the
+full width — the same invariant Arrange Windows keeps for its two rects.
+Coordinates are the work area's own, so second monitors and docks work.
+
+**Classification is inferred, not remembered.** `matchPlacement` compares
+the window's normal-state bounds with every target within an 8 px
+tolerance. A window the user dragged into a half by hand therefore counts
+as being there, and nothing can go stale. The only state kept is **restore
+memory**: a `Map<windowId, Rect>` in main, written when a command takes a
+window out of an unclassified ("free") position (by either set), read by
+Restore, pruned of closed windows on each call, not persisted. If the saved
+rect no longer has a usable overlap with any display, Restore centres the
+window at 60% × 80% of the work area.
+
+**Plumbing.** Renderer: `src/editor/window-placement-commands.ts` holds the
+ids, labels, aliases and the request each sends (`{kind:'move',direction}`
+or `{kind:'place',action}`); `ribbon-commands.ts` spreads those into the
+registry and routes all 23 through one `RibbonContext.placeWindow(req)`
+hook; `index.ts` forwards to `ElectronHost.placeWindow`; availability is
+desktop-only. Main: `host:place-window` validates the payload
+(`isWindowPlaceRequest`), classifies, applies — reusing the
+un-fullscreen/unminimize/unmaximize step (now `leaveSpecialWindowStates`,
+shared with Arrange Windows, including its 700 ms macOS full-screen-exit
+wait). A move with no transition resolves `done:false` and is silent in the
+renderer by design. The renderer cannot import from `apps/desktop`, so the
+placement names are duplicated as a string union there; a test asserts the
+two lists agree.
+
+**Surfacing.** No ribbon buttons, no default keys (the OS usually owns
+Win+Arrow / Ctrl+Fn+Arrow). Palette, keybindings editor, custom ribbon
+buttons and voice reach them. New `Window` group in `RIBBON_GROUPS` (the
+shortcuts reference and keybindings editor taxonomy) — Minimize Window and
+Switch Window moved into it from View. Always the OS window, three-pane
+included; slots keep Mod-1/2/3.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

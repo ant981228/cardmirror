@@ -47,6 +47,16 @@ import { openFootnoteEditor } from './footnote-popover.js';
 import { flipQuoteDirection } from './flip-quote-direction.js';
 import { refreshFileSearchIndex } from './file-index-refresh.js';
 import {
+  WINDOW_PLACE_ALIASES,
+  WINDOW_PLACE_COMMAND_IDS,
+  WINDOW_PLACE_COMMANDS,
+  WINDOW_PLACE_DEFAULT_KEYS,
+  WINDOW_PLACE_LABELS,
+  isWindowPlaceCommandId,
+  type WindowPlaceCommandId,
+  type WindowPlaceRequest,
+} from './window-placement-commands.js';
+import {
   isPluginCommandId,
   pluginCommandIds,
   pluginCommandLabel,
@@ -4694,6 +4704,7 @@ export type RibbonCommandId =
   | 'saveWorkspace'
   | 'reopenWorkspace'
   | 'arrangeWindows'
+  | WindowPlaceCommandId
   | 'toggleCommentsVisible'
   | 'addCommentToSelection'
   | 'addNoteToSelection'
@@ -4981,6 +4992,7 @@ export const RIBBON_COMMAND_IDS: RibbonCommandId[] = [
   'saveWorkspace',
   'reopenWorkspace',
   'arrangeWindows',
+  ...WINDOW_PLACE_COMMAND_IDS,
   'toggleCommentsVisible',
   'addCommentToSelection',
   'addNoteToSelection',
@@ -5211,6 +5223,7 @@ export const RIBBON_COMMAND_LABELS: Record<RibbonCommandId, string> = {
   saveWorkspace: 'Save Workspace',
   reopenWorkspace: 'Reopen Last Workspace',
   arrangeWindows: 'Arrange Windows',
+  ...WINDOW_PLACE_LABELS,
   toggleCommentsVisible: 'Show / Hide Comments',
   addCommentToSelection: 'Add Comment to Selection',
   addNoteToSelection: 'Add Note to Selection',
@@ -5445,6 +5458,7 @@ export const RIBBON_COMMAND_ALIASES: Partial<Record<RibbonCommandId, readonly st
   saveWorkspace: ['save session', 'save open documents', 'remember open documents', 'save tabs'],
   reopenWorkspace: ['restore session', 'reopen session', 'open previous session', 'reopen last session', 'restore workspace', 'reopen documents', 'reopen tabs'],
   arrangeWindows: ['window arranger', 'arrange for speech', 'tile windows', 'speech doc side by side', 'split screen', 'organize windows'],
+  ...WINDOW_PLACE_ALIASES,
   toggleAutosave: ['enable autosave', 'disable autosave', 'turn on autosave', 'turn off autosave'],
   markActiveAsSpeech: ['toggle speech doc', 'set speech document'],
   // vague / Word-flavored labels
@@ -5648,6 +5662,9 @@ export const DEFAULT_RIBBON_KEYS: Record<RibbonCommandId, string | string[]> = {
   saveWorkspace: '',
   reopenWorkspace: '',
   arrangeWindows: '',
+  // Move / Snap Window: unbound too — the OS usually owns Win+Arrow and
+  // Ctrl+Fn+Arrow, so users pick chords that fit their platform.
+  ...WINDOW_PLACE_DEFAULT_KEYS,
   toggleCommentsVisible: '',
   addCommentToSelection: '',
   addNoteToSelection: 'Mod-Shift-n',
@@ -5941,6 +5958,10 @@ export interface RibbonContext {
   /** Arrange Windows: speech doc on one side, everything else on the
    *  other (three-pane: into slots). Desktop only. */
   arrangeWindows: () => void;
+  /** Move / Snap Window: place THIS OS window on its display (desktop
+   *  only; acts on the window in the three-pane workspace too). One
+   *  hook for all 23 commands — the request says which. */
+  placeWindow: (req: WindowPlaceRequest) => void;
   openShortcutsReference: () => void;
   toggleCommentsVisible: () => void;
   addCommentToSelection: () => void;
@@ -6174,6 +6195,7 @@ const DEFAULT_RIBBON_CONTEXT: RibbonContext = {
   saveWorkspace: () => {},
   reopenWorkspace: () => {},
   arrangeWindows: () => {},
+  placeWindow: () => {},
   openShortcutsReference: () => {},
   toggleCommentsVisible: () => {},
   addCommentToSelection: () => {},
@@ -6298,6 +6320,17 @@ function startSpeechPreset(idx: number): void {
 }
 
 function commandFor(id: RibbonCommandId, ctx: RibbonContext): Command {
+  // The 23 Move / Snap Window commands share one hook; the table says
+  // which request each sends. Resolved here so the switch below stays
+  // exhaustive over the hand-written ids.
+  if (isWindowPlaceCommandId(id)) {
+    const req = WINDOW_PLACE_COMMANDS[id].request;
+    return (_state, dispatch) => {
+      if (!dispatch) return true;
+      ctx.placeWindow(req);
+      return true;
+    };
+  }
   switch (id) {
     // Resolved per press, not per build: the routing depends on which
     // document has focus (see RibbonContext.undoCommand).

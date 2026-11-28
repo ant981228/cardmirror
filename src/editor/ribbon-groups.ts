@@ -9,6 +9,7 @@
  */
 
 import { RIBBON_COMMAND_IDS, type RibbonCommandId } from './ribbon-commands.js';
+import { WINDOW_PLACE_COMMAND_IDS } from './window-placement-commands.js';
 
 export interface RibbonGroup {
   title: string;
@@ -228,11 +229,16 @@ export const RIBBON_GROUPS: RibbonGroup[] = [
       'wordCountSelection',
       'openSettings',
       'cycleTheme',
-      'minimizeWindow',
-      'switchWindow',
       'openShortcutsReference',
       'startUiTour',
     ],
+  },
+  {
+    // The OS window itself: minimize, switch, and the Move / Snap set
+    // (no ribbon buttons, no default keys — palette, keybindings
+    // editor, custom buttons and voice reach them).
+    title: 'Window',
+    commands: ['minimizeWindow', 'switchWindow', ...WINDOW_PLACE_COMMAND_IDS],
   },
   {
     title: 'Timer',

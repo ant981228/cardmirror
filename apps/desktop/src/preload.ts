@@ -459,6 +459,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   arrangeWindows: (opts: { side: 'left' | 'right'; speechPct: number }) =>
     ipcRenderer.invoke('host:arrange-windows', opts) as Promise<{ speechFound: boolean; arranged: number }>,
 
+  /** Move / Snap Window: place THIS window on its display. `place` names
+   *  a fixed target (or maximize / restore); `move` is the Win+Arrow-
+   *  style step whose effect depends on where the window sits now.
+   *  Resolves with whether anything happened. */
+  placeWindow: (req: unknown) =>
+    ipcRenderer.invoke('host:place-window', req) as Promise<{ done: boolean }>,
+
   /** Synchronous — asked from `pagehide`, where nothing can be
    *  awaited: is the app quitting, as opposed to this one window
    *  closing? The workspace store keeps a window's open set through

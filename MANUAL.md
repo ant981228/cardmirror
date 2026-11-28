@@ -1504,6 +1504,46 @@ create in the speech-side slot (Slot 3 for right, Slot 1 for left) gets marked.
 Once a speech doc is marked, nothing changes, and moving a document between
 slots never marks it.
 
+### Moving and snapping a single window
+
+Two sets of commands place the window you are in on its screen. Both are
+desktop only, act on the whole CardMirror window (in the three-pane workspace
+too — slots keep their own Mod-1/2/3 moves), and have no ribbon button and no
+key by default: run them from the Search Everything palette, bind them under
+**Settings → Keyboard shortcuts**, add one as a custom ribbon button
+(**Settings → Appearance → Custom ribbon buttons**), or say them with voice
+control. They are listed under **Window** in the shortcuts reference.
+
+**Move Window Left / Right / Up / Down** work the way Win+Arrow does on
+Windows: what happens depends on where the window already is.
+
+- From a free-floating window: Left and Right snap it to that half of the
+  screen, Up maximizes it, Down minimizes it.
+- From a half: Up and Down move it into the top or bottom corner on that side.
+  Pressing further into the edge you are on (Left from the left half) does
+  nothing. Pressing toward the other side restores the window to its earlier
+  size and place — so switching sides goes through the middle and takes two
+  taps.
+- From a corner: Left and Right cross straight to the other corner in that
+  row; Up from a top corner maximizes, Down from a bottom corner minimizes;
+  the other vertical step returns to the half.
+- From maximized: Left and Right snap to a half, Down restores, Up does
+  nothing.
+
+**Window: …** commands snap straight to a fixed place regardless of where the
+window is: **Left Half**, **Right Half**, the four **Corners**, **Left /
+Middle / Right Third**, **Left / Right Two Thirds**, and the six **Sixths**
+(each third split top and bottom). **Maximize Window** and **Restore Window
+Size** round out the set. Thirds and sixths are reachable only this way; the
+Move commands treat a window sitting in one as free-floating.
+
+Restore puts the window back where it was before a Move or Snap command first
+took it off its free position. CardMirror remembers that per window for the
+session; with nothing to go back to (a fresh launch, or the old spot is on a
+monitor that is gone) it centres the window at a comfortable size instead.
+Positions are judged from the window's actual geometry, so a window you have
+dragged by hand into a half or a corner counts as being there.
+
 ### Switching windows
 
 **Switch Window** (**Ctrl+Tab** by default, on macOS too) opens the Search

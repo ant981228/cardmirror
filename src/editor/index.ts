@@ -1795,6 +1795,16 @@ const ribbonContext: RibbonContext = {
       }
     })();
   },
+  placeWindow: (req) => {
+    // Always the OS window, three-pane included — slots have Mod-1/2/3.
+    // A Move that has nowhere to go (Left from the left half) resolves
+    // `done: false` and stays silent on purpose: that is the designed
+    // no-op, not a failure worth a toast.
+    void (async () => {
+      const result = await getElectronHost()?.placeWindow(req);
+      if (!result) showToast('Moving the window requires the desktop edition.');
+    })();
+  },
   reopenWorkspace: () => {
     if (!getElectronHost()) {
       showToast('Reopening a workspace requires the desktop edition.');
