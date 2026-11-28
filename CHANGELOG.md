@@ -30,6 +30,10 @@ see `DETAILED_CHANGELOG.md`.
   of the UI tour. You can change the keys at any time under Settings →
   Keyboard shortcuts. Windows and Linux, which have their own window
   keys, are not asked.
+- **Nav pane text size.** A new setting under Settings → Appearance →
+  Nav pane & indicators makes the text of navigation-pane entries larger
+  or smaller, from 50% to 200% of the default. Thanks to Shreeram
+  (@shreerammodi)!
 
 ## 1.17.2 — 2026-11-01
 

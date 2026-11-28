@@ -125,6 +125,34 @@ never scrolls — leaving the boxed, scroll-capped detail for quoted content.
 to show the dialog on every launch regardless of the flag or existing
 bindings. Gated on `import.meta.env.DEV`; absent from production builds.
 
+### Added: nav pane text size setting (PR #117)
+
+**What.** `navFontScalePct` (Appearance → Nav pane & indicators, 50–200,
+default 100) scales the text of nav-pane entries and the cite preview.
+Contributed by Shreeram (@shreerammodi).
+
+**How.** `applyNavFontScale` sets `--pmd-nav-font-scale` on the document
+root; the entry font sizes in `style.css` became `calc(<size> *
+var(--pmd-nav-font-scale, 1))`. The nav list now states its own 0.85rem
+(it used to inherit the same value from the panel), so level-3 rows —
+which set no size of their own — scale with the rest and look unchanged at
+100%. One root variable means single-doc, three-pane and mobile nav panes
+all follow it. Indentation, the pane header, the search status line and
+the pickup pill deliberately do not scale. Rows are measured, not assumed,
+so scroll-follow and drag indicators are unaffected.
+
+**Number settings gain `max` and `step`.** `SettingMeta` accepts both;
+`buildNumberEditor` sets the input's `max` only when one is given and
+clamps typed values on both sides. `step` is the spinner increment only —
+typed values need not be multiples. Existing number settings are unchanged
+(no ceiling, step 1). The value is also rounded and clamped at the
+load/import boundary in `sanitize`.
+
+**Tests.** `tests/editor/nav-font-scale-setting.test.ts` (added on merge):
+the import clamp, the row's min/max/step, clamping at both ends, a junk
+entry restoring the stored value, and unbounded settings staying
+unbounded.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)
