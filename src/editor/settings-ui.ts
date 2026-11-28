@@ -1010,7 +1010,7 @@ class SettingsModal {
       // Inline: the numeric input sits on the right of the label, like
       // toggles / text inputs. Falls through to `row.appendChild(label)`
       // so the description stays width-limited inside the flex row.
-      label.appendChild(buildNumberEditor(meta.key as keyof Settings, meta.min));
+      label.appendChild(buildNumberEditor(meta.key as keyof Settings, meta.min, meta.max, meta.step));
     } else if (meta.kind === 'defaultZoomPct') {
       row.appendChild(text);
       row.appendChild(buildDefaultZoomEditor());
@@ -4414,15 +4414,16 @@ function buildDefaultZoomEditor(): HTMLElement {
   return input;
 }
 
-function buildNumberEditor(key: keyof Settings, min = 0): HTMLElement {
+function buildNumberEditor(key: keyof Settings, min = 0, max = Infinity, step = 1): HTMLElement {
   const input = document.createElement('input');
   input.type = 'number';
   input.className = 'pmd-line-height-input';
   input.min = String(min);
-  input.step = '1';
+  if (Number.isFinite(max)) input.max = String(max);
+  input.step = String(step);
   input.value = String(settings.get(key));
   input.addEventListener('change', () => {
-    const v = Math.max(min, Math.round(parseFloat(input.value)));
+    const v = Math.min(max, Math.max(min, Math.round(parseFloat(input.value))));
     if (!Number.isFinite(v)) {
       input.value = String(settings.get(key));
       return;

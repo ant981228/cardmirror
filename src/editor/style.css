@@ -5247,6 +5247,9 @@ body.pmd-nav-resize-active {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
   padding-left: 0;
+  /* Entry text scales with the navFontScalePct setting
+     (applyNavFontScale); the per-level sizes below do the same. */
+  font-size: calc(0.85rem * var(--pmd-nav-font-scale, 1));
 }
 
 .pmd-nav-empty {
@@ -5578,7 +5581,7 @@ body.pmd-nav-resize-active {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--pmd-nav-font-scale, 1));
   font-weight: 600;
   color: var(--pmd-c-text-secondary);
   /* Wider, fully-opaque fade. The preview's body sits past the fade
@@ -5608,10 +5611,10 @@ body.pmd-nav-resize-active {
 }
 
 /* Indent + emphasis per outline level (Word's nav pane convention). */
-.pmd-nav-level-1 { padding-left: 0.75rem;  font-weight: 700; font-size: 0.95rem; }
-.pmd-nav-level-2 { padding-left: 1.5rem;   font-weight: 600; font-size: 0.9rem; }
+.pmd-nav-level-1 { padding-left: 0.75rem;  font-weight: 700; font-size: calc(0.95rem * var(--pmd-nav-font-scale, 1)); }
+.pmd-nav-level-2 { padding-left: 1.5rem;   font-weight: 600; font-size: calc(0.9rem * var(--pmd-nav-font-scale, 1)); }
 .pmd-nav-level-3 { padding-left: 2.25rem;  font-weight: 500; }
-.pmd-nav-level-4 { padding-left: 3rem;     font-size: 0.85rem; color: var(--pmd-c-text-muted); }
+.pmd-nav-level-4 { padding-left: 3rem;     font-size: calc(0.85rem * var(--pmd-nav-font-scale, 1)); color: var(--pmd-c-text-muted); }
 
 /* Type-specific color cues — analytic uses the same settings-driven
    color as in the editor surface so changing it propagates everywhere. */
@@ -5643,7 +5646,7 @@ html.pmd-nav-flat .pmd-nav-level-2,
 html.pmd-nav-flat .pmd-nav-level-3,
 html.pmd-nav-flat .pmd-nav-level-4 {
   font-weight: normal;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--pmd-nav-font-scale, 1));
   color: var(--pmd-c-text);
 }
 html.pmd-nav-flat .pmd-nav-type-analytic .pmd-nav-label,
