@@ -124,6 +124,10 @@ never scrolls — leaving the boxed, scroll-capped detail for quoted content.
 **Dev aid.** Start the dev server with `VITE_CM_FORCE_WINDOW_KEYS_OFFER=1`
 to show the dialog on every launch regardless of the flag or existing
 bindings. Gated on `import.meta.env.DEV`; absent from production builds.
+`VITE_CM_FORCE_UI_TOUR=1` does the same for the UI tour (it runs on every
+launch, whatever the profile); with both set the forced question waits for
+the tour to end, reproducing a new user's first run on an established
+profile.
 
 ### Added: nav pane text size setting (PR #117)
 

@@ -113,14 +113,14 @@ function buildSteps(opts: { includeCreateDoc: boolean }): TourStep[] {
       title: 'Structural styles',
       body:
         'Turn a paragraph into a Pocket, Hat, Block, Tag, Analytic, or Undertag with one ' +
-        'click — or one keystroke (F4–F7 and friends; the keyboard reference lists them all).',
+        'click — or one keystroke (F4–F7 and friends; you can always look them up in the keyboard reference later).',
       target: el('formatting-panel'),
     },
     {
       id: 'char-styles',
       title: 'Character styles',
       body:
-        'F9 underlines, F10 emphasizes, F11 highlights, F8 marks the cite. The color ' +
+        'F9 underlines, F10 emphasizes, F11 highlights, F8 marks a cite. The color ' +
         'panel beside them handles highlight colors, background shading, and font color.',
       target: el('cite-panel'),
       union: el('color-panel'),
@@ -688,11 +688,17 @@ export function startUiTour(): void {
  *  leading step then walks creating the first document). Returns
  *  whether a tour is on its way (true = it will start once the chrome
  *  is ready), so callers can queue prompts behind it. */
-export function maybeAutoStartUiTour(): boolean {
-  if (settings.get('hasSeenUiTour')) return false;
-  if (hasCustomizedSettings()) {
-    settings.set('hasSeenUiTour', true);
-    return false;
+export function maybeAutoStartUiTour(force = false): boolean {
+  if (force) {
+    // Dev aid (see `forceUiTourForDev` in index.ts): tour this launch
+    // even on an established profile.
+    settings.set('hasSeenUiTour', false);
+  } else {
+    if (settings.get('hasSeenUiTour')) return false;
+    if (hasCustomizedSettings()) {
+      settings.set('hasSeenUiTour', true);
+      return false;
+    }
   }
   let tries = 0;
   const poll = window.setInterval(() => {

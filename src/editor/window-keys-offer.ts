@@ -81,7 +81,7 @@ export async function promptWindowKeys(): Promise<WindowKeysChoice | null> {
     detailInline: true,
     choices: [
       { value: 'leave', label: 'Leave unbound' },
-      { value: 'bind', label: 'Use ⌘ + arrows', primary: true },
+      { value: 'bind', label: 'Use ⌘ + arrows (Recommended)', primary: true },
     ],
     cancelLabel: 'Ask me next time',
   });
@@ -184,7 +184,8 @@ export function scheduleWindowKeysOffer(
   deps: WindowKeysOfferDeps = defaultDeps,
 ): void {
   if (deps === defaultDeps && forcedForDev() && getElectronHost() !== null) {
-    askWhenCalm(deps, true);
+    if (afterTour) afterTour(() => window.setTimeout(() => askWhenCalm(deps, true), 350));
+    else askWhenCalm(deps, true);
     return;
   }
   // Cheap exit before any polling: web, Windows, Linux, or already seen.

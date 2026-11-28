@@ -498,7 +498,14 @@ if (!getElectronHost() && !isLiteBuild() && window.location.hash.includes('join=
 // the first opened document instead.
 if (!isMobileLayout()) {
   void import('./ui-tour.js').then((m) => {
-    const tourComing = m.maybeAutoStartUiTour();
+    // Dev aid, dev server only: `VITE_CM_FORCE_UI_TOUR=1` runs the tour
+    // on every launch regardless of the profile — pair it with
+    // `VITE_CM_FORCE_WINDOW_KEYS_OFFER=1` to see the first-run sequence
+    // (tour, then the ⌘ + arrows question) on an established profile.
+    // Compiled out of production builds.
+    const env = (import.meta as { env?: Record<string, unknown> }).env;
+    const forceUiTourForDev = env?.DEV === true && Boolean(env.VITE_CM_FORCE_UI_TOUR);
+    const tourComing = m.maybeAutoStartUiTour(forceUiTourForDev);
     // macOS desktop, once: offer ⌘ + arrows for Move Window. A profile
     // getting the tour is asked when the tour ends, not on top of it.
     void import('./window-keys-offer.js').then((w) =>
