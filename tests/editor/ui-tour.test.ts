@@ -48,7 +48,12 @@ vi.mock('../../src/editor/quick-card-search-ui.js', () => {
   };
 });
 
-import { UiTourController, startUiTour, maybeAutoStartUiTour } from '../../src/editor/ui-tour.js';
+import {
+  UiTourController,
+  startUiTour,
+  maybeAutoStartUiTour,
+  onNextUiTourEnd,
+} from '../../src/editor/ui-tour.js';
 import { settings } from '../../src/editor/settings.js';
 import * as qcs from '../../src/editor/quick-card-search-ui.js';
 
@@ -431,5 +436,37 @@ describe('UI tour', () => {
     startUiTour();
     expect(settings.get('hasSeenUiTour')).toBe(true);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+
+  it('onNextUiTourEnd fires once when a tour ends, and not for later tours', () => {
+    buildChrome();
+    const ended = vi.fn();
+    onNextUiTourEnd(ended);
+    const tour = new UiTourController();
+    tour.start();
+    expect(ended).not.toHaveBeenCalled();
+    tour.end();
+    expect(ended).toHaveBeenCalledTimes(1);
+    const again = new UiTourController();
+    again.start();
+    again.end();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('onNextUiTourEnd can be cancelled before the tour ends', () => {
+    buildChrome();
+    const ended = vi.fn();
+    const cancel = onNextUiTourEnd(ended);
+    cancel();
+    const tour = new UiTourController();
+    tour.start();
+    tour.end();
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('maybeAutoStartUiTour reports whether a tour is on its way', () => {
+    vi.useFakeTimers();
+    settings.set('hasSeenUiTour', true);
+    expect(maybeAutoStartUiTour()).toBe(false);
   });
 });

@@ -367,6 +367,7 @@ export class UiTourController {
     window.removeEventListener('keydown', this.onKey, { capture: true });
     this.root.remove();
     this.root = this.shade = this.ring = this.card = null;
+    fireTourEnd();
   }
 
   /** Leaving the interactive step in EITHER direction tidies up
@@ -649,6 +650,28 @@ function settingsDialogEl(): HTMLElement | null {
 
 let controller: UiTourController | null = null;
 
+const tourEndListeners = new Set<() => void>();
+
+/** Run `cb` once, the next time a tour ends (Done, Skip or Esc).
+ *  For one-time prompts that must follow onboarding rather than land
+ *  on top of it (window-keys-offer.ts). Returns an unsubscribe. */
+export function onNextUiTourEnd(cb: () => void): () => void {
+  tourEndListeners.add(cb);
+  return () => tourEndListeners.delete(cb);
+}
+
+function fireTourEnd(): void {
+  const cbs = [...tourEndListeners];
+  tourEndListeners.clear();
+  for (const cb of cbs) {
+    try {
+      cb();
+    } catch (err) {
+      console.warn('[ui-tour] end listener failed', err);
+    }
+  }
+}
+
 /** Start (or restart) the tour. */
 export function startUiTour(): void {
   controller?.end();
@@ -662,12 +685,14 @@ export function startUiTour(): void {
  *  and unprompted overlays on upgrade are rude — so it initializes as
  *  already-seen there without touring. Waits for either the editor
  *  chrome or the home screen (a first boot lands on home; the tour's
- *  leading step then walks creating the first document). */
-export function maybeAutoStartUiTour(): void {
-  if (settings.get('hasSeenUiTour')) return;
+ *  leading step then walks creating the first document). Returns
+ *  whether a tour is on its way (true = it will start once the chrome
+ *  is ready), so callers can queue prompts behind it. */
+export function maybeAutoStartUiTour(): boolean {
+  if (settings.get('hasSeenUiTour')) return false;
   if (hasCustomizedSettings()) {
     settings.set('hasSeenUiTour', true);
-    return;
+    return false;
   }
   let tries = 0;
   const poll = window.setInterval(() => {
@@ -687,4 +712,5 @@ export function maybeAutoStartUiTour(): void {
       window.clearInterval(poll);
     }
   }, 500);
+  return true;
 }

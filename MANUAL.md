@@ -1514,6 +1514,20 @@ key by default: run them from the Search Everything palette, bind them under
 (**Settings → Appearance → Custom ribbon buttons**), or say them with voice
 control. They are listed under **Window** in the shortcuts reference.
 
+**On macOS, CardMirror offers once to bind the four Move Window commands to
+⌘ + the matching arrow key.** The question appears the first time you run a
+version that has these commands — at the end of the UI tour if you are new,
+otherwise shortly after launch. Saying yes means ⌘← ⌘→ ⌘↑ ⌘↓ move the
+window instead of jumping the cursor to the start or end of the line or
+document (⇧⌘ + arrows still select to there, and ⌘ + arrows keep working
+normally inside text boxes such as Find). Saying no leaves everything as it
+was. **Ask me next time** brings the question back at the next launch. Either
+way you can add, change or remove these keys at any time under **Settings →
+Keyboard shortcuts** (the **Window** group). You are not asked if you have
+already set keys for these commands yourself or use ⌘ + arrows for something
+else. Windows and Linux are not asked: both already move windows with the
+Windows / Super key and the arrows.
+
 **Move Window Left / Right / Up / Down** work the way Win+Arrow does on
 Windows: what happens depends on where the window already is.
 

@@ -22,6 +22,14 @@ see `DETAILED_CHANGELOG.md`.
   Keyboard shortcuts, add custom ribbon buttons, or use voice. The
   shortcuts reference gains a **Window** group (Minimize Window and
   Switch Window moved there from View).
+- **macOS: a one-time offer to move windows with ⌘ + arrow keys.** The
+  first time you run this version on a Mac, CardMirror asks whether to
+  bind Move Window Left / Right / Up / Down to ⌘← ⌘→ ⌘↑ ⌘↓. Those keys
+  normally jump the cursor to the start or end of the line or document,
+  so nothing changes unless you say yes. New users are asked at the end
+  of the UI tour. You can change the keys at any time under Settings →
+  Keyboard shortcuts. Windows and Linux, which have their own window
+  keys, are not asked.
 
 ## 1.17.2 — 2026-11-01
 

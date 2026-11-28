@@ -332,6 +332,7 @@ import {
   reapplyAllRibbonTooltips,
 } from './ribbon-tooltips.js';
 import { availableRibbonCommandIds } from './ribbon-availability.js';
+import { WINDOW_PLACE_COMMANDS, isWindowPlaceCommandId } from './window-placement-commands.js';
 import { setIcon } from './icons.js';
 import { runSettingCommand, settingCommandLabel } from './setting-commands.js';
 import {
@@ -496,7 +497,14 @@ if (!getElectronHost() && !isLiteBuild() && window.location.hash.includes('join=
 // chrome itself, so first boots that land on the home screen tour on
 // the first opened document instead.
 if (!isMobileLayout()) {
-  void import('./ui-tour.js').then((m) => m.maybeAutoStartUiTour());
+  void import('./ui-tour.js').then((m) => {
+    const tourComing = m.maybeAutoStartUiTour();
+    // macOS desktop, once: offer ⌘ + arrows for Move Window. A profile
+    // getting the tour is asked when the tour ends, not on top of it.
+    void import('./window-keys-offer.js').then((w) =>
+      w.scheduleWindowKeysOffer(tourComing ? m.onNextUiTourEnd : null),
+    );
+  });
 }
 
 // Tag the body with the host kind so CSS can gate platform-specific chrome
@@ -4581,6 +4589,14 @@ window.addEventListener('keydown', (e) => {
     targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT';
   if (inNativeField && !VIEWLESS_RIBBON_COMMANDS.has(cmdId)) return;
   e.preventDefault();
+  // Window placement acts on the OS window, so it needs no document —
+  // a bound key works from the home screen and an empty three-pane
+  // workspace too. (Native fields were excluded just above, so ⌘←/→
+  // in the find bar still move that field's own cursor.)
+  if (isWindowPlaceCommandId(cmdId)) {
+    ribbonContext.placeWindow(WINDOW_PLACE_COMMANDS[cmdId].request);
+    return;
+  }
   // File-level commands (newDocument / openFile / saveAs) and the
   // shortcuts-dialog opener don't need a live view — invoke the
   // ctx side effect directly so the shortcut works even when no

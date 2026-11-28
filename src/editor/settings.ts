@@ -497,6 +497,11 @@ export interface Settings {
   /** First cut-in-place notice (shared documents) shown. Auto-set; no
    *  settings row. See cut-in-place.ts. */
   hasSeenCutInPlaceNotice: boolean;
+  /** macOS desktop: the one-time offer to bind Move Window Left /
+   *  Right / Up / Down to ⌘ + arrows was shown (or was moot because
+   *  those commands or keys were already bound). Auto-set; no settings
+   *  row. See window-keys-offer.ts. */
+  hasSeenWindowKeysOffer: boolean;
   /** Desktop-only. When set, "New Speech Document" saves into this
    *  directory by default (instead of leaving the doc unsaved until
    *  the user picks a location). Empty string means no default — the
@@ -1871,6 +1876,7 @@ const DEFAULTS: Settings = {
   showOnboardingStarter: true,
   hasSeenUiTour: false,
   hasSeenCutInPlaceNotice: false,
+  hasSeenWindowKeysOffer: false,
   defaultSpeechDocFolder: '',
   defaultSpeechDocFormat: 'docx',
   speechDocFilenameTemplate: DEFAULT_SPEECH_FILENAME_TEMPLATE,
@@ -2158,7 +2164,11 @@ export const SETTINGS_DEFAULTS: Readonly<Settings> = DEFAULTS;
  *  presence-based — boot code persisting an all-defaults store must
  *  not disqualify a genuinely fresh profile. */
 export function hasCustomizedSettings(
-  ignore: readonly (keyof Settings)[] = ['hasSeenUiTour', 'hasSeenCutInPlaceNotice'],
+  ignore: readonly (keyof Settings)[] = [
+    'hasSeenUiTour',
+    'hasSeenCutInPlaceNotice',
+    'hasSeenWindowKeysOffer',
+  ],
 ): boolean {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Record<
@@ -4917,6 +4927,7 @@ function sanitize(s: Settings): Settings {
     showOnboardingStarter: s.showOnboardingStarter === false ? false : true,
     hasSeenUiTour: s.hasSeenUiTour === true,
     hasSeenCutInPlaceNotice: s.hasSeenCutInPlaceNotice === true,
+    hasSeenWindowKeysOffer: s.hasSeenWindowKeysOffer === true,
     defaultSpeechDocFolder:
       typeof s.defaultSpeechDocFolder === 'string'
         ? s.defaultSpeechDocFolder

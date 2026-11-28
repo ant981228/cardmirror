@@ -69,6 +69,18 @@ export function isWindowsHost(): boolean {
   );
 }
 
+/** Whether we're running on the macOS desktop. Gates the first-run
+ *  offer to bind Move Window to ⌘ + arrows (window-keys-offer.ts):
+ *  Windows and Linux ship their own Win/Super + arrow window
+ *  management, macOS does not. */
+export function isMacHost(): boolean {
+  return (
+    getElectronHost() !== null &&
+    typeof navigator !== 'undefined' &&
+    /Mac/i.test(navigator.platform || navigator.userAgent)
+  );
+}
+
 /** Compare two file handles for identity — used by the
  *  duplicate-open guard so we can refuse a second open of a doc
  *  that's already loaded into the workspace. Electron handles are

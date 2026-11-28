@@ -12409,6 +12409,18 @@ textarea.pmd-text-prompt-input {
   max-height: 8rem;
   overflow-y: auto;
 }
+/* Inline variant (`detailInline`): the explanation reads as plain prose
+   under the question — unboxed, uncapped, never scrolls. The dialog is
+   width-limited so the prose wraps at a readable measure. */
+.pmd-choice-prompt-detail-inline {
+  color: var(--pmd-c-text);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.pmd-choice-prompt-prose {
+  max-width: 30rem;
+}
 .pmd-text-prompt-buttons {
   display: flex;
   justify-content: flex-end;

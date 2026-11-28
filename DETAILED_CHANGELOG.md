@@ -71,6 +71,60 @@ shortcuts reference and keybindings editor taxonomy) — Minimize Window and
 Switch Window moved into it from View. Always the OS window, three-pane
 included; slots keep Mod-1/2/3.
 
+### Added: macOS one-time offer to bind Move Window to ⌘ + arrows
+
+**What.** On the macOS desktop, the first launch of a build with the Move
+Window commands shows one dialog: bind Move Window Left / Right / Up / Down
+to `Mod-ArrowLeft/Right/Up/Down`, leave them unbound, or be asked next
+time. The dialog says the choice can be changed under Settings → Keyboard
+shortcuts.
+
+**Why ask instead of shipping the default.** ⌘ + arrows are the obvious
+keys on a Mac, which has no Win+Arrow of its own — but they are also the
+caret's line-start / line-end / document-start / document-end keys, and
+taking them silently on upgrade would break muscle memory. Windows and
+Linux are not asked at all: the OS already owns window movement there.
+
+**When.** A fresh profile that is about to get the UI tour is asked when
+the tour ends (Done, Skip or Esc) — `maybeAutoStartUiTour` now returns
+whether a tour is coming and `onNextUiTourEnd` is the hook. Everyone else
+is asked at the first calm moment after launch: editor chrome or home
+screen up, this window focused, no other modal open (`isAnyOverlayOpen`).
+If two minutes pass without one, the flag stays unset and the next launch
+tries again.
+
+**When not.** If any of the four commands already has an override entry
+(bound or explicitly unbound), or any of the four keys already resolves to
+another command, the offer is moot: it is recorded as seen and never shown.
+
+**State.** One new setting, `hasSeenWindowKeysOffer` (no settings row; added
+to `hasCustomizedSettings`' ignore list so it does not make a fresh profile
+look established and suppress the tour). It is set *before* the dialog
+opens so a second window starting at the same moment stays quiet, and put
+back to false only for "Ask me next time". Accepting writes four entries
+into `ribbonKeyOverrides`; the existing subscriber rebuilds the keymap, so
+the keys work immediately.
+
+**Related fix in the same change.** The global keydown fallback now runs
+window-placement commands without a live view, so a bound key works on the
+home screen and in an empty three-pane workspace. Native text fields are
+still excluded first, so ⌘←/→ in the find bar or a dialog input keep
+moving that field's cursor.
+
+**Code.** `src/editor/window-keys-offer.ts` (policy `windowKeysOfferDecision`,
+`runWindowKeysOffer`, `scheduleWindowKeysOffer`), `isMacHost()` in
+`host/index.ts`, wiring next to the tour auto-start in `index.ts`. Tests:
+`tests/editor/window-keys-offer.test.ts`, three added to `ui-tour.test.ts`.
+
+**Dialog.** A small ordinary prompt (`promptForChoice`), not the two-line
+numbered route dialog: three normal buttons and the explanation as inline
+prose. `promptForChoice` gains `detailInline` for that — unboxed, uncapped,
+never scrolls — leaving the boxed, scroll-capped detail for quoted content.
+
+**Dev aid.** Start the dev server with `VITE_CM_FORCE_WINDOW_KEYS_OFFER=1`
+to show the dialog on every launch regardless of the flag or existing
+bindings. Gated on `import.meta.env.DEV`; absent from production builds.
+
 ## 1.17.2 — 2026-11-01
 
 ### Fixed: co-editing window freezes on rejoin / catch-up (loro-crdt 1.13.6 diff hang)

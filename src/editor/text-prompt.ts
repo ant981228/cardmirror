@@ -242,6 +242,11 @@ export interface ChoicePromptOptions<T extends string> {
   choices: { value: T; label: string; primary?: boolean }[];
   /** Label on the trailing cancel button. Defaults to 'Cancel'. */
   cancelLabel?: string;
+  /** Render `detail` as ordinary inline prose under the message — no
+   *  box, no height cap, never scrolls — for a short explanation of
+   *  the question itself. The default boxed style suits quoted content
+   *  the choice is about (existing alt text), which can be long. */
+  detailInline?: boolean;
 }
 
 /** Modal that asks the user to pick one of N options. Returns the
@@ -267,8 +272,11 @@ export function promptForChoice<T extends string>(
 
     if (opts.detail) {
       const detail = document.createElement('div');
-      detail.className = 'pmd-choice-prompt-detail';
+      detail.className = opts.detailInline
+        ? 'pmd-choice-prompt-detail-inline'
+        : 'pmd-choice-prompt-detail';
       detail.textContent = opts.detail;
+      if (opts.detailInline) dialog.classList.add('pmd-choice-prompt-prose');
       dialog.appendChild(detail);
     }
 
